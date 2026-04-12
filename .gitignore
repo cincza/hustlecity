@@ -1,9 +1,0 @@
-node_modules
-.expo
-.expo/
-.expo-shared
-npm-debug.*
-.env
-backend/.env
-backend/data/*.db
-backend/data/*.db~
