@@ -2,7 +2,7 @@ services:
   - type: web
     name: hustle-city-api
     runtime: node
-    rootDir: backend
+    rootDir: upload_bundle/backend
     plan: free
     buildCommand: npm install
     startCommand: npm start
