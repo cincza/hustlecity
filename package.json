@@ -1,0 +1,33 @@
+{
+  "name": "hustle-city-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start:lan": "expo start --lan --port 8090",
+    "start": "expo start --port 8090",
+    "start:tunnel": "expo start --tunnel --port 8090",
+    "android": "expo start --port 8090 --android",
+    "android:lan": "expo start --lan --port 8090 --android",
+    "android:tunnel": "expo start --tunnel --port 8090 --android",
+    "ios": "expo start --port 8090 --ios",
+    "ios:lan": "expo start --lan --port 8090 --ios",
+    "ios:tunnel": "expo start --tunnel --port 8090 --ios",
+    "web": "expo start --web --port 8090"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~5.0.5",
+    "expo": "~53.0.9",
+    "expo-image-picker": "~16.1.4",
+    "expo-linear-gradient": "~14.1.5",
+    "expo-secure-store": "~14.2.4",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-native": "0.79.6",
+    "react-native-web": "^0.20.0"
+  },
+  "devDependencies": {
+    "babel-preset-expo": "~13.0.0"
+  }
+}

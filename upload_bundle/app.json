@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Hustle City",
+    "slug": "hustle-city-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.hustlecity.mobile"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6612bf24-6d0b-47ef-b698-f0ff3ac13a0b"
+      }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}
