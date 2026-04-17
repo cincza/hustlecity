@@ -28,6 +28,10 @@ export async function fetchMarket(token) {
   return request("/market", { token });
 }
 
+export async function fetchHeistsOnline(token) {
+  return request("/heists", { token });
+}
+
 export async function executeHeistOnline(token, heistId) {
   return request(`/heists/${heistId}/execute`, {
     method: "POST",

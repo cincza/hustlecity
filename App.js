@@ -24,6 +24,7 @@ import {
   executeHeistOnline,
   fetchCasinoMeta,
   fetchGlobalChatOnline,
+  fetchHeistsOnline,
   fetchMarket,
   fetchMe,
   fetchRankingsOnline,
@@ -638,6 +639,7 @@ const INITIAL = {
     roster: [],
     selectedPlayerId: null,
     selectedGangId: null,
+    heists: [],
     cityChat: [
       { id: "city-1", author: "System", text: "Chat miasta zyje. Tutaj zgadujesz sie z ludzmi na akcje i handel.", time: "14:18" },
     ],
@@ -663,6 +665,32 @@ const INITIAL = {
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const randomBetween = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const normalizeHeistDefinition = (heist) => {
+  if (!heist || typeof heist !== "object") return null;
+  const normalizeRange = (value, fallback) => {
+    if (Array.isArray(value) && value.length >= 2 && value.every((entry) => Number.isFinite(entry))) {
+      return [value[0], value[1]];
+    }
+    if (Number.isFinite(value)) {
+      return [value, value];
+    }
+    return fallback;
+  };
+
+  return {
+    ...heist,
+    tier: Number.isFinite(heist.tier) ? heist.tier : 1,
+    respect: Number.isFinite(heist.respect) ? heist.respect : 0,
+    reward: normalizeRange(heist.reward, [120, 180]),
+    failCashLoss: normalizeRange(heist.failCashLoss, [20, 50]),
+    hpLoss: normalizeRange(heist.hpLoss, [0, 5]),
+    xpGain: normalizeRange(heist.xpGain ?? heist.respectGain, [1, 2]),
+    energy: Number.isFinite(heist.energy) ? heist.energy : 1,
+    risk: Number.isFinite(heist.risk) ? heist.risk : 0.08,
+    heatOnSuccess: Number.isFinite(heist.heatOnSuccess) ? heist.heatOnSuccess : 3,
+    heatOnFailure: Number.isFinite(heist.heatOnFailure) ? heist.heatOnFailure : 8,
+  };
+};
 const formatMoney = (value) => {
   const amount = Number(value || 0);
   const sign = amount < 0 ? "-" : "";
@@ -1418,6 +1446,10 @@ function AppRuntime() {
   const taskStates = useMemo(() => getTaskStates(game), [game]);
   const topTask = taskStates.find((task) => !task.claimed) || taskStates[0];
   const nextHeistTier = getNextHeistTier(game.player.respect);
+  const heistCatalog =
+    Array.isArray(game.online?.heists) && game.online.heists.length
+      ? game.online.heists.map(normalizeHeistDefinition).filter(Boolean)
+      : HEISTS.map(normalizeHeistDefinition).filter(Boolean);
   const inGang = Boolean(game.gang.joined);
   const gangTributeRemaining = Math.max(0, GANG_TRIBUTE_COOLDOWN_MS - (Date.now() - (game.gang.lastTributeAt || 0)));
   const clubNightRemaining = Math.max(0, CLUB_NIGHT_COOLDOWN_MS - (Date.now() - (game.club.lastRunAt || 0)));
@@ -1513,6 +1545,7 @@ function AppRuntime() {
           ...INITIAL.online,
           ...(snapshot.online || {}),
           roster: [],
+          heists: Array.isArray(snapshot.online?.heists) ? snapshot.online.heists : INITIAL.online.heists,
           cityChat: Array.isArray(snapshot.online?.cityChat) ? snapshot.online.cityChat : INITIAL.online.cityChat,
         },
         supplierStock: { ...INITIAL.supplierStock, ...(snapshot.supplierStock || {}) },
@@ -1564,6 +1597,20 @@ function AppRuntime() {
             bet: String(meta.blackjackSession.bet || prev.blackjack.bet || "200"),
           }
         : prev.blackjack,
+    }));
+  };
+
+  const refreshHeistsState = async (token = sessionToken) => {
+    if (!token) return;
+    const heistsSnapshot = await fetchHeistsOnline(token);
+    if (!Array.isArray(heistsSnapshot?.heists)) return;
+
+    setGame((prev) => ({
+      ...prev,
+      online: {
+        ...prev.online,
+        heists: heistsSnapshot.heists.map(normalizeHeistDefinition).filter(Boolean),
+      },
     }));
   };
 
@@ -1641,6 +1688,10 @@ function AppRuntime() {
       }
       try {
         await refreshSocialState(token);
+      } catch (_error) {
+      }
+      try {
+        await refreshHeistsState(token);
       } catch (_error) {
       }
   };
@@ -4156,7 +4207,7 @@ function AppRuntime() {
         source={SCENE_BACKGROUNDS.heists}
       />
       <SectionCard title="Napady" subtitle="Klikasz prog i wchodzisz w akcje.">
-        {HEISTS.map((heist) => {
+        {heistCatalog.map((heist) => {
           const locked = game.player.respect < heist.respect;
           const odds = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist);
           return (
@@ -4897,13 +4948,13 @@ function AppRuntime() {
     helpers: {
       hasGymPass,
       inJail,
-      nextHeistName: HEISTS.find((entry) => entry.respect > game.player.respect)?.name ?? "Wszystkie odblokowane",
+      nextHeistName: heistCatalog.find((entry) => entry.respect > game.player.respect)?.name ?? "Wszystkie odblokowane",
     },
     actions: {
       openSection: setActiveSection,
       quickHeist: () => {
-        const available = HEISTS.filter((entry) => entry.respect <= game.player.respect);
-        executeHeist(available[available.length - 1] ?? HEISTS[0]);
+        const available = heistCatalog.filter((entry) => entry.respect <= game.player.respect);
+        executeHeist(available[available.length - 1] ?? heistCatalog[0]);
       },
       fightClubRound,
       collectGangTribute,
@@ -5051,7 +5102,7 @@ function AppRuntime() {
     pickCustomAvatar,
     formatMoney,
     getRankTitle,
-    heists: HEISTS,
+    heists: heistCatalog,
     getSoloHeistOdds,
     sceneBackgrounds: SCENE_BACKGROUNDS,
   };
@@ -5069,7 +5120,7 @@ function AppRuntime() {
   };
 
   const heistsScreenProps = {
-    heists: HEISTS,
+    heists: heistCatalog,
     game,
     effectivePlayer,
     styles,

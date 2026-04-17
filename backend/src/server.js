@@ -529,6 +529,11 @@ function getHeistJailSentenceSeconds(player, heist) {
   );
 }
 
+function logHeistEvent(message, level = "log") {
+  if (!VERBOSE_SERVER_LOGS && level === "log") return;
+  console[level](`[heists] ${message}`);
+}
+
 function publicPlayer(player, now = Date.now()) {
   syncPlayerState(player, now);
   return {
@@ -1729,13 +1734,27 @@ app.post("/casino/blackjack/stand", auth, asyncHandler(async (req, res) => {
 }));
 app.get("/heists", auth, asyncHandler(async (req, res) => {
   await commitPlayerMutation(req, "heists-touch", async () => ({ ok: true }));
+  logHeistEvent(`catalog requested by ${req.user?.username || req.user?.id || "unknown"} :: ${HEIST_DEFINITIONS.length} entries`);
   res.json({ heists: HEIST_DEFINITIONS });
+}));
+
+app.get("/heists/:id", auth, asyncHandler(async (req, res) => {
+  const heist = getHeistById(req.params.id);
+  if (!heist) {
+    logHeistEvent(`invalid catalog id requested: ${req.params.id}`, "warn");
+    res.status(404).json({ error: "Heist not found", heistId: req.params.id });
+    return;
+  }
+
+  await commitPlayerMutation(req, "heist-detail-touch", async () => ({ ok: true }));
+  res.json({ heist });
 }));
 
 app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   const heist = getHeistById(req.params.id);
   if (!heist) {
-    res.status(404).json({ error: "Heist not found" });
+    logHeistEvent(`invalid execute id from ${req.user?.username || req.user?.id || "unknown"} :: ${req.params.id}`, "warn");
+    res.status(404).json({ error: "Heist not found", heistId: req.params.id });
     return;
   }
 
@@ -1789,6 +1808,9 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
       chance,
       user: publicPlayer(player, now),
     });
+    logHeistEvent(
+      `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: success reward=$${gain} xp=${xpGain} energy=${player.profile.energy}`
+    );
     return;
   }
 
@@ -1828,6 +1850,9 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
     jailSeconds,
     user: publicPlayer(player, now),
   });
+  logHeistEvent(
+    `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: failure loss=$${loss} damage=${damage} jailed=${jailed ? "yes" : "no"}`
+  );
 }));
 
 app.use((error, _req, res, _next) => {
