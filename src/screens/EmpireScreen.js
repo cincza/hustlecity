@@ -29,7 +29,6 @@ export function EmpireScreen({
   drugs,
   suppliers,
   clubFoundingCashCost,
-  clubFoundingPremiumCost,
   clubEscortSearchCost,
   totalBusinessIncome,
   businessCollectionCap,
@@ -58,6 +57,34 @@ export function EmpireScreen({
     gang: game?.gang || {},
     ...game,
   };
+
+  const unlockedBusinesses = businesses.filter((business) => safeGame.player.respect >= business.respect);
+  const availableBusinesses = unlockedBusinesses.filter((business) => {
+    const owned = safeGame.businessesOwned.find((entry) => entry.id === business.id)?.count ?? 0;
+    return owned === 0;
+  });
+  const ownedBusinesses = safeGame.businessesOwned
+    .map((entry) => {
+      const definition = businesses.find((business) => business.id === entry.id);
+      if (!definition) return null;
+      return { ...definition, count: entry.count || 0 };
+    })
+    .filter(Boolean);
+  const lockedBusinesses = businesses.filter((business) => safeGame.player.respect < business.respect);
+  const nextBusinessUnlock = lockedBusinesses[0] || null;
+  const getUpgradeState = (businessId) => helpers.getBusinessUpgradeState?.(safeGame, businessId) || { speedLevel: 0, cashLevel: 0, totalLevel: 0 };
+  const getBusinessMinuteIncome = (business, count = 1) => {
+    const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, count);
+    const perMinute = Number(preview?.currentIncome ?? (Number(business?.incomePerMinute || 0) * count));
+    return formatMoney(perMinute);
+  };
+  const factoryMilestones = [
+    { respect: 8, title: "Pierwsza fabryka", unlocks: factories.filter((factory) => factory.respect === 8) },
+    { respect: 12, title: "Druga fala", unlocks: factories.filter((factory) => factory.respect === 12) },
+    { respect: 16, title: "Mocniejsza chemia", unlocks: factories.filter((factory) => factory.respect === 16) },
+    { respect: 20, title: "Pelna produkcja", unlocks: factories.filter((factory) => factory.respect === 20) },
+    { respect: 25, title: "Top fabryki", unlocks: factories.filter((factory) => factory.respect === 25) },
+  ].filter((entry) => entry.unlocks.length);
 
   const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
     <SectionCard title={title} subtitle={subtitle}>
@@ -119,34 +146,110 @@ export function EmpireScreen({
           accent={["#4a2d18", "#17110c", "#050505"]}
           source={sceneBackgrounds.empire}
         />
-        {renderCollectionsPanel("Odbior kasy", "Biznesy i ulica nie przelewaja hajsu same do kieszeni. Musisz odbierac, a skrytki maja twardy dobowy limit.")}
+        <SectionCard title="Przeglad biznesu" subtitle="Najpierw widzisz co masz, co mozesz kupic i co odblokujesz dalej.">
+          <StatLine label="Masz biznesow" value={String(ownedBusinesses.reduce((sum, business) => sum + business.count, 0))} visual={systemVisuals.cash} />
+          <StatLine label="Mozesz kupic teraz" value={String(availableBusinesses.length)} visual={systemVisuals.market} />
+          <StatLine
+            label="Nastepny unlock"
+            value={nextBusinessUnlock ? `${nextBusinessUnlock.name} przy Szacunku ${nextBusinessUnlock.respect}` : "Wszystko odblokowane"}
+            visual={systemVisuals.respect}
+          />
+        </SectionCard>
 
-        <SectionCard title="Lokale i biznesy" subtitle="Pasywny dochod to fundament gry. Tu budujesz prawdziwe zaplecze.">
-          {businesses.map((business) => {
-            const owned = safeGame.businessesOwned.find((entry) => entry.id === business.id)?.count ?? 0;
-            const locked = safeGame.player.respect < business.respect;
-            return (
-              <View key={business.id} style={styles.listCard}>
+        <SectionCard title="Twoje biznesy" subtitle="Tu od razu widzisz, co juz stoi i ile tego masz.">
+          {ownedBusinesses.length ? (
+            ownedBusinesses.map((business) => (
+              <View key={`owned-${business.id}`} style={styles.listCard}>
                 <View style={styles.listCardHeader}>
                   <View style={styles.entityHead}>
                     <EntityBadge visual={businessVisuals[business.id]} />
                     <View style={styles.flexOne}>
                       <Text style={styles.listCardTitle}>{business.name}</Text>
-                      <Text style={styles.listCardMeta}>{business.kind} | Wymaga {business.respect} szacunu | Masz: {owned}</Text>
+                      <Text style={styles.listCardMeta}>Masz: {business.count} | {business.kind}</Text>
                     </View>
                   </View>
-                  <Text style={styles.listCardReward}>{formatMoney(business.incomePerMinute)}/min</Text>
+                  <Text style={styles.listCardReward}>{getBusinessMinuteIncome(business, business.count)}/min</Text>
                 </View>
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>Koszt: {formatMoney(business.cost)}</Text>
-                  <Pressable onPress={() => actions.buyBusiness(business)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>{locked ? "Za niski szacun" : "Kup obiekt"}</Text>
-                  </Pressable>
-                </View>
+                <Text style={styles.listCardMeta}>Jedna sztuka robi {getBusinessMinuteIncome(business)}/min.</Text>
+                <Text style={styles.listCardMeta}>Upgrade: tempo {getUpgradeState(business.id).speedLevel} | cash {getUpgradeState(business.id).cashLevel}</Text>
+                {business.note ? <Text style={styles.listCardMeta}>{business.note}</Text> : null}
+                {(() => {
+                  const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, business.count);
+                  if (!preview) return null;
+                  return (
+                    <>
+                      <Text style={styles.listCardMeta}>Nastepny upgrade: szybciej -> {formatMoney(preview.nextSpeedIncome)}/min | grubsza koperta -> {formatMoney(preview.nextCashIncome)}/min</Text>
+                      <View style={styles.marketButtons}>
+                        <Pressable onPress={() => actions.upgradeBusiness(business, "speed")} style={styles.marketButton}>
+                          <Text style={styles.marketButtonText}>Szybszy obrot {formatMoney(preview.speedCost)}</Text>
+                        </Pressable>
+                        <Pressable onPress={() => actions.upgradeBusiness(business, "cash")} style={styles.marketButton}>
+                          <Text style={styles.marketButtonText}>Grubsza koperta {formatMoney(preview.cashCost)}</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  );
+                })()}
               </View>
-            );
-          })}
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Na razie nic nie stoi. Kup pierwszy lokal z sekcji ponizej i od razu zobaczysz go tutaj.</Text>
+          )}
         </SectionCard>
+
+        <SectionCard title="Kup teraz" subtitle="To juz jest odblokowane i gotowe do wejscia.">
+          {availableBusinesses.length ? (
+            availableBusinesses.map((business) => (
+              <View key={`available-${business.id}`} style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={businessVisuals[business.id]} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{business.name}</Text>
+                      <Text style={styles.listCardMeta}>{business.kind} | Koszt {formatMoney(business.cost)}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.listCardReward}>{getBusinessMinuteIncome(business)}/min</Text>
+                </View>
+                {business.note ? <Text style={styles.listCardMeta}>{business.note}</Text> : null}
+                <Pressable onPress={() => actions.buyBusiness(business)} style={styles.inlineButton}>
+                  <Text style={styles.inlineButtonText}>Kup biznes</Text>
+                </Pressable>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>
+              {nextBusinessUnlock
+                ? `Nic do kupienia w tej chwili. Nastepny biznes: ${nextBusinessUnlock.name} od ${nextBusinessUnlock.respect} RES.`
+                : "Na tym progu szacunku masz juz wykupione wszystko."}
+            </Text>
+          )}
+        </SectionCard>
+
+        <SectionCard title="Odblokujesz pozniej" subtitle="To jeszcze czeka na szacun i grubszy bankroll.">
+          {lockedBusinesses.length ? (
+            lockedBusinesses.map((business) => (
+              <View key={`locked-${business.id}`} style={[styles.listCard, styles.listCardLocked]}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={businessVisuals[business.id]} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{business.name}</Text>
+                      <Text style={styles.listCardMeta}>🔒 Wymagany szacunek: {business.respect} | Koszt {formatMoney(business.cost)}</Text>
+                    </View>
+                  </View>
+                  <Tag text={`🔒 ${business.respect}`} warning />
+                </View>
+                <Text style={styles.listCardMeta}>{getBusinessMinuteIncome(business)}/min po odblokowaniu.</Text>
+                {business.note ? <Text style={styles.listCardMeta}>{business.note}</Text> : null}
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Na ten moment odblokowales juz cala aktualna liste biznesow.</Text>
+          )}
+        </SectionCard>
+
+        {renderCollectionsPanel("Odbior kasy", "Biznesy i ulica nie przelewaja hajsu same do kieszeni. Musisz odbierac, a skrytki maja twardy dobowy limit.")}
 
         <SectionCard title="Panienki" subtitle="Mozesz je kupic albo wyhaczyc w klubie. Potem wystawiasz na ulice, sciagasz albo sprzedajesz dalej.">
           <SceneArtwork
@@ -179,7 +282,7 @@ export function EmpireScreen({
                 <View style={styles.inlineRow}>
                   <Text style={styles.costLabel}>Kupno: {formatMoney(escort.cost)} | Sprzedaz: {formatMoney(escort.sellPrice)}</Text>
                   <Pressable onPress={() => actions.buyEscort(escort)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>{locked ? "Za niski szacun" : "Kup kontakt"}</Text>
+                    <Text style={styles.inlineButtonText}>{locked ? `Szacunek ${escort.respect}` : "Kup kontakt"}</Text>
                   </Pressable>
                 </View>
                 {streetDistricts.map((district) => {
@@ -229,29 +332,48 @@ export function EmpireScreen({
           accent={["#3d2918", "#16100c", "#050505"]}
           source={sceneBackgrounds.empire}
         />
+        <SectionCard title="Progres fabryk" subtitle="Pierwsza produkcja wpada szybciej. Widzisz od razu, co otworzy Ci kolejny prog szacunku.">
+          <StatLine label="Twoj szacunek" value={`${safeGame.player.respect}`} />
+          {factoryMilestones.map((milestone) => {
+            const unlocked = safeGame.player.respect >= milestone.respect;
+            return (
+              <View key={milestone.respect} style={[styles.listCard, !unlocked && styles.listCardLocked]}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{milestone.title}</Text>
+                    <Text style={styles.listCardMeta}>
+                      Szacunek {milestone.respect} | {milestone.unlocks.map((factory) => factory.name).join(", ")}
+                    </Text>
+                  </View>
+                  <Tag text={unlocked ? "Odblokowane" : `🔒 ${milestone.respect}`} warning={!unlocked} />
+                </View>
+              </View>
+            );
+          })}
+        </SectionCard>
         <SectionCard title="Fabryki" subtitle="Fabryki sa grubo wycenione. Zarabianie jest realne, ale wejscie w produkcje kosztuje powazny hajs.">
           {factories.map((factory) => {
             const owned = helpers.hasFactory(safeGame, factory.id);
             const factoryRisk = Math.max(...factory.unlocks.map((drugId) => helpers.getDrugPoliceProfile(drugs.find((entry) => entry.id === drugId)).risk));
             return (
-              <View key={factory.id} style={styles.listCard}>
+              <View key={factory.id} style={[styles.listCard, safeGame.player.respect < factory.respect && styles.listCardLocked]}>
                 <View style={styles.listCardHeader}>
                   <View style={styles.entityHead}>
                     <EntityBadge visual={factoryVisuals[factory.id]} />
                     <View style={styles.flexOne}>
                       <Text style={styles.listCardTitle}>{factory.name}</Text>
-                      <Text style={styles.listCardMeta}>Szacun {factory.respect} | {factory.text}</Text>
+                      <Text style={styles.listCardMeta}>🔒 Wymagany szacunek: {factory.respect} | {factory.text}</Text>
                     </View>
                   </View>
-                  {owned ? <Tag text="Masz" /> : <Tag text={formatMoney(factory.cost)} warning />}
+                  {owned ? <Tag text="Masz" /> : <Tag text={safeGame.player.respect < factory.respect ? `🔒 ${factory.respect}` : formatMoney(factory.cost)} warning />}
                 </View>
                 <Text style={styles.listCardMeta}>
                   Odblokowuje: {factory.unlocks.map((drugId) => drugs.find((entry) => entry.id === drugId)?.name).join(", ")} | Presja glin: {Math.round(factoryRisk * 100)}%
                 </Text>
                 <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>{owned ? "Zaklad stoi i pracuje." : `Koszt: ${formatMoney(factory.cost)}`}</Text>
-                  <Pressable onPress={() => actions.buyFactory(factory)} style={[styles.inlineButton, owned && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>{owned ? "Kupione" : "Przejmij"}</Text>
+                  <Text style={styles.costLabel}>{owned ? "Zaklad stoi i pracuje." : safeGame.player.respect < factory.respect ? `Wymagany szacunek: ${factory.respect}` : `Koszt: ${formatMoney(factory.cost)}`}</Text>
+                  <Pressable onPress={() => actions.buyFactory(factory)} style={[styles.inlineButton, (owned || safeGame.player.respect < factory.respect) && styles.tileDisabled]}>
+                    <Text style={styles.inlineButtonText}>{owned ? "Kupione" : safeGame.player.respect < factory.respect ? "Zablokowane" : "Przejmij"}</Text>
                   </Pressable>
                 </View>
               </View>
@@ -304,13 +426,13 @@ export function EmpireScreen({
           accent={["#372519", "#150f0c", "#050505"]}
           source={sceneBackgrounds.market}
         />
-        <SectionCard title="Hurtownie" subtitle="Tu kupujesz skladniki do produkcji. Bez tego fabryki stoja.">
+        <SectionCard title="Hurtownie" subtitle="Tu kupujesz skladniki do produkcji. Bez limitu slotow i bez blokady ilosci.">
           <View style={styles.listCard}>
             <View style={styles.entityHead}>
               <EntityBadge visual={systemVisuals.supplier} />
               <View style={styles.flexOne}>
                 <Text style={styles.listCardTitle}>Zaplecze hurtowe</Text>
-                <Text style={styles.listCardMeta}>Kazdy skladnik ma teraz czytelny znak, wiec od razu widac co jest chemia, szklem, pakowaniem albo ziolami.</Text>
+                <Text style={styles.listCardMeta}>Kazdy skladnik kupujesz bez limitu hurtowni. Jedyny limit to Twoja kasa.</Text>
               </View>
             </View>
           </View>
@@ -321,7 +443,7 @@ export function EmpireScreen({
                   <EntityBadge visual={supplierVisuals[supply.id] || systemVisuals.supplier} />
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{supply.name}</Text>
-                    <Text style={styles.listCardMeta}>{supply.unit} | Na stanie: {safeGame.supplies[supply.id] || 0}</Text>
+                    <Text style={styles.listCardMeta}>{supply.unit} | Na stanie: {safeGame.supplies[supply.id] || 0} | Bez limitu</Text>
                   </View>
                 </View>
                 <Pressable onPress={() => actions.buySupply(supply)} style={styles.inlineButton}>
@@ -340,77 +462,64 @@ export function EmpireScreen({
       <SceneArtwork
         eyebrow="Klub"
         title="Lokal, klientela i zrzut towaru"
-        lines={["Na mapie miasta sa stale kluby, ale topowe ekipy moga tez postawic wlasny lokal za absurdalny hajs albo premium.", "Im mocniejszy towar i wiekszy utarg, tym szybciej policja zaczyna czuc smrod interesu."]}
+        lines={["Na mapie miasta sa stale kluby, ale topowe ekipy moga tez postawic wlasny lokal za absurdalny hajs.", "Im mocniejszy towar i wiekszy utarg, tym szybciej policja zaczyna czuc smrod interesu."]}
         accent={["#432417", "#170f0c", "#050505"]}
         source={sceneBackgrounds.clubWide}
       />
-      <SectionCard title="Rynek klubow" subtitle="Jeden lokal ma miasto, reszta moze przechodzic w rece ekip. Nowy klub od zera stawia juz tylko boss gangu i to za gruby hajs.">
-        {safeGame.clubListings.map((listing) => {
-          const isOwnedByPlayer = safeGame.club.owned && safeGame.club.sourceId === listing.id;
-          const isVisiting = currentClubVenue?.id === listing.id;
-          const listingProfile = helpers.getClubVenueProfile(safeGame, listing);
-          return (
-            <View key={listing.id} style={styles.listCard}>
-              <View style={styles.listCardHeader}>
-                <View style={styles.entityHead}>
-                  <EntityBadge visual={businessVisuals.club} />
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{listing.name}</Text>
-                    <Text style={styles.listCardMeta}>
-                      Wlasciciel: {listing.ownerLabel} | Szacun {listing.respect} | Popularnosc {listing.popularity}% | Nastroj {listing.mood}%
-                    </Text>
+      {!currentClubVenue ? (
+        <SectionCard title="Rynek klubow" subtitle="Jeden lokal ma miasto, reszta moze przechodzic w rece ekip. Nowy klub od zera stawia juz tylko boss gangu i to za gruby hajs.">
+          {safeGame.clubListings.map((listing) => {
+            const isOwnedByPlayer = safeGame.club.owned && safeGame.club.sourceId === listing.id;
+            const listingProfile = helpers.getClubVenueProfile(safeGame, listing);
+            return (
+              <View key={listing.id} style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={businessVisuals.club} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{listing.name}</Text>
+                      <Text style={styles.listCardMeta}>
+                        Wlasciciel: {listing.ownerLabel} | Szacun {listing.respect} | Popularnosc {listing.popularity}% | Nastroj {listing.mood}%
+                      </Text>
+                    </View>
                   </View>
+                  <Tag text={isOwnedByPlayer ? "Twoj" : formatMoney(listing.takeoverCost)} warning={!isOwnedByPlayer} />
                 </View>
-                <Tag text={isVisiting ? "W srodku" : isOwnedByPlayer ? "Twoj" : formatMoney(listing.takeoverCost)} warning={!isOwnedByPlayer && !isVisiting} />
-              </View>
-              <Text style={styles.listCardMeta}>{listing.note}</Text>
-              <Text style={styles.listCardMeta}>
-                Bazowa presja policji: {listing.policeBase}/20 | Eventy {Math.round(listingProfile.eventChance * 100)}% | Kontakty {Math.round(listingProfile.contactChance * 100)}%
-              </Text>
-              <View style={styles.marketButtons}>
-                <Pressable onPress={isVisiting ? actions.leaveClubAsGuest : () => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
-                  <Text style={styles.marketButtonText}>
-                    {isVisiting ? "Wyjdz" : isOwnedByPlayer ? "Wejdz do swojego" : "Wejdz"}
-                  </Text>
-                </Pressable>
-                <Pressable onPress={() => actions.openClub(listing)} style={[styles.marketButton, (safeGame.club.owned || safeGame.player.respect < listing.respect || isOwnedByPlayer) && styles.tileDisabled]}>
-                  <Text style={styles.marketButtonText}>{isOwnedByPlayer ? "Kupione" : "Przejmij"}</Text>
-                </Pressable>
-              </View>
-              <View style={styles.inlineRow}>
-                <Text style={styles.costLabel}>
-                  {isOwnedByPlayer
-                    ? isVisiting
-                      ? "Jestes teraz u siebie i masz dostep do tablicy lokalu."
-                      : "Lokal jest Twoj, ale musisz do niego wejsc, zeby cokolwiek ogarniac."
-                    : isVisiting
-                      ? `Siedzisz teraz w ${listing.name}.`
-                      : `Przejecie: ${formatMoney(listing.takeoverCost)}`}
+                <Text style={styles.listCardMeta}>{listing.note}</Text>
+                <Text style={styles.listCardMeta}>
+                  Bazowa presja policji: {listing.policeBase}/20 | Eventy {Math.round(listingProfile.eventChance * 100)}% | Kontakty {Math.round(listingProfile.contactChance * 100)}%
                 </Text>
+                <View style={styles.marketButtons}>
+                  <Pressable onPress={() => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
+                    <Text style={styles.marketButtonText}>{isOwnedByPlayer ? "Wejdz do swojego" : "Wejdz"}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => actions.openClub(listing)} style={[styles.marketButton, (safeGame.club.owned || safeGame.player.respect < listing.respect || isOwnedByPlayer) && styles.tileDisabled]}>
+                    <Text style={styles.marketButtonText}>{isOwnedByPlayer ? "Kupione" : "Przejmij"}</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.inlineRow}>
+                  <Text style={styles.costLabel}>
+                    {isOwnedByPlayer
+                      ? "Lokal jest Twoj. Wejdz do srodka, zeby odpalic tablice."
+                      : `Przejecie: ${formatMoney(listing.takeoverCost)}`}
+                  </Text>
+                </View>
               </View>
-            </View>
-          );
-        })}
-        <View style={styles.grid}>
-          <ActionTile
-            title="Postaw nowy klub"
-            subtitle={`Boss gangu moze zalozyc nowy lokal za ${formatMoney(clubFoundingCashCost)}.`}
-            visual={systemVisuals.club}
-            onPress={() => actions.foundClub("cash")}
-            disabled={safeGame.club.owned || !safeGame.gang.joined || safeGame.gang.role !== "Boss"}
-          />
-          <ActionTile
-            title="Premium shortcut"
-            subtitle={`${clubFoundingPremiumCost} premium i lokal staje od razu na mapie miasta.`}
-            visual={systemVisuals.premium}
-            onPress={() => actions.foundClub("premium")}
-            disabled={safeGame.club.owned || !safeGame.gang.joined || safeGame.gang.role !== "Boss"}
-            danger
-          />
-        </View>
-      </SectionCard>
+            );
+          })}
+          <View style={styles.grid}>
+            <ActionTile
+              title="Postaw nowy klub"
+              subtitle={`Boss gangu moze zalozyc nowy lokal za ${formatMoney(clubFoundingCashCost)}.`}
+              visual={systemVisuals.club}
+              onPress={actions.foundClub}
+              disabled={safeGame.club.owned || !safeGame.gang.joined || safeGame.gang.role !== "Boss"}
+            />
+          </View>
+        </SectionCard>
+      ) : null}
 
-      <SectionCard title="Aktualny lokal" subtitle="Mozesz siedziec u siebie, wejsc do cudzego klubu albo po prostu byc na ulicy.">
+      <SectionCard title={currentClubVenue ? `Wnetrze: ${currentClubVenue.name}` : "Aktualny lokal"} subtitle={currentClubVenue ? "Jestes juz w srodku. Tu masz tylko rzeczy zwiazane z tym lokalem." : "Mozesz siedziec u siebie, wejsc do cudzego klubu albo po prostu byc na ulicy."}>
         <StatLine label="Gdzie jestes" value={currentClubVenue ? currentClubVenue.name : "Poza klubem"} visual={systemVisuals.club} />
         <StatLine label="Wlasciciel" value={currentClubVenue ? currentClubVenue.ownerLabel : "Brak"} visual={systemVisuals.gang} />
         <StatLine label="Popularnosc" value={currentClubVenue ? `${currentClubVenue.popularity}%` : "0%"} visual={systemVisuals.club} />
@@ -427,6 +536,13 @@ export function EmpireScreen({
         {currentClubVenue ? <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text> : null}
         <View style={styles.grid}>
           <ActionTile
+            title="Szukaj panienki"
+            subtitle={currentClubVenue ? `Wejscie ${formatMoney(clubEscortSearchCost)}. Szukasz teraz w ${currentClubVenue.name}.` : "Najpierw wejdz do jakiegos klubu z listy powyzej."}
+            visual={systemVisuals.street}
+            onPress={actions.findEscortInClub}
+            disabled={!currentClubVenue}
+          />
+          <ActionTile
             title="Wyjdz z klubu"
             subtitle={currentClubVenue ? "Wracasz na ulice i tracisz bonusy lokalu." : "Ta opcja dziala tylko, kiedy siedzisz w jakims klubie."}
             visual={systemVisuals.street}
@@ -436,6 +552,7 @@ export function EmpireScreen({
         </View>
       </SectionCard>
 
+      {!currentClubVenue || insideOwnClub ? (
       <SectionCard title="Twoj klub" subtitle="Klub ma byc droga instytucja, ktora dopiero po czasie mieli hajs i glowbol z policja.">
         {!safeGame.club.owned ? (
           <Text style={styles.emptyText}>Jeszcze bez lokalu. Najpierw przejmij klub albo postaw nowy.</Text>
@@ -472,7 +589,9 @@ export function EmpireScreen({
           </>
         )}
       </SectionCard>
+      ) : null}
 
+      {!currentClubVenue || insideOwnClub ? (
       <SectionCard title="Stash klubu" subtitle="Dorzuc towar z fabryk do klubu. Tu jest glowny loop z dragami.">
         {!safeGame.club.owned ? (
           <Text style={styles.emptyText}>Bez swojego lokalu nie masz gdzie wrzucac towaru.</Text>
@@ -499,6 +618,7 @@ export function EmpireScreen({
           ))
         )}
       </SectionCard>
+      ) : null}
     </>
   );
 }

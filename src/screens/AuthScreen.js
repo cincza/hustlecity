@@ -1,6 +1,8 @@
 import React, { useState } from "react";
-import { Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+
+const BRAND_LOGO = require("../../assets/branding/hustle-city-logo.png");
 
 export function AuthScreen({ busy = false, error = "", onLogin, onRegister }) {
   const [mode, setMode] = useState("login");
@@ -20,6 +22,9 @@ export function AuthScreen({ busy = false, error = "", onLogin, onRegister }) {
     <SafeAreaView style={styles.root}>
       <LinearGradient colors={["#050607", "#0f1116", "#171a20"]} style={styles.fill}>
         <View style={styles.card}>
+          <View style={styles.brandWrap}>
+            <Image source={BRAND_LOGO} style={styles.brandImage} resizeMode="contain" />
+          </View>
           <Text style={styles.eyebrow}>Hustle City</Text>
           <Text style={styles.title}>{mode === "login" ? "Wejdz do miasta" : "Stworz konto"}</Text>
           <Text style={styles.subtitle}>
@@ -88,6 +93,15 @@ const styles = StyleSheet.create({
     borderColor: "#2f3440",
     backgroundColor: "rgba(8,10,14,0.94)",
     gap: 12,
+  },
+  brandWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingBottom: 6,
+  },
+  brandImage: {
+    width: 196,
+    height: 196,
   },
   eyebrow: { color: "#7ab6ff", fontSize: 12, textTransform: "uppercase", letterSpacing: 1.6, fontWeight: "800" },
   title: { color: "#f4efe8", fontSize: 30, fontWeight: "900" },

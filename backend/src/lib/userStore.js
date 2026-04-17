@@ -8,9 +8,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const dataDir = path.resolve(__dirname, "../../data");
 const userDbPath = path.join(dataDir, "users.db");
+const globalChatDbPath = path.join(dataDir, "global-chat.db");
 
 let usersDb;
+let globalChatDb;
 let userStoreInitLogged = false;
+const VERBOSE_USER_STORE_LOGS = process.env.VERBOSE_USER_STORE_LOGS === "1";
+
+function logUserStore(message, level = "log") {
+  if (!VERBOSE_USER_STORE_LOGS) return;
+  console[level](`[userStore] ${message}`);
+}
 
 function normalizeEmail(email) {
   return typeof email === "string" ? email.trim().toLowerCase() : null;
@@ -34,7 +42,17 @@ async function ensureUsersDbFile() {
     await fs.access(userDbPath);
   } catch (_error) {
     await fs.writeFile(userDbPath, "", "utf8");
-    console.log(`[userStore] created database file at ${userDbPath}`);
+    logUserStore(`created database file at ${userDbPath}`);
+  }
+}
+
+async function ensureGlobalChatDbFile() {
+  await fs.mkdir(dataDir, { recursive: true });
+  try {
+    await fs.access(globalChatDbPath);
+  } catch (_error) {
+    await fs.writeFile(globalChatDbPath, "", "utf8");
+    logUserStore(`created global chat database file at ${globalChatDbPath}`);
   }
 }
 
@@ -65,20 +83,30 @@ async function getDb() {
   await usersDb.ensureIndexAsync({ fieldName: "usernameLower", unique: true });
   await usersDb.ensureIndexAsync({ fieldName: "emailLower", sparse: true, unique: true });
   if (!userStoreInitLogged) {
-    console.log(`[userStore] database ready at ${userDbPath}`);
+    logUserStore(`database ready at ${userDbPath}`);
     userStoreInitLogged = true;
   }
   return usersDb;
 }
 
+async function getGlobalChatDb() {
+  if (globalChatDb) return globalChatDb;
+  await ensureGlobalChatDbFile();
+  globalChatDb = new Datastore({ filename: globalChatDbPath });
+  await globalChatDb.loadDatabaseAsync();
+  await globalChatDb.ensureIndexAsync({ fieldName: "createdAt" });
+  return globalChatDb;
+}
+
 export async function initUserStore() {
   await getDb();
+  await getGlobalChatDb();
 }
 
 export async function findUserById(userId) {
   const db = await getDb();
   const user = await db.findOneAsync({ _id: userId });
-  console.log(`[userStore] read by id ${userId} -> ${user ? "hit" : "miss"}`);
+  logUserStore(`read by id ${userId} -> ${user ? "hit" : "miss"}`);
   return user;
 }
 
@@ -93,7 +121,7 @@ export async function findUserByLogin(login) {
     (await db.findOneAsync({ emailLower })) ||
     (await db.findOneAsync({ usernameLower })) ||
     null;
-  console.log(`[userStore] read by login ${rawLogin} -> ${user ? "hit" : "miss"}`);
+  logUserStore(`read by login ${rawLogin} -> ${user ? "hit" : "miss"}`);
   return user;
 }
 
@@ -145,7 +173,7 @@ export async function createUserRecord({
     updatedAt: now,
   };
   const inserted = await db.insertAsync(doc);
-  console.log(`[userStore] created user ${inserted.username} (${inserted._id})`);
+  logUserStore(`created user ${inserted.username} (${inserted._id})`);
   return inserted;
 }
 
@@ -169,6 +197,61 @@ export async function saveUserPlayerData(userId, playerData) {
     },
     {}
   );
-  console.log(`[userStore] saved playerData for ${userId} at ${updatedAt}`);
+  logUserStore(`saved playerData for ${userId} at ${updatedAt}`);
   return findUserById(userId);
+}
+
+export async function deleteUserByLogin(login) {
+  const db = await getDb();
+  const rawLogin = String(login || "").trim();
+  if (!rawLogin) return 0;
+
+  const emailLower = normalizeEmail(rawLogin);
+  const usernameLower = normalizeUsername(rawLogin);
+  const result = await db.removeAsync(
+    {
+      $or: [{ emailLower }, { usernameLower }],
+    },
+    { multi: true }
+  );
+  logUserStore(`deleted by login ${rawLogin} -> ${result}`);
+  return result;
+}
+
+export async function listUsers() {
+  const db = await getDb();
+  return db.findAsync({});
+}
+
+export async function clearAllUsers() {
+  const db = await getDb();
+  const removed = await db.removeAsync({}, { multi: true });
+  logUserStore(`cleared users -> ${removed}`);
+  return removed;
+}
+
+export async function getGlobalChatMessages(limit = 40) {
+  const db = await getGlobalChatDb();
+  const safeLimit = Math.max(1, Math.min(80, Number(limit) || 40));
+  const entries = await db.findAsync({}).sort({ createdAt: -1 }).limit(safeLimit);
+  return entries;
+}
+
+export async function clearGlobalChatMessages() {
+  const db = await getGlobalChatDb();
+  const removed = await db.removeAsync({}, { multi: true });
+  logUserStore(`cleared global chat -> ${removed}`);
+  return removed;
+}
+
+export async function addGlobalChatMessage({ userId, author, text }) {
+  const db = await getGlobalChatDb();
+  const now = Date.now();
+  return db.insertAsync({
+    _id: crypto.randomUUID(),
+    userId,
+    author,
+    text,
+    createdAt: now,
+  });
 }

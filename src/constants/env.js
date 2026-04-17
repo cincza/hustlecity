@@ -14,4 +14,3 @@ function normalizeApiBaseUrl(value) {
 }
 
 export const API_BASE_URL = normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL);
-export const IS_DEV_LOCAL_API_FALLBACK = API_BASE_URL === DEV_LOCALHOST_API_BASE_URL;

@@ -54,17 +54,17 @@ export function MarketScreen({
         <SceneArtwork
           eyebrow="Handel"
           title="Miasto kupuje wszystko"
-          lines={["Kupujesz taniej, wypychasz drozej i pilnujesz, gdzie akurat skacze cena.", "Rynek ma czuc ulice, magazyny i nocne oferty, a nie tabele bez charakteru."]}
+          lines={["Kupujesz, sprzedajesz i pilnujesz ruchu rynku."]}
           accent={["#372417", "#160f0c", "#050505"]}
           source={sceneBackgrounds.market}
         />
-        <SectionCard title="Handel" subtitle="Kupuj tanio, sprzedawaj drozej. Ceny odswiezaja sie automatycznie.">
+        <SectionCard title="Handel" subtitle="Ulica, fallback NPC i ceny na zywo.">
           <View style={styles.listCard}>
             <View style={styles.entityHead}>
               <EntityBadge visual={systemVisuals.market} />
               <View style={styles.flexOne}>
                 <Text style={styles.listCardTitle}>Rynek miasta</Text>
-                <Text style={styles.listCardMeta}>Towar krazy po ulicy, a ceny i zapasy maja wygladac czytelnie na pierwszy rzut oka.</Text>
+                <Text style={styles.listCardMeta}>Szybki podglad cen, podazy i ruchu.</Text>
               </View>
             </View>
           </View>
@@ -120,17 +120,17 @@ export function MarketScreen({
         <SceneArtwork
           eyebrow="Diler"
           title="Towar schodzi, stan sie konczy"
-          lines={["Diler nie ma nieskonczonego magazynu. Startuje grubo, a potem zyje tym, co gracze mu odsprzedaja.", "Mocniejsze rzeczy kosztuja wiecej, podbijaja konkretne staty i maja wyzsza smiertelnosc."]}
+          lines={["Kupujesz, sprzedajesz albo zarzucasz."]}
           accent={["#3a2617", "#16100c", "#050505"]}
           source={sceneBackgrounds.escort}
         />
-        <SectionCard title="Narkotyki" subtitle="Diler startuje z duzym magazynem, ale potem ma tylko to, co gracze mu sprzedaja.">
+        <SectionCard title="Towar" subtitle="Stan, cena i szybki obrot.">
           <View style={styles.listCard}>
             <View style={styles.entityHead}>
               <EntityBadge visual={systemVisuals.dealer} />
               <View style={styles.flexOne}>
                 <Text style={styles.listCardTitle}>Diler i szybki obrot</Text>
-                <Text style={styles.listCardMeta}>Kupujesz, sprzedajesz i zarzucasz towar bez zgadywania, co jest czym.</Text>
+                <Text style={styles.listCardMeta}>Towar na ulicy i w kieszeni.</Text>
               </View>
             </View>
           </View>
@@ -183,13 +183,13 @@ export function MarketScreen({
   }
 
   return (
-    <SectionCard title="Aktywne boosty" subtitle="Tu widzisz wszystko, co teraz podbija staty.">
+    <SectionCard title="Boosty" subtitle="Aktywne efekty na teraz.">
       <View style={styles.listCard}>
         <View style={styles.entityHead}>
           <EntityBadge visual={systemVisuals.energy} />
           <View style={styles.flexOne}>
             <Text style={styles.listCardTitle}>Boosty i aktywne efekty</Text>
-            <Text style={styles.listCardMeta}>Jednym rzutem oka widzisz co teraz pompuje staty i jak dlugo jeszcze to siedzi.</Text>
+            <Text style={styles.listCardMeta}>Co teraz pompuje staty i jak dlugo.</Text>
           </View>
         </View>
       </View>

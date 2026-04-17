@@ -28,13 +28,25 @@ import {
   rebalanceMarketState,
 } from "./config/economy.js";
 import {
+  addGlobalChatMessage,
+  clearAllUsers,
+  clearGlobalChatMessages,
   createAvailableUsername,
   createUserRecord,
+  deleteUserByLogin,
   findUserById,
   findUserByLogin,
+  getGlobalChatMessages,
   initUserStore,
+  listUsers,
   saveUserPlayerData,
-} from "./lib/userStore.js";
+} from "./repositories/userRepository.js";
+import {
+  logMutationFailure,
+  logMutationSuccess,
+} from "./services/actionLogService.js";
+import { sendError, sendOk } from "./utils/http.js";
+import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import {
   createAuthMiddleware,
   getBearerToken,
@@ -58,8 +70,28 @@ const allowedOrigins = Array.from(
     "http://127.0.0.1:8090",
   ])
 );
-const ALPHA_TEST_STARTING_CASH = 5000000;
-const ALPHA_TEST_STARTING_BANK = 250000;
+const ALPHA_TEST_STARTING_CASH = 5000;
+const ALPHA_TEST_STARTING_BANK = 10000;
+const ALPHA_TEST_STARTING_RESPECT = 1;
+const RESET_GAME_ENABLED =
+  process.env.ALLOW_TEST_RESET === "1" || process.env.NODE_ENV !== "production";
+const RESET_GAME_TOKEN = String(process.env.RESET_GAME_TOKEN || "").trim();
+const ADMIN_ACCOUNT = {
+  username: "czincza11",
+  email: "czincza11@hustle-city.local",
+  password: "1234",
+  cash: 5000000,
+  bank: 5000000,
+};
+const SPECIAL_PROFILE_FLOORS = {
+  czincza11: {
+    cash: 5000000,
+    bank: 5000000,
+    respect: 1,
+    level: 1,
+  },
+};
+const VERBOSE_SERVER_LOGS = process.env.VERBOSE_SERVER_LOGS === "1";
 
 function asyncHandler(handler) {
   return function wrappedHandler(req, res, next) {
@@ -80,8 +112,10 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use((req, _res, next) => {
-  const requester = req.ip || "unknown";
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} :: ${requester}`);
+  if (VERBOSE_SERVER_LOGS) {
+    const requester = req.ip || "unknown";
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} :: ${requester}`);
+  }
   next();
 });
 
@@ -91,22 +125,22 @@ function randomBetween(min, max) {
 
 function createDeck() {
   const baseCards = [
-    { label: "A", value: 11, suit: "♠" },
-    { label: "K", value: 10, suit: "♠" },
-    { label: "Q", value: 10, suit: "♠" },
-    { label: "J", value: 10, suit: "♠" },
-    { label: "10", value: 10, suit: "♠" },
-    { label: "9", value: 9, suit: "♠" },
-    { label: "8", value: 8, suit: "♠" },
-    { label: "7", value: 7, suit: "♠" },
-    { label: "6", value: 6, suit: "♠" },
-    { label: "5", value: 5, suit: "♠" },
-    { label: "4", value: 4, suit: "♠" },
-    { label: "3", value: 3, suit: "♠" },
-    { label: "2", value: 2, suit: "♠" },
+    { label: "A", value: 11, suit: "S" },
+    { label: "K", value: 10, suit: "S" },
+    { label: "Q", value: 10, suit: "S" },
+    { label: "J", value: 10, suit: "S" },
+    { label: "10", value: 10, suit: "S" },
+    { label: "9", value: 9, suit: "S" },
+    { label: "8", value: 8, suit: "S" },
+    { label: "7", value: 7, suit: "S" },
+    { label: "6", value: 6, suit: "S" },
+    { label: "5", value: 5, suit: "S" },
+    { label: "4", value: 4, suit: "S" },
+    { label: "3", value: 3, suit: "S" },
+    { label: "2", value: 2, suit: "S" },
   ];
 
-  const suits = ["♠", "♥", "♦", "♣"];
+  const suits = ["S", "H", "D", "C"];
   const deck = [];
   suits.forEach((suit) => {
     baseCards.forEach((card) => {
@@ -137,19 +171,30 @@ function getBlackjackHandValue(cards = []) {
 }
 
 function getLevelFromRespect(respect) {
-  return 1 + Math.floor(respect / 14);
+  return Math.max(1, Math.floor(Number(respect) || 1));
 }
 
-function createInitialPlayerData(username = "boss") {
+function normalizePlayerLogin(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isResetAuthorized(req) {
+  if (!RESET_GAME_ENABLED) return false;
+  if (!RESET_GAME_TOKEN) return true;
+  return req.get("x-reset-token") === RESET_GAME_TOKEN;
+}
+
+function createInitialPlayerData(username = "gracz") {
   const now = Date.now();
   return {
     profile: {
-      name: username === "boss" ? "Vin Blaze" : username,
+      name: username,
       avatarId: "ghost",
       avatarCustomUri: null,
-      rank: "Mlody wilk",
-      level: 1,
-      respect: 7,
+      rank: "Swiezak",
+      level: ALPHA_TEST_STARTING_RESPECT,
+      respect: ALPHA_TEST_STARTING_RESPECT,
+      xp: 0,
       heat: 6,
       hp: 100,
       maxHp: 100,
@@ -160,8 +205,8 @@ function createInitialPlayerData(username = "boss") {
       dexterity: 7,
       charisma: 6,
       stamina: 7,
-      cash: 5000000,
-      bank: 250000,
+      cash: ALPHA_TEST_STARTING_CASH,
+      bank: ALPHA_TEST_STARTING_BANK,
     },
     stats: {
       heistsDone: 0,
@@ -186,31 +231,47 @@ function createInitialPlayerData(username = "boss") {
     },
     log: [
       "Miasto wrze. Lokalne ekipy obserwuja kazdy ruch.",
-      "Backend liczy energie, cooldowny i rewardy. Klient tylko to pokazuje.",
+      "Backend liczy energie i rewardy. Klient tylko to pokazuje.",
     ],
     flags: {
-      alphaTestGrantApplied: true,
+      alphaTestGrantApplied: false,
     },
   };
+}
+
+function createAdminPlayerData() {
+  const playerData = createInitialPlayerData(ADMIN_ACCOUNT.username);
+  playerData.profile.cash = ADMIN_ACCOUNT.cash;
+  playerData.profile.bank = ADMIN_ACCOUNT.bank;
+  playerData.profile.respect = 1;
+  playerData.profile.level = 1;
+  playerData.profile.rank = "Swiezak";
+  playerData.flags.alphaTestGrantApplied = true;
+  playerData.log = [
+    "Konto administratora gotowe do testow.",
+    "Masz gruby bankroll do sprawdzania systemow.",
+  ];
+  return playerData;
 }
 
 const state = {
   activeUsers: new Map(),
   market: createMarketState(),
   routeRateLimit: new Map(),
+  actionLocks: new Map(),
 };
 
 await initUserStore();
+await deleteUserByLogin("boss");
 
-const existingSeed = await findUserByLogin("boss");
-if (!existingSeed) {
-  const passwordHash = await bcrypt.hash("1234", 10);
-  const seedUsername = await createAvailableUsername("boss", "boss");
+const existingAdmin = await findUserByLogin(ADMIN_ACCOUNT.username);
+if (!existingAdmin) {
+  const passwordHash = await bcrypt.hash(ADMIN_ACCOUNT.password, 10);
   await createUserRecord({
-    username: seedUsername,
-    email: "boss@hustle-city.local",
+    username: ADMIN_ACCOUNT.username,
+    email: ADMIN_ACCOUNT.email,
     passwordHash,
-    playerData: createInitialPlayerData(seedUsername),
+    playerData: createAdminPlayerData(),
   });
 }
 
@@ -218,18 +279,52 @@ function pushLog(player, message) {
   player.log = [message, ...player.log].slice(0, 16);
 }
 
-function ensureAlphaTestGrant(player) {
+function ensureAlphaTestGrant(player, authUser = null) {
   if (!player || typeof player !== "object") return false;
-  if (player.flags?.alphaTestGrantApplied) return false;
 
-  player.flags = {
-    ...(player.flags || {}),
-    alphaTestGrantApplied: true,
-  };
-  player.profile.cash = Math.max(Number(player.profile?.cash || 0), ALPHA_TEST_STARTING_CASH);
-  player.profile.bank = Math.max(Number(player.profile?.bank || 0), ALPHA_TEST_STARTING_BANK);
-  pushLog(player, "Alpha test boost wbity. Masz gruby bankroll na sprawdzanie drozszych rzeczy.");
-  return true;
+  let changed = false;
+
+  if (!player.flags?.alphaTestGrantApplied) {
+    player.flags = {
+      ...(player.flags || {}),
+      alphaTestGrantApplied: true,
+    };
+    player.profile.cash = Math.max(Number(player.profile?.cash || 0), ALPHA_TEST_STARTING_CASH);
+    player.profile.bank = Math.max(Number(player.profile?.bank || 0), ALPHA_TEST_STARTING_BANK);
+    player.profile.respect = Math.max(Number(player.profile?.respect || 0), ALPHA_TEST_STARTING_RESPECT);
+    player.profile.level = Math.max(Number(player.profile?.level || 0), ALPHA_TEST_STARTING_RESPECT);
+    pushLog(player, "Alpha test boost wbity. Masz gruby bankroll na sprawdzanie drozszych rzeczy.");
+    changed = true;
+  }
+
+  const usernameLower = normalizePlayerLogin(
+    authUser?.username || player.username || player.profile?.name || ""
+  );
+  const specialFloors = usernameLower ? SPECIAL_PROFILE_FLOORS[usernameLower] : null;
+
+  if (specialFloors) {
+    if (Number(player.profile?.cash || 0) < specialFloors.cash) {
+      player.profile.cash = specialFloors.cash;
+      changed = true;
+    }
+    if (Number(player.profile?.bank || 0) < specialFloors.bank) {
+      player.profile.bank = specialFloors.bank;
+      changed = true;
+    }
+    if (Number(player.profile?.respect || 0) < specialFloors.respect) {
+      player.profile.respect = specialFloors.respect;
+      changed = true;
+    }
+    if (Number(player.profile?.level || 0) < specialFloors.level) {
+      player.profile.level = specialFloors.level;
+      changed = true;
+    }
+    if (changed) {
+      pushLog(player, "Specjalny bankroll testowy wbity do profilu.");
+    }
+  }
+
+  return changed;
 }
 
 function markUserActive(userId, now = Date.now()) {
@@ -259,6 +354,48 @@ function getActiveUserCount(now = Date.now()) {
   return state.activeUsers.size;
 }
 
+function isUserOnline(userId, now = Date.now()) {
+  const lastSeenAt = state.activeUsers.get(userId) || 0;
+  return now - lastSeenAt <= 30 * 60 * 1000;
+}
+
+function buildDirectoryEntry(userRecord, now = Date.now()) {
+  const profile = userRecord?.playerData?.profile || {};
+  const stats = userRecord?.playerData?.stats || {};
+  return {
+    id: userRecord._id,
+    name: profile.name || userRecord.username,
+    gang: userRecord?.playerData?.gang?.name || "No gang",
+    respect: Number(profile.respect || 0),
+    cash: Number(profile.cash || 0) + Number(profile.bank || 0),
+    attack: Number(profile.attack || 0),
+    defense: Number(profile.defense || 0),
+    dexterity: Number(profile.dexterity || 0),
+    charisma: Number(profile.charisma || 0),
+    bounty: Math.max(0, Math.round(Number(profile.heat || 0) * 140)),
+    online: isUserOnline(userRecord._id, now),
+    heists: Number(stats.heistsWon || 0),
+    casino: Number(stats.casinoWins || 0),
+  };
+}
+
+async function buildSocialSnapshot(now = Date.now()) {
+  const users = await listUsers();
+  const roster = users.map((userRecord) => buildDirectoryEntry(userRecord, now));
+  roster.sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    if (b.respect !== a.respect) return b.respect - a.respect;
+    return a.name.localeCompare(b.name, "pl");
+  });
+  const globalChat = (await getGlobalChatMessages(40)).map((entry) => ({
+    id: entry._id,
+    author: entry.author,
+    text: entry.text,
+    time: new Date(entry.createdAt).toISOString(),
+  }));
+  return { roster, globalChat };
+}
+
 async function persistPlayerForUser(userId, playerData) {
   if (!userId) {
     throw new Error("Cannot persist player without user id");
@@ -267,7 +404,9 @@ async function persistPlayerForUser(userId, playerData) {
     throw new Error("Cannot persist empty player data");
   }
   const updated = await saveUserPlayerData(userId, playerData);
-  console.log(`[persist] saved player state for ${userId}`);
+  if (VERBOSE_SERVER_LOGS) {
+    console.log(`[persist] saved player state for ${userId}`);
+  }
   return updated;
 }
 
@@ -281,6 +420,26 @@ function enforceRateLimit(req, res, scope, minIntervalMs, message) {
   }
   state.routeRateLimit.set(key, now);
   return true;
+}
+
+async function withPlayerActionLock(req, actionKey, handler) {
+  if (!req?.user?.id) {
+    throw new Error("Authenticated user id missing for action lock");
+  }
+
+  const key = `${req.user.id}:${actionKey}`;
+  if (state.actionLocks.has(key)) {
+    const error = new Error("Action already in progress");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  state.actionLocks.set(key, true);
+  try {
+    return await handler();
+  } finally {
+    state.actionLocks.delete(key);
+  }
 }
 
 function parsePositiveInteger(rawValue, { min = 1, max = Number.MAX_SAFE_INTEGER, field = "value" } = {}) {
@@ -325,6 +484,9 @@ function syncPlayerEnergy(player, now = Date.now()) {
 
 function syncPlayerState(player, now = Date.now()) {
   syncPlayerEnergy(player, now);
+  player.profile.level = getLevelFromRespect(player.profile.respect);
+  player.profile.xp = Math.max(0, Math.floor(Number(player.profile.xp) || 0));
+  player.profile.xp = Math.min(player.profile.xp, getXpRequirementForRespect(player.profile.respect));
 }
 
 function getHeistSuccessChance(player, heist) {
@@ -343,9 +505,28 @@ function getHeistSuccessChance(player, heist) {
   );
 }
 
-function getHeistCooldownRemaining(player, heistId, now = Date.now()) {
-  const until = player.cooldowns?.heists?.[heistId] || 0;
-  return Math.max(0, until - now);
+function isPlayerJailed(player, now = Date.now()) {
+  return Number.isFinite(player?.profile?.jailUntil) && player.profile.jailUntil > now;
+}
+
+function getHeistJailChance(player, heist) {
+  const heatFactor = (Number(player?.profile?.heat) || 0) * 0.0025;
+  const defenseReduction = (Number(player?.profile?.defense) || 0) * 0.004;
+  const dexterityReduction = (Number(player?.profile?.dexterity) || 0) * 0.006;
+
+  return clamp(
+    0.08 + heist.risk * 0.48 + heist.energy * 0.018 + heatFactor - defenseReduction - dexterityReduction,
+    0.06,
+    0.72
+  );
+}
+
+function getHeistJailSentenceSeconds(player, heist) {
+  const heatBonus = Math.round((Number(player?.profile?.heat) || 0) * 1.5);
+  return Math.max(
+    75,
+    Math.round(90 + heist.energy * 55 + heist.risk * 360 + heist.respect * 4 + heatBonus)
+  );
 }
 
 function publicPlayer(player, now = Date.now()) {
@@ -404,13 +585,14 @@ function applyClientGameSnapshotToPlayerData(player, game) {
     hp: Number.isFinite(profile.hp) ? profile.hp : player.profile.hp,
     maxHp: Number.isFinite(profile.maxHp) ? profile.maxHp : player.profile.maxHp,
     respect: Number.isFinite(profile.respect) ? profile.respect : player.profile.respect,
+    xp: Number.isFinite(profile.xp) ? profile.xp : player.profile.xp,
     attack: Number.isFinite(profile.attack) ? profile.attack : player.profile.attack,
     defense: Number.isFinite(profile.defense) ? profile.defense : player.profile.defense,
     dexterity: Number.isFinite(profile.dexterity) ? profile.dexterity : player.profile.dexterity,
     charisma: Number.isFinite(profile.charisma) ? profile.charisma : player.profile.charisma,
     heat: Number.isFinite(profile.heat) ? profile.heat : player.profile.heat,
     stamina: Number.isFinite(profile.stamina) ? profile.stamina : player.profile.stamina,
-    level: Number.isFinite(profile.level) ? profile.level : getLevelFromRespect(Number.isFinite(profile.respect) ? profile.respect : player.profile.respect),
+    level: getLevelFromRespect(Number.isFinite(profile.respect) ? profile.respect : player.profile.respect),
     gymPassTier: profile.gymPassTier ?? player.profile.gymPassTier,
     gymPassUntil: profile.gymPassUntil ?? player.profile.gymPassUntil,
     jailUntil: profile.jailUntil ?? player.profile.jailUntil,
@@ -579,13 +761,26 @@ async function commitPlayerMutation(req, actionName, mutator) {
   }
 
   const before = snapshotPlayerMutationState(req.player);
-  const result = await mutator(req.player);
-  await persistPlayerForUser(req.user.id, req.player);
-  const after = snapshotPlayerMutationState(req.player);
-  console.log(
-    `[mutation] ${actionName} user=${req.user.id} cash=${before.cash}->${after.cash} bank=${before.bank}->${after.bank} energy=${before.energy}->${after.energy} hp=${before.hp}->${after.hp} heat=${before.heat}->${after.heat} respect=${before.respect}->${after.respect} save=ok`
-  );
-  return result;
+  try {
+    const result = await mutator(req.player);
+    await persistPlayerForUser(req.user.id, req.player);
+    const after = snapshotPlayerMutationState(req.player);
+    logMutationSuccess({
+      actionName,
+      userId: req.user.id,
+      before,
+      after,
+    });
+    return result;
+  } catch (error) {
+    logMutationFailure({
+      actionName,
+      userId: req.user.id,
+      before,
+      reason: error?.message || "unknown",
+    });
+    throw error;
+  }
 }
 
 const auth = createAuthMiddleware({
@@ -596,7 +791,7 @@ const auth = createAuthMiddleware({
 });
 
 app.get("/health", (_req, res) => {
-  res.json({
+  sendOk(res, {
     ok: true,
     app: process.env.APP_NAME || "Hustle City API",
     economyVersion: ECONOMY_RULES.version,
@@ -605,7 +800,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/api/meta", (_req, res) => {
-  res.json({
+  sendOk(res, {
     name: "Hustle City",
     status: "vertical-slice",
     economyVersion: ECONOMY_RULES.version,
@@ -617,6 +812,37 @@ app.get("/api/meta", (_req, res) => {
     },
   });
 });
+
+app.post("/reset-game", asyncHandler(async (req, res) => {
+  if (!isResetAuthorized(req)) {
+    res.status(403).json({ error: "Reset endpoint is disabled" });
+    return;
+  }
+
+  const [usersCleared, globalChatCleared] = await Promise.all([
+    clearAllUsers(),
+    clearGlobalChatMessages(),
+  ]);
+
+  state.activeUsers.clear();
+  state.routeRateLimit.clear();
+  state.actionLocks.clear();
+  state.market = createMarketState();
+
+  console.log(
+    `[reset-game] cleared runtime data :: users=${usersCleared}, globalChat=${globalChatCleared}`
+  );
+
+  sendOk(res, {
+    ok: true,
+    testingOnly: true,
+    usersCleared,
+    globalChatCleared,
+    gangsCleared: true,
+    rankingsCleared: true,
+    marketReset: true,
+  });
+}));
 
 app.post("/auth/register", asyncHandler(async (req, res) => {
   if (
@@ -634,6 +860,7 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
   const rawLogin = sanitizeAuthInput(login || username || email);
   const rawEmail = sanitizeAuthInput(email || (rawLogin.includes("@") ? rawLogin : ""));
   const rawPassword = String(password || "");
+  const requestedUsername = sanitizeAuthInput(username || (!rawLogin.includes("@") ? rawLogin : ""));
 
   if (!rawLogin || !rawPassword) {
     res.status(400).json({ error: "Login/email and password are required" });
@@ -649,6 +876,11 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
     return;
   }
 
+  if (requestedUsername && !isValidUsername(requestedUsername)) {
+    res.status(400).json({ error: "Username must be 3-18 chars and use only letters, numbers, dot, dash or underscore" });
+    return;
+  }
+
   const existingByLogin = await findUserByLogin(rawLogin);
   const existingByEmail = rawEmail ? await findUserByLogin(rawEmail) : null;
   if (existingByLogin || existingByEmail) {
@@ -656,7 +888,7 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
     return;
   }
 
-  const nextUsername = await createAvailableUsername(rawLogin, username);
+  const nextUsername = await createAvailableUsername(rawLogin, requestedUsername);
   if (!isValidUsername(nextUsername)) {
     res.status(400).json({ error: "Username must be 3-18 chars and use only letters, numbers, dot, dash or underscore" });
     return;
@@ -713,7 +945,7 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
     return;
   }
 
-  if (ensureAlphaTestGrant(userRecord.playerData)) {
+  if (ensureAlphaTestGrant(userRecord.playerData, userRecord)) {
     await persistPlayerForUser(userRecord._id, userRecord.playerData);
   }
 
@@ -732,7 +964,7 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
 
 app.get("/me", auth, asyncHandler(async (req, res) => {
   refreshMarket();
-  ensureAlphaTestGrant(req.player);
+  ensureAlphaTestGrant(req.player, req.user);
   await persistPlayerForUser(req.user.id, req.player);
   const marketView = getMarketPublicView(state.market, getActiveUserCount());
   res.json({
@@ -754,6 +986,82 @@ app.get("/me", auth, asyncHandler(async (req, res) => {
       streetIncome: ECONOMY_RULES.streetIncome,
       },
     });
+}));
+
+app.get("/social/players", auth, asyncHandler(async (req, res) => {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "social-players",
+      800,
+      "Player directory rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const query = String(req.query?.q || "").trim().toLowerCase();
+  const { roster } = await buildSocialSnapshot();
+  const filtered = query
+    ? roster.filter((entry) =>
+        entry.name.toLowerCase().includes(query) ||
+        entry.gang.toLowerCase().includes(query)
+      )
+    : roster;
+
+  res.json({
+    players: filtered.slice(0, 40),
+  });
+}));
+
+app.get("/social/rankings", auth, asyncHandler(async (_req, res) => {
+  const { roster } = await buildSocialSnapshot();
+  res.json({
+    byRespect: [...roster].sort((a, b) => b.respect - a.respect).slice(0, 12),
+    byCash: [...roster].sort((a, b) => b.cash - a.cash).slice(0, 12),
+    byHeists: [...roster].sort((a, b) => b.heists - a.heists).slice(0, 12),
+    byCasino: [...roster].sort((a, b) => b.casino - a.casino).slice(0, 12),
+  });
+}));
+
+app.get("/chat/global", auth, asyncHandler(async (_req, res) => {
+  const { globalChat } = await buildSocialSnapshot();
+  res.json({ messages: globalChat });
+}));
+
+app.post("/chat/global", auth, asyncHandler(async (req, res) => {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "chat-global",
+      1200,
+      "Global chat rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const text = String(req.body?.text || "").trim();
+  if (!text) {
+    res.status(400).json({ error: "Message is required" });
+    return;
+  }
+  if (text.length > 280) {
+    res.status(400).json({ error: "Message too long" });
+    return;
+  }
+
+  const author = req.player?.profile?.name || req.user?.username || "Gracz";
+  await addGlobalChatMessage({
+    userId: req.user.id,
+    author,
+    text,
+  });
+
+  const { globalChat } = await buildSocialSnapshot();
+  res.json({ messages: globalChat });
 }));
 
 app.post("/sync/client-state", auth, asyncHandler(async (req, res) => {
@@ -915,14 +1223,16 @@ app.post("/market/buy", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  await commitPlayerMutation(req, "market-buy", async (player) => {
-    player.profile.cash -= quote.total;
-    player.inventory[product.id] += qty;
-    pushLog(
-      player,
-      `Kupiono ${qty}x ${product.name} za $${quote.total}. Rynek: ${quote.streetUnits}, fallback NPC: ${quote.fallbackUnits}.`
-    );
-    return null;
+  await withPlayerActionLock(req, "market-buy", async () => {
+    await commitPlayerMutation(req, "market-buy", async (player) => {
+      player.profile.cash -= quote.total;
+      player.inventory[product.id] += qty;
+      pushLog(
+        player,
+        `Kupiono ${qty}x ${product.name} za $${quote.total}. Rynek: ${quote.streetUnits}, fallback NPC: ${quote.fallbackUnits}.`
+      );
+      return null;
+    });
   });
 
   res.json({
@@ -979,12 +1289,14 @@ app.post("/market/sell", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  await commitPlayerMutation(req, "market-sell", async (player) => {
-    player.inventory[product.id] -= qty;
-    player.profile.cash += sale.total;
-    player.stats.totalEarned += sale.total;
-    pushLog(player, `Sprzedano ${qty}x ${product.name} za $${sale.total}. Towar zasila uliczna podaz.`);
-    return null;
+  await withPlayerActionLock(req, "market-sell", async () => {
+    await commitPlayerMutation(req, "market-sell", async (player) => {
+      player.inventory[product.id] -= qty;
+      player.profile.cash += sale.total;
+      player.stats.totalEarned += sale.total;
+      pushLog(player, `Sprzedano ${qty}x ${product.name} za $${sale.total}. Towar zasila uliczna podaz.`);
+      return null;
+    });
   });
 
   res.json({
@@ -1025,11 +1337,13 @@ app.post("/bank/deposit", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  await commitPlayerMutation(req, "bank-deposit", async (player) => {
-    player.profile.cash -= totalCost;
-    player.profile.bank += amount;
-    pushLog(player, `Wplacono do banku $${amount}. Fee: $${fee}.`);
-    return null;
+  await withPlayerActionLock(req, "bank-deposit", async () => {
+    await commitPlayerMutation(req, "bank-deposit", async (player) => {
+      player.profile.cash -= totalCost;
+      player.profile.bank += amount;
+      pushLog(player, `Wplacono do banku $${amount}. Fee: $${fee}.`);
+      return null;
+    });
   });
   res.json({ user: publicPlayer(req.player), amount, fee });
 }));
@@ -1064,11 +1378,13 @@ app.post("/bank/withdraw", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  await commitPlayerMutation(req, "bank-withdraw", async (player) => {
-    player.profile.bank -= totalDebit;
-    player.profile.cash += amount;
-    pushLog(player, `Wyplacono z banku $${amount}. Fee: $${fee}.`);
-    return null;
+  await withPlayerActionLock(req, "bank-withdraw", async () => {
+    await commitPlayerMutation(req, "bank-withdraw", async (player) => {
+      player.profile.bank -= totalDebit;
+      player.profile.cash += amount;
+      pushLog(player, `Wyplacono z banku $${amount}. Fee: $${fee}.`);
+      return null;
+    });
   });
   res.json({ user: publicPlayer(req.player), amount, fee });
 }));
@@ -1116,16 +1432,18 @@ app.post("/casino/slot", auth, asyncHandler(async (req, res) => {
 
   const outcome = rollWeightedOutcome(CASINO_RULES.slot.outcomes);
   const totalReturn = Math.floor(guard.amount * outcome.multiplier);
-  const settled = await commitPlayerMutation(req, "casino-slot", async (player) =>
-    settleCasinoResult(player, {
-      gameId: "slot",
-      stake: guard.amount,
-      totalReturn,
-      message:
-        totalReturn > 0
-          ? `Slot: ${outcome.label}. Wraca $${totalReturn} przy stawce $${guard.amount}.`
-          : `Slot: pudlo. Automat bierze $${guard.amount}.`,
-    })
+  const settled = await withPlayerActionLock(req, "casino-slot", async () =>
+    commitPlayerMutation(req, "casino-slot", async (player) =>
+      settleCasinoResult(player, {
+        gameId: "slot",
+        stake: guard.amount,
+        totalReturn,
+        message:
+          totalReturn > 0
+            ? `Slot: ${outcome.label}. Wraca $${totalReturn} przy stawce $${guard.amount}.`
+            : `Slot: pudlo. Automat bierze $${guard.amount}.`,
+      })
+    )
   );
 
   res.json({
@@ -1165,15 +1483,17 @@ app.post("/casino/high-risk", auth, asyncHandler(async (req, res) => {
 
   const win = crypto.randomInt(0, 10000) < Math.floor(CASINO_RULES.highRisk.winChance * 10000);
   const totalReturn = win ? Math.floor(guard.amount * CASINO_RULES.highRisk.winMultiplier) : 0;
-  const settled = await commitPlayerMutation(req, "casino-high-risk", async (player) =>
-    settleCasinoResult(player, {
-      gameId: "highRisk",
-      stake: guard.amount,
-      totalReturn,
-      message: win
-        ? `High-risk bet: ${CASINO_RULES.highRisk.winMessage} Wraca $${totalReturn}.`
-        : `High-risk bet: ${CASINO_RULES.highRisk.lossMessage} Tracisz $${guard.amount}.`,
-    })
+  const settled = await withPlayerActionLock(req, "casino-high-risk", async () =>
+    commitPlayerMutation(req, "casino-high-risk", async (player) =>
+      settleCasinoResult(player, {
+        gameId: "highRisk",
+        stake: guard.amount,
+        totalReturn,
+        message: win
+          ? `High-risk bet: ${CASINO_RULES.highRisk.winMessage} Wraca $${totalReturn}.`
+          : `High-risk bet: ${CASINO_RULES.highRisk.lossMessage} Tracisz $${guard.amount}.`,
+      })
+    )
   );
 
   res.json({
@@ -1222,60 +1542,62 @@ app.post("/casino/blackjack/start", auth, asyncHandler(async (req, res) => {
   const dealerValue = getBlackjackHandValue(dealerCards);
 
   let responsePayload = null;
-  await commitPlayerMutation(req, "casino-blackjack-start", async (currentPlayer) => {
-    currentPlayer.profile.cash -= guard.amount;
-    currentPlayer.casino.totalWagered += guard.amount;
-    currentPlayer.cooldowns.casinoActionUntil = Date.now() + CASINO_RULES.actionCooldownSeconds * 1000;
+  await withPlayerActionLock(req, "casino-blackjack-start", async () => {
+    await commitPlayerMutation(req, "casino-blackjack-start", async (currentPlayer) => {
+      currentPlayer.profile.cash -= guard.amount;
+      currentPlayer.casino.totalWagered += guard.amount;
+      currentPlayer.cooldowns.casinoActionUntil = Date.now() + CASINO_RULES.actionCooldownSeconds * 1000;
 
-    if (playerValue === 21 || dealerValue === 21) {
-      let totalReturn = 0;
-      let message = "Push. Wrzuta wraca.";
-      if (playerValue === 21 && dealerValue !== 21) {
-        totalReturn = Math.floor(guard.amount * 2.5);
-        currentPlayer.stats.casinoWins += 1;
-        currentPlayer.casino.totalWon += totalReturn;
-        message = "Blackjack. Stolik placi 3:2.";
-      } else if (dealerValue === 21 && playerValue !== 21) {
-        currentPlayer.casino.dailyLoss += guard.amount;
-        message = "Krupier ma blackjacka. Stolik bierze pule.";
-      } else {
-        totalReturn = guard.amount;
+      if (playerValue === 21 || dealerValue === 21) {
+        let totalReturn = 0;
+        let message = "Push. Wrzuta wraca.";
+        if (playerValue === 21 && dealerValue !== 21) {
+          totalReturn = Math.floor(guard.amount * 2.5);
+          currentPlayer.stats.casinoWins += 1;
+          currentPlayer.casino.totalWon += totalReturn;
+          message = "Blackjack. Stolik placi 3:2.";
+        } else if (dealerValue === 21 && playerValue !== 21) {
+          currentPlayer.casino.dailyLoss += guard.amount;
+          message = "Krupier ma blackjacka. Stolik bierze pule.";
+        } else {
+          totalReturn = guard.amount;
+        }
+
+        currentPlayer.profile.cash += totalReturn;
+        currentPlayer.casino.blackjackSession = {
+          stage: "done",
+          bet: guard.amount,
+          playerCards,
+          dealerCards,
+          message,
+        };
+        pushLog(currentPlayer, `Blackjack: ${message}`);
+        responsePayload = {
+          resolved: true,
+          result: totalReturn > guard.amount ? "win" : totalReturn === guard.amount ? "push" : "loss",
+          totalReturn,
+          net: totalReturn - guard.amount,
+        };
+        return null;
       }
 
-      currentPlayer.profile.cash += totalReturn;
       currentPlayer.casino.blackjackSession = {
-        stage: "done",
+        stage: "player",
         bet: guard.amount,
+        deck,
         playerCards,
         dealerCards,
-        message,
+        message: "Twoj ruch: dobieraj albo pas.",
       };
-      pushLog(currentPlayer, `Blackjack: ${message}`);
+      pushLog(currentPlayer, `Blackjack start za $${guard.amount}.`);
       responsePayload = {
-        resolved: true,
-        result: totalReturn > guard.amount ? "win" : totalReturn === guard.amount ? "push" : "loss",
-        totalReturn,
-        net: totalReturn - guard.amount,
+        resolved: false,
+        result: "ongoing",
+        totalReturn: 0,
+        net: -guard.amount,
       };
       return null;
-    }
-
-    currentPlayer.casino.blackjackSession = {
-      stage: "player",
-      bet: guard.amount,
-      deck,
-      playerCards,
-      dealerCards,
-      message: "Twoj ruch: dobieraj albo pas.",
-    };
-    pushLog(currentPlayer, `Blackjack start za $${guard.amount}.`);
-    responsePayload = {
-      resolved: false,
-      result: "ongoing",
-      totalReturn: 0,
-      net: -guard.amount,
-    };
-    return null;
+    });
   });
 
   res.json({
@@ -1287,7 +1609,6 @@ app.post("/casino/blackjack/start", auth, asyncHandler(async (req, res) => {
     user: publicPlayer(req.player),
   });
 }));
-
 app.post("/casino/blackjack/hit", auth, asyncHandler(async (req, res) => {
   if (
     !enforceRateLimit(
@@ -1308,24 +1629,26 @@ app.post("/casino/blackjack/hit", auth, asyncHandler(async (req, res) => {
   }
 
   let responsePayload = null;
-  await commitPlayerMutation(req, "casino-blackjack-hit", async (player) => {
-    const currentSession = player.casino.blackjackSession;
-    const nextCard = drawDeckCard(currentSession.deck);
-    currentSession.playerCards.push(nextCard);
-    const playerValue = getBlackjackHandValue(currentSession.playerCards);
+  await withPlayerActionLock(req, "casino-blackjack-hit", async () => {
+    await commitPlayerMutation(req, "casino-blackjack-hit", async (player) => {
+      const currentSession = player.casino.blackjackSession;
+      const nextCard = drawDeckCard(currentSession.deck);
+      currentSession.playerCards.push(nextCard);
+      const playerValue = getBlackjackHandValue(currentSession.playerCards);
 
-    if (playerValue > 21) {
-      currentSession.stage = "bust";
-      currentSession.message = "Spaliles sie.";
-      player.casino.dailyLoss += currentSession.bet;
-      pushLog(player, "Blackjack: spaliles sie. Kasyno bierze pule.");
-      responsePayload = { resolved: true, result: "loss", totalReturn: 0, net: -currentSession.bet };
+      if (playerValue > 21) {
+        currentSession.stage = "bust";
+        currentSession.message = "Spaliles sie.";
+        player.casino.dailyLoss += currentSession.bet;
+        pushLog(player, "Blackjack: spaliles sie. Kasyno bierze pule.");
+        responsePayload = { resolved: true, result: "loss", totalReturn: 0, net: -currentSession.bet };
+        return null;
+      }
+
+      currentSession.message = "Dobierasz kolejna karte.";
+      responsePayload = { resolved: false, result: "ongoing", totalReturn: 0, net: 0 };
       return null;
-    }
-
-    currentSession.message = "Dobierasz kolejna karte.";
-    responsePayload = { resolved: false, result: "ongoing", totalReturn: 0, net: 0 };
-    return null;
+    });
   });
 
   res.json({
@@ -1335,7 +1658,6 @@ app.post("/casino/blackjack/hit", auth, asyncHandler(async (req, res) => {
     user: publicPlayer(req.player),
   });
 }));
-
 app.post("/casino/blackjack/stand", auth, asyncHandler(async (req, res) => {
   if (
     !enforceRateLimit(
@@ -1356,44 +1678,46 @@ app.post("/casino/blackjack/stand", auth, asyncHandler(async (req, res) => {
   }
 
   let responsePayload = null;
-  await commitPlayerMutation(req, "casino-blackjack-stand", async (player) => {
-    const currentSession = player.casino.blackjackSession;
-    currentSession.stage = "dealer";
-    while (getBlackjackHandValue(currentSession.dealerCards) < 17) {
-      currentSession.dealerCards.push(drawDeckCard(currentSession.deck));
-    }
+  await withPlayerActionLock(req, "casino-blackjack-stand", async () => {
+    await commitPlayerMutation(req, "casino-blackjack-stand", async (player) => {
+      const currentSession = player.casino.blackjackSession;
+      currentSession.stage = "dealer";
+      while (getBlackjackHandValue(currentSession.dealerCards) < 17) {
+        currentSession.dealerCards.push(drawDeckCard(currentSession.deck));
+      }
 
-    const playerValue = getBlackjackHandValue(currentSession.playerCards);
-    const dealerValue = getBlackjackHandValue(currentSession.dealerCards);
-    let totalReturn = 0;
-    let message = "Push. Wrzuta wraca.";
-    let result = "push";
+      const playerValue = getBlackjackHandValue(currentSession.playerCards);
+      const dealerValue = getBlackjackHandValue(currentSession.dealerCards);
+      let totalReturn = 0;
+      let message = "Push. Wrzuta wraca.";
+      let result = "push";
 
-    if (dealerValue > 21 || playerValue > dealerValue) {
-      totalReturn = currentSession.bet * 2;
-      player.stats.casinoWins += 1;
-      player.casino.totalWon += totalReturn;
-      message = "Wygrana. Stolik oddaje dubel.";
-      result = "win";
-    } else if (playerValue === dealerValue) {
-      totalReturn = currentSession.bet;
-    } else {
-      player.casino.dailyLoss += currentSession.bet;
-      message = "Krupier bierze pulę.";
-      result = "loss";
-    }
+      if (dealerValue > 21 || playerValue > dealerValue) {
+        totalReturn = currentSession.bet * 2;
+        player.stats.casinoWins += 1;
+        player.casino.totalWon += totalReturn;
+        message = "Wygrana. Stolik oddaje dubel.";
+        result = "win";
+      } else if (playerValue === dealerValue) {
+        totalReturn = currentSession.bet;
+      } else {
+        player.casino.dailyLoss += currentSession.bet;
+        message = "Krupier bierze pule.";
+        result = "loss";
+      }
 
-    player.profile.cash += totalReturn;
-    currentSession.stage = "done";
-    currentSession.message = message;
-    pushLog(player, `Blackjack: ${message} ${totalReturn ? `Wraca $${totalReturn}.` : ""}`.trim());
-    responsePayload = {
-      resolved: true,
-      result,
-      totalReturn,
-      net: totalReturn - currentSession.bet,
-    };
-    return null;
+      player.profile.cash += totalReturn;
+      currentSession.stage = "done";
+      currentSession.message = message;
+      pushLog(player, `Blackjack: ${message} ${totalReturn ? `Wraca $${totalReturn}.` : ""}`.trim());
+      responsePayload = {
+        resolved: true,
+        result,
+        totalReturn,
+        net: totalReturn - currentSession.bet,
+      };
+      return null;
+    });
   });
 
   res.json({
@@ -1403,24 +1727,12 @@ app.post("/casino/blackjack/stand", auth, asyncHandler(async (req, res) => {
     user: publicPlayer(req.player),
   });
 }));
-
 app.get("/heists", auth, asyncHandler(async (req, res) => {
   await commitPlayerMutation(req, "heists-touch", async () => ({ ok: true }));
   res.json({ heists: HEIST_DEFINITIONS });
 }));
 
 app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
-  if (
-    !enforceRateLimit(
-      req,
-      res,
-      "heist-execute",
-      BACKEND_RULES.rateLimitsMs.heistExecute,
-      "Heist action rate limit active"
-    )
-  ) {
-    return;
-  }
   const heist = getHeistById(req.params.id);
   if (!heist) {
     res.status(404).json({ error: "Heist not found" });
@@ -1431,8 +1743,13 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   const player = req.player;
   syncPlayerState(player, now);
 
+  if (isPlayerJailed(player, now)) {
+    res.status(423).json({ error: "Siedzisz w wiezieniu. Najpierw odsiadka albo kaucja." });
+    return;
+  }
+
   if (player.profile.respect < heist.respect) {
-    res.status(400).json({ error: "Respect too low" });
+    res.status(400).json({ error: `Masz za niski szacunek. Wymagany szacunek: ${heist.respect}` });
     return;
   }
   if (player.profile.energy < heist.energy) {
@@ -1440,36 +1757,35 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  const cooldownRemaining = getHeistCooldownRemaining(player, heist.id, now);
-  if (cooldownRemaining > 0) {
-    res.status(429).json({ error: `Heist cooldown active for ${Math.ceil(cooldownRemaining / 1000)}s` });
-    return;
-  }
-
   const chance = getHeistSuccessChance(player, heist);
-  player.profile.energy -= heist.energy;
-  player.timers.energyUpdatedAt = now;
-  player.stats.heistsDone += 1;
-  player.cooldowns.heists[heist.id] = now + heist.cooldownSeconds * 1000;
 
   if (Math.random() < chance) {
     const gain = randomBetween(heist.reward[0], heist.reward[1]);
-    const respectGain = randomBetween(heist.respectGain[0], heist.respectGain[1]);
-    await commitPlayerMutation(req, "heist-success", async (currentPlayer) => {
-      currentPlayer.profile.cash += gain;
-      currentPlayer.profile.respect += respectGain;
-      currentPlayer.profile.level = getLevelFromRespect(currentPlayer.profile.respect);
-      currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnSuccess, 0, 100);
-      currentPlayer.stats.heistsWon += 1;
-      currentPlayer.stats.totalEarned += gain;
-      pushLog(currentPlayer, `Napad udany: ${heist.name}. Wpada $${gain} i +${respectGain} respektu.`);
-      return null;
+    const xpGain = randomBetween(heist.xpGain[0], heist.xpGain[1]);
+    await withPlayerActionLock(req, `heist:${heist.id}`, async () => {
+      await commitPlayerMutation(req, "heist-success", async (currentPlayer) => {
+        currentPlayer.profile.energy -= heist.energy;
+        currentPlayer.timers.energyUpdatedAt = now;
+        currentPlayer.stats.heistsDone += 1;
+        currentPlayer.profile.cash += gain;
+        const progression = applyXpProgression(
+          { respect: currentPlayer.profile.respect, xp: currentPlayer.profile.xp },
+          xpGain
+        );
+        currentPlayer.profile.respect = progression.respect;
+        currentPlayer.profile.xp = progression.xp;
+        currentPlayer.profile.level = progression.respect;
+        currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnSuccess, 0, 100);
+        currentPlayer.stats.heistsWon += 1;
+        currentPlayer.stats.totalEarned += gain;
+        pushLog(currentPlayer, `Napad udany: ${heist.name}. Wpada $${gain} i +${xpGain} XP.`);
+        return null;
+      });
     });
     res.json({
       result: "success",
       reward: gain,
-      respectGain,
-      cooldownUntil: player.cooldowns.heists[heist.id],
+      xpGain,
       chance,
       user: publicPlayer(player, now),
     });
@@ -1478,19 +1794,38 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
 
   const loss = randomBetween(heist.failCashLoss[0], heist.failCashLoss[1]);
   const damage = randomBetween(heist.hpLoss[0], heist.hpLoss[1]);
-  await commitPlayerMutation(req, "heist-failure", async (currentPlayer) => {
-    currentPlayer.profile.cash = Math.max(0, currentPlayer.profile.cash - loss);
-    currentPlayer.profile.hp = Math.max(1, currentPlayer.profile.hp - damage);
-    currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnFailure, 0, 100);
-    pushLog(currentPlayer, `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ${damage} HP.`);
-    return null;
+  const jailChance = getHeistJailChance(player, heist);
+  const jailed = Math.random() < jailChance;
+  const jailSeconds = jailed ? getHeistJailSentenceSeconds(player, heist) : 0;
+
+  await withPlayerActionLock(req, `heist:${heist.id}`, async () => {
+    await commitPlayerMutation(req, "heist-failure", async (currentPlayer) => {
+      currentPlayer.profile.energy -= heist.energy;
+      currentPlayer.timers.energyUpdatedAt = now;
+      currentPlayer.stats.heistsDone += 1;
+      currentPlayer.profile.cash = Math.max(0, currentPlayer.profile.cash - loss);
+      currentPlayer.profile.hp = Math.max(1, currentPlayer.profile.hp - damage);
+      currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnFailure, 0, 100);
+      if (jailed) {
+        currentPlayer.profile.jailUntil = Math.max(currentPlayer.profile.jailUntil || 0, now + jailSeconds * 1000);
+        pushLog(
+          currentPlayer,
+          `Wtopa na akcji: ${heist.name}. Tracisz $${loss}, ${damage} HP i siadasz na ${Math.ceil(jailSeconds / 60)} min.`
+        );
+      } else {
+        pushLog(currentPlayer, `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ${damage} HP.`);
+      }
+      return null;
+    });
   });
   res.json({
     result: "failure",
     loss,
     damage,
-    cooldownUntil: player.cooldowns.heists[heist.id],
     chance,
+    jailChance,
+    jailed,
+    jailSeconds,
     user: publicPlayer(player, now),
   });
 }));
@@ -1498,17 +1833,18 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
 app.use((error, _req, res, _next) => {
   console.error("[api-error]", error?.message || error);
   if (error?.type === "entity.parse.failed") {
-    res.status(400).json({ error: "Invalid JSON body" });
+    sendError(res, "Invalid JSON body", 400);
     return;
   }
   if (error?.message === "CORS blocked") {
-    res.status(403).json({ error: "CORS blocked" });
+    sendError(res, "CORS blocked", 403);
     return;
   }
-  res.status(error?.statusCode || 500).json({ error: error?.message || "Internal server error" });
+  sendError(res, error?.message || "Internal server error", error?.statusCode || 500);
 });
 
 app.listen(port, host, () => {
   console.log(`Hustle City API listening on ${host}:${port}`);
   console.log(`CORS origins: ${allowedOrigins.length ? allowedOrigins.join(", ") : "all (dev default)"}`);
 });
+

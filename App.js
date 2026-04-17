@@ -16,20 +16,26 @@ import {
 } from "react-native";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import {
   buyProductOnline,
   depositOnline,
   executeHeistOnline,
   fetchCasinoMeta,
+  fetchGlobalChatOnline,
   fetchMarket,
   fetchMe,
+  fetchRankingsOnline,
+  fetchSocialPlayers,
   hitBlackjackOnline,
   loginUser,
   playHighRiskOnline,
+  playSlotOnline,
   previewClubPvpOnline,
   registerUser,
   sellProductOnline,
+  sendGlobalChatMessageOnline,
   startBlackjackOnline,
   standBlackjackOnline,
   syncClientStateOnline,
@@ -37,7 +43,6 @@ import {
 } from "./api";
 import {
   CLUB_FOUNDING_CASH_COST,
-  CLUB_FOUNDING_PREMIUM_COST,
   CLUB_TAKEOVER_COST,
   ENERGY_REGEN_SECONDS,
   HEIST_DEFINITIONS,
@@ -53,6 +58,16 @@ import { CasinoScreen } from "./src/screens/CasinoScreen";
 import { EmpireScreen } from "./src/screens/EmpireScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { CityScreen } from "./src/screens/CityScreen";
+import { HubScreen } from "./src/screens/HubScreen";
+import { ProfileMenuScreen } from "./src/screens/ProfileMenuScreen";
+import { HeistsScreen } from "./src/screens/HeistsScreen";
+import { GameHeader, QuickActionModal, ResultModal } from "./src/components/GameShellUI";
+import { BUSINESSES } from "./src/game/config/businesses";
+import { blockIfOnlineAlpha } from "./src/game/authority";
+import { getGameMode } from "./src/game/modes";
+import { getNextHeistTier } from "./src/game/config/heistTiers";
+import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradePreview, getBusinessUpgradeState } from "./src/game/selectors/businessSelectors";
+import { applyXpProgression } from "./shared/progression.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
 const CLUB_ESCORT_SEARCH_COST = 450;
@@ -61,7 +76,6 @@ const AVATAR_ART = {
   razor: require("./assets/avatars/avatar-razor-face.png"),
   saint: require("./assets/avatars/avatar-saint-face.png"),
   vandal: require("./assets/avatars/avatar-vandal-face.png"),
-  venom: require("./assets/avatars/avatar-venom-face.png"),
   boss: require("./assets/avatars/avatar-boss-face.png"),
 };
 const AVATAR_OPTIONS = [
@@ -69,9 +83,35 @@ const AVATAR_OPTIONS = [
   { id: "razor", name: "Razor", sigil: "RZ", colors: ["#6a2a1d", "#1b0d0a"], image: AVATAR_ART.razor },
   { id: "saint", name: "Saint", sigil: "ST", colors: ["#4b3914", "#171109"], image: AVATAR_ART.saint },
   { id: "vandal", name: "Vandal", sigil: "VN", colors: ["#22463f", "#0d1816"], image: AVATAR_ART.vandal },
-  { id: "venom", name: "Venom", sigil: "VN", colors: ["#243055", "#0a0e19"], image: AVATAR_ART.venom },
   { id: "boss", name: "Boss", sigil: "$$", colors: ["#5a4b1f", "#171308"], image: AVATAR_ART.boss },
 ];
+
+const TAB_SIGILS = {
+  start: "¦",
+  heists: "?",
+  empire: "?",
+  market: "?",
+  gang: "?",
+  profile: "?",
+  solo: "?",
+  fightclub: "?",
+  cell: "?",
+  businesses: "?",
+  factories: "?",
+  supply: "?",
+  overview: "¦",
+  heistsGang: "?",
+  members: "?",
+  chat: "?",
+  actions: "?",
+  summary: "?",
+  rank: "?",
+  security: "?",
+  log: "?",
+  street: "?",
+  drugs: "?",
+  boosts: "?",
+};
 
 const CHARACTER_ARCHETYPES = [
   {
@@ -79,50 +119,36 @@ const CHARACTER_ARCHETYPES = [
     name: "Pimp",
     sigil: "PM",
     bonus: "Lepszy klub, kontakty i lekki bonus do zarobku z nocy.",
-    starter: { respect: 4, attack: 7, defense: 7, dexterity: 8, charisma: 12, energy: 13, hp: 98, cash: 5000000, bank: 250000 },
+    starter: { respect: 1, attack: 7, defense: 7, dexterity: 8, charisma: 12, energy: 13, hp: 98, cash: 5000, bank: 10000 },
   },
   {
     id: "fighter",
     name: "Fighter",
     sigil: "FT",
     bonus: "Mocniejszy start do atakow, fightclubu i napadow na grubo.",
-    starter: { respect: 3, attack: 12, defense: 10, dexterity: 7, charisma: 5, energy: 14, hp: 108, cash: 5000000, bank: 250000 },
+    starter: { respect: 1, attack: 12, defense: 10, dexterity: 7, charisma: 5, energy: 14, hp: 108, cash: 5000, bank: 10000 },
   },
   {
     id: "runner",
     name: "Runner",
     sigil: "RN",
     bonus: "Wysoka zrecznosc i czystsze wejscie/wyjscie z akcji.",
-    starter: { respect: 3, attack: 8, defense: 7, dexterity: 13, charisma: 6, energy: 15, hp: 100, cash: 5000000, bank: 250000 },
+    starter: { respect: 1, attack: 8, defense: 7, dexterity: 13, charisma: 6, energy: 15, hp: 100, cash: 5000, bank: 10000 },
   },
   {
     id: "broker",
     name: "Broker",
     sigil: "BR",
     bonus: "Lepszy start pod handel, bank i ekonomie zaplecza.",
-    starter: { respect: 5, attack: 6, defense: 6, dexterity: 8, charisma: 10, energy: 13, hp: 96, cash: 5000000, bank: 250000 },
+    starter: { respect: 1, attack: 6, defense: 6, dexterity: 8, charisma: 10, energy: 13, hp: 96, cash: 5000, bank: 10000 },
   },
 ];
 
-const PREMIUM_PACKAGES = [
-  { id: "starter", name: "Starter Pack", tokens: 5, bonus: "Avatar frame i szybki refill energii", priceLabel: "9,99 zl" },
-  { id: "crew", name: "Crew Pack", tokens: 12, bonus: "Gang, rename i zapas premium uslug", priceLabel: "19,99 zl" },
-  { id: "boss", name: "Boss Pack", tokens: 30, bonus: "Duzy zapas tokenow pod uslugi i eventy", priceLabel: "39,99 zl" },
-];
-
-const PREMIUM_SERVICES = [
-  { id: "rename", name: "Zmiana nicku / avatara", cost: 1, description: "Edycja tozsamosci po starcie gry." },
-  { id: "archetype", name: "Zmiana archetypu", cost: 2, description: "Respec postaci na nowy styl gry." },
-  { id: "refill", name: "Pelna energia", cost: 1, description: "Natychmiastowe doladowanie paska energii." },
-  { id: "jailpass", name: "Karta wyjscia z celi", cost: 1, description: "Natychmiastowy reset odsiadki." },
-  { id: "gang", name: "Zalozenie gangu", cost: 2, description: "Premium wejscie w zalozenie wlasnej organizacji." },
-];
-
 const REFERRAL_MILESTONES = [
-  { id: "ref-1", verified: 1, rewardCash: 5000, rewardPremium: 1, rewardRespect: 0 },
-  { id: "ref-3", verified: 3, rewardCash: 18000, rewardPremium: 2, rewardRespect: 1 },
-  { id: "ref-5", verified: 5, rewardCash: 42000, rewardPremium: 4, rewardRespect: 2 },
-  { id: "ref-10", verified: 10, rewardCash: 125000, rewardPremium: 8, rewardRespect: 4 },
+  { id: "ref-1", verified: 1, rewardCash: 10000, rewardXp: 0 },
+  { id: "ref-3", verified: 3, rewardCash: 30000, rewardXp: 8 },
+  { id: "ref-5", verified: 5, rewardCash: 70000, rewardXp: 14 },
+  { id: "ref-10", verified: 10, rewardCash: 180000, rewardXp: 22 },
 ];
 
 const CLUB_MARKET = [
@@ -139,15 +165,6 @@ const GANG_HEISTS = [
   { id: "port", name: "Kontener w porcie", respect: 30, minMembers: 8, reward: [36000, 54000], risk: 0.49, energy: 5 },
   { id: "armory", name: "Sklad wojskowy", respect: 42, minMembers: 12, reward: [65000, 98000], risk: 0.59, energy: 6 },
   { id: "mint", name: "Miejska mennica", respect: 58, minMembers: 18, reward: [120000, 170000], risk: 0.68, energy: 7 },
-];
-
-const BUSINESSES = [
-  { id: "bar", name: "Bar na zapleczu", respect: 4, cost: 12000, incomePerMinute: 110, kind: "lokal" },
-  { id: "club", name: "Klub nocny", respect: 10, cost: 42000, incomePerMinute: 290, kind: "lokal" },
-  { id: "garage", name: "Warsztat chop-shop", respect: 15, cost: 78000, incomePerMinute: 540, kind: "przykrywka" },
-  { id: "pilllab", name: "Mini fabryka tabletek", respect: 22, cost: 145000, incomePerMinute: 930, kind: "fabryka" },
-  { id: "brew", name: "Destylarnia zaplecza", respect: 30, cost: 240000, incomePerMinute: 1450, kind: "fabryka" },
-  { id: "tower", name: "Siec lokali premium", respect: 42, cost: 420000, incomePerMinute: 2550, kind: "imperium" },
 ];
 
 const ESCORTS = [
@@ -202,15 +219,15 @@ const SUPPLIERS = [
 ];
 
 const FACTORIES = [
-  { id: "smokeworks", name: "Fabryka fajek", respect: 4, cost: 80000, text: "Tani, szybki towar na poczatek i pod lokalne bary.", unlocks: ["smokes"] },
-  { id: "distillery", name: "Destylarnia spirytusu", respect: 6, cost: 125000, text: "Spirytus schodzi zawsze, ale wymaga zaplecza i butelek.", unlocks: ["spirit"] },
-  { id: "wetlab", name: "Wet Lab GBL", respect: 10, cost: 240000, text: "Chemia klubowa i szybki zarobek przy dobrym ruchu.", unlocks: ["gbl"] },
-  { id: "greenhouse", name: "Szklarnie botaniczne", respect: 14, cost: 450000, text: "Salvia, grzybki, hasz i marihuana dla stalych klientow.", unlocks: ["salvia", "shrooms", "hash", "weed"] },
-  { id: "powderlab", name: "Laboratorium proszkow", respect: 22, cost: 820000, text: "Amfetamina i rohypnol, czyli mocniejszy towar z wiekszym ryzykiem.", unlocks: ["amphetamine", "rohypnol"] },
-  { id: "poppyworks", name: "Zaklad opium i heroiny", respect: 30, cost: 1250000, text: "Ciezki zarobek, ciezkie ryzyko i bardzo mocny towar.", unlocks: ["opium", "heroin"] },
-  { id: "cartelrefinery", name: "Rafineria kokainy", respect: 36, cost: 1800000, text: "Kokaina daje wielkie pieniadze, ale wymaga solidnego lancucha dostaw.", unlocks: ["cocaine"] },
-  { id: "acidlab", name: "Acid Lab", respect: 44, cost: 2550000, text: "Produkcja LSD pod najbardziej odklejonych klientow miasta.", unlocks: ["lsd"] },
-  { id: "designerlab", name: "Designer Lab", respect: 52, cost: 3600000, text: "Extasy i meskalina dla topowego rynku i najbogatszych ekip.", unlocks: ["ecstasy", "mescaline"] },
+  { id: "smokeworks", name: "Fabryka fajek", respect: 8, cost: 80000, text: "Tani, szybki towar na poczatek i pod lokalne bary.", unlocks: ["smokes"] },
+  { id: "distillery", name: "Destylarnia spirytusu", respect: 12, cost: 125000, text: "Spirytus schodzi zawsze, ale wymaga zaplecza i butelek.", unlocks: ["spirit"] },
+  { id: "wetlab", name: "Wet Lab GBL", respect: 16, cost: 240000, text: "Chemia klubowa i szybki zarobek przy dobrym ruchu.", unlocks: ["gbl"] },
+  { id: "greenhouse", name: "Szklarnie botaniczne", respect: 20, cost: 450000, text: "Salvia, grzybki, hasz i marihuana dla stalych klientow.", unlocks: ["salvia", "shrooms", "hash", "weed"] },
+  { id: "powderlab", name: "Laboratorium proszkow", respect: 25, cost: 820000, text: "Amfetamina i rohypnol, czyli mocniejszy towar z wiekszym ryzykiem.", unlocks: ["amphetamine", "rohypnol"] },
+  { id: "poppyworks", name: "Zaklad opium i heroiny", respect: 25, cost: 1250000, text: "Ciezki zarobek, ciezkie ryzyko i bardzo mocny towar.", unlocks: ["opium", "heroin"] },
+  { id: "cartelrefinery", name: "Rafineria kokainy", respect: 25, cost: 1800000, text: "Kokaina daje wielkie pieniadze, ale wymaga solidnego lancucha dostaw.", unlocks: ["cocaine"] },
+  { id: "acidlab", name: "Acid Lab", respect: 25, cost: 2550000, text: "Produkcja LSD pod najbardziej odklejonych klientow miasta.", unlocks: ["lsd"] },
+  { id: "designerlab", name: "Designer Lab", respect: 25, cost: 3600000, text: "Extasy i meskalina dla topowego rynku i najbogatszych ekip.", unlocks: ["ecstasy", "mescaline"] },
 ];
 
 const RESTAURANT_ITEMS = [
@@ -328,66 +345,72 @@ const SUPPLIER_VISUALS = {
 };
 
 const DRUG_VISUALS = {
-  smokes: { emoji: "🚬", code: "FK", colors: ["#6a5540", "#231a12"] },
-  spirit: { emoji: "🥃", code: "SP", colors: ["#7b5529", "#261709"] },
-  gbl: { emoji: "🧪", code: "GB", colors: ["#32696b", "#0f2021"] },
-  salvia: { emoji: "🍃", code: "SV", colors: ["#3a7841", "#102313"] },
-  shrooms: { emoji: "🍄", code: "GR", colors: ["#8a4435", "#2a120d"] },
-  hash: { emoji: "🌿", code: "HS", colors: ["#55763b", "#162010"] },
-  weed: { emoji: "🌱", code: "MJ", colors: ["#4d9d55", "#132715"] },
-  amphetamine: { emoji: "⚡", code: "AM", colors: ["#8a7136", "#2b210d"] },
-  opium: { emoji: "🌺", code: "OP", colors: ["#8f4d62", "#251018"] },
-  rohypnol: { emoji: "💊", code: "RH", colors: ["#6273af", "#161c34"] },
-  cocaine: { emoji: "❄️", code: "KK", colors: ["#8eb4c7", "#17313b"] },
-  heroin: { emoji: "💉", code: "HR", colors: ["#88545f", "#2d1419"] },
-  lsd: { emoji: "🌀", code: "LSD", colors: ["#6a57a8", "#1c1431"] },
-  ecstasy: { emoji: "💿", code: "EX", colors: ["#b86297", "#351125"] },
-  mescaline: { emoji: "🌵", code: "MS", colors: ["#5c8f54", "#182716"] },
+  smokes: { icon: "smoking", code: "FK", colors: ["#6a5540", "#231a12"], image: require("./assets/drug-icons/smokes.png") },
+  spirit: { icon: "glass-cocktail", code: "SP", colors: ["#7b5529", "#261709"], image: require("./assets/drug-icons/spirit.png") },
+  gbl: { icon: "flask-round-bottom", code: "GB", colors: ["#32696b", "#0f2021"], image: require("./assets/drug-icons/gbl.png") },
+  salvia: { icon: "leaf", code: "SV", colors: ["#3a7841", "#102313"], image: require("./assets/drug-icons/salvia.png") },
+  shrooms: { icon: "mushroom", code: "GR", colors: ["#8a4435", "#2a120d"], image: require("./assets/drug-icons/shrooms.png") },
+  hash: { icon: "cube-outline", code: "HS", colors: ["#55763b", "#162010"], image: require("./assets/drug-icons/hash.png") },
+  weed: { icon: "cannabis", code: "MJ", colors: ["#4d9d55", "#132715"], image: require("./assets/drug-icons/weed.png") },
+  amphetamine: { icon: "pill", code: "AM", colors: ["#8a7136", "#2b210d"], image: require("./assets/drug-icons/amphetamine.png") },
+  opium: { icon: "flower", code: "OP", colors: ["#8f4d62", "#251018"], image: require("./assets/drug-icons/opium.png") },
+  rohypnol: { icon: "pill-multiple", code: "RH", colors: ["#6273af", "#161c34"], image: require("./assets/drug-icons/rohypnol.png") },
+  cocaine: { icon: "google-circles-communities", code: "KK", colors: ["#8eb4c7", "#17313b"], image: require("./assets/drug-icons/cocaine.png") },
+  heroin: { icon: "needle", code: "HR", colors: ["#88545f", "#2d1419"], image: require("./assets/drug-icons/heroin.png") },
+  lsd: { icon: "star-four-points", code: "LSD", colors: ["#6a57a8", "#1c1431"], image: require("./assets/drug-icons/lsd.png") },
+  ecstasy: { icon: "heart-circle", code: "EX", colors: ["#b86297", "#351125"], image: require("./assets/drug-icons/ecstasy.png") },
+  mescaline: { icon: "cactus", code: "MS", colors: ["#5c8f54", "#182716"], image: require("./assets/drug-icons/mescaline.png") },
 };
 
 const BUSINESS_VISUALS = {
-  bar: { emoji: "🍺", code: "BAR", colors: ["#8b6329", "#251708"] },
-  club: { emoji: "🎧", code: "VIP", colors: ["#7c315e", "#240d1c"], image: UI_ICON_ART.club },
-  garage: { emoji: "🔧", code: "GAR", colors: ["#66727d", "#1a1f24"] },
-  pilllab: { emoji: "💊", code: "LAB", colors: ["#6579af", "#171b35"] },
-  brew: { emoji: "🥃", code: "DST", colors: ["#93622f", "#261607"] },
-  tower: { emoji: "🏙️", code: "IMP", colors: ["#51637c", "#121820"], image: UI_ICON_ART.cash },
+  bar: { icon: "glass-mug-variant", code: "BAR", colors: ["#8b6329", "#251708"] },
+  club: { icon: "party-popper", code: "VIP", colors: ["#7c315e", "#240d1c"], image: UI_ICON_ART.club },
+  laundry: { icon: "washing-machine", code: "PRA", colors: ["#3d6f8e", "#0f1d28"] },
+  cleaning: { icon: "spray-bottle", code: "SPR", colors: ["#2c7d72", "#0a1d1a"] },
+  travel: { icon: "airplane", code: "POD", colors: ["#3b5f8e", "#101927"] },
+  school: { icon: "translate", code: "JZK", colors: ["#56763d", "#111b0c"] },
+  cinema: { icon: "movie-open", code: "KIN", colors: ["#7b2f2f", "#200b0b"] },
+  garage: { icon: "car-wrench", code: "GAR", colors: ["#66727d", "#1a1f24"] },
+  furniture: { icon: "sofa", code: "MBL", colors: ["#7c5d3f", "#1f150e"] },
+  pilllab: { icon: "pill-multiple", code: "LAB", colors: ["#6579af", "#171b35"] },
+  brew: { icon: "barrel", code: "DST", colors: ["#93622f", "#261607"] },
+  tower: { icon: "office-building", code: "IMP", colors: ["#51637c", "#121820"], image: UI_ICON_ART.cash },
 };
 
 const ESCORT_VISUALS = {
-  corner: { emoji: "💋", code: "UL", colors: ["#934050", "#280d15"], image: ESCORT_ART.corner },
-  velvet: { emoji: "👠", code: "VIP", colors: ["#a2557d", "#32111f"], image: ESCORT_ART.velvet },
-  vip: { emoji: "💎", code: "LUX", colors: ["#b57c34", "#2e1a08"], image: ESCORT_ART.vip },
+  corner: { emoji: "??", code: "UL", colors: ["#934050", "#280d15"], image: ESCORT_ART.corner },
+  velvet: { emoji: "??", code: "VIP", colors: ["#a2557d", "#32111f"], image: ESCORT_ART.velvet },
+  vip: { emoji: "??", code: "LUX", colors: ["#b57c34", "#2e1a08"], image: ESCORT_ART.vip },
 };
 
 const GANG_VISUALS = {
-  "Grey Saints": { emoji: "✝️", code: "GS", colors: ["#6f6f74", "#141418"], image: GANG_ART.greySaints },
-  "Cold Avenue": { emoji: "🚘", code: "CA", colors: ["#4d6f94", "#10161f"], image: GANG_ART.coldAvenue },
-  "Night Vultures": { emoji: "🦅", code: "NV", colors: ["#8b5439", "#1b0d09"], image: GANG_ART.nightVultures },
-  "Velvet Ash": { emoji: "♠️", code: "VA", colors: ["#98577d", "#1b0d16"], image: GANG_ART.velvetAsh },
-  default: { emoji: "👥", code: "HC", colors: ["#7e5f2b", "#1a1208"], image: GANG_ART.default },
+  "Grey Saints": { icon: "shield-crown", code: "GS", colors: ["#6f6f74", "#141418"], image: GANG_ART.greySaints },
+  "Cold Avenue": { icon: "shield-crown", code: "CA", colors: ["#4d6f94", "#10161f"], image: GANG_ART.coldAvenue },
+  "Night Vultures": { icon: "shield-crown", code: "NV", colors: ["#8b5439", "#1b0d09"], image: GANG_ART.nightVultures },
+  "Velvet Ash": { icon: "shield-crown", code: "VA", colors: ["#98577d", "#1b0d16"], image: GANG_ART.velvetAsh },
+  default: { icon: "shield-crown", code: "HC", colors: ["#7e5f2b", "#1a1208"], image: GANG_ART.default },
 };
 
 const FACTORY_VISUALS = {
-  smokeworks: { emoji: "🚬", code: "FK", colors: ["#6a5540", "#231a12"] },
-  distillery: { emoji: "🥃", code: "SP", colors: ["#7b5529", "#261709"] },
-  wetlab: { emoji: "🧪", code: "GBL", colors: ["#32696b", "#0f2021"] },
-  greenhouse: { emoji: "🌿", code: "BOT", colors: ["#3f7f42", "#112113"] },
-  powderlab: { emoji: "⚗️", code: "PDR", colors: ["#80704e", "#211b10"] },
-  poppyworks: { emoji: "🌺", code: "OP", colors: ["#8f4d62", "#251018"] },
-  cartelrefinery: { emoji: "❄️", code: "KK", colors: ["#8eb4c7", "#17313b"] },
-  acidlab: { emoji: "🌀", code: "LSD", colors: ["#6a57a8", "#1c1431"] },
-  designerlab: { emoji: "💿", code: "DSN", colors: ["#b86297", "#351125"] },
+  smokeworks: { icon: "factory", code: "FK", colors: ["#6a5540", "#231a12"], image: require("./assets/factory-icons/smokeworks.png") },
+  distillery: { icon: "factory", code: "SP", colors: ["#7b5529", "#261709"], image: require("./assets/factory-icons/distillery.png") },
+  wetlab: { icon: "flask", code: "GBL", colors: ["#32696b", "#0f2021"], image: require("./assets/factory-icons/wetlab.png") },
+  greenhouse: { icon: "greenhouse", code: "BOT", colors: ["#3f7f42", "#112113"], image: require("./assets/factory-icons/greenhouse.png") },
+  powderlab: { icon: "beaker", code: "PDR", colors: ["#80704e", "#211b10"], image: require("./assets/factory-icons/powderlab.png") },
+  poppyworks: { icon: "flower-tulip", code: "OP", colors: ["#8f4d62", "#251018"], image: require("./assets/factory-icons/poppyworks.png") },
+  cartelrefinery: { icon: "factory", code: "KK", colors: ["#8eb4c7", "#17313b"], image: require("./assets/factory-icons/cartelrefinery.png") },
+  acidlab: { icon: "flask-round-bottom", code: "LSD", colors: ["#6a57a8", "#1c1431"], image: require("./assets/factory-icons/acidlab.png") },
+  designerlab: { icon: "palette", code: "DSN", colors: ["#b86297", "#351125"], image: require("./assets/factory-icons/designerlab.png") },
 };
 
 const PRODUCT_VISUALS = {
-  smoke: { emoji: "📦", code: "SM", colors: ["#6a5540", "#231a12"] },
-  spirytus: { emoji: "🥃", code: "AL", colors: ["#7b5529", "#261709"] },
-  weed: { emoji: "🌿", code: "WE", colors: ["#4d9d55", "#132715"] },
-  speed: { emoji: "⚡", code: "SP", colors: ["#8a7136", "#2b210d"] },
-  oxy: { emoji: "💊", code: "OX", colors: ["#6273af", "#161c34"] },
-  coke: { emoji: "❄️", code: "CK", colors: ["#8eb4c7", "#17313b"] },
-  crystal: { emoji: "💠", code: "CR", colors: ["#5a80ad", "#13203a"] },
+  smoke: { icon: "smoking", code: "SM", colors: ["#6a5540", "#231a12"], image: require("./assets/drug-icons/smokes.png") },
+  spirytus: { icon: "glass-cocktail", code: "AL", colors: ["#7b5529", "#261709"], image: require("./assets/drug-icons/spirit.png") },
+  weed: { icon: "cannabis", code: "WE", colors: ["#4d9d55", "#132715"], image: require("./assets/drug-icons/weed.png") },
+  speed: { icon: "pill", code: "SP", colors: ["#8a7136", "#2b210d"], image: require("./assets/drug-icons/amphetamine.png") },
+  oxy: { icon: "pill-multiple", code: "OX", colors: ["#6273af", "#161c34"], image: require("./assets/drug-icons/rohypnol.png") },
+  coke: { icon: "google-circles-communities", code: "CK", colors: ["#8eb4c7", "#17313b"], image: require("./assets/drug-icons/cocaine.png") },
+  crystal: { icon: "diamond-stone", code: "CR", colors: ["#5a80ad", "#13203a"], image: require("./assets/drug-icons/gbl.png") },
 };
 
 const WORLD_PLAYERS = [
@@ -459,14 +482,33 @@ const WORLD_GANGS = [
 ];
 
 const TAB_DEFINITIONS = [
-  { id: "city", label: "Miasto", sections: [{ id: "dashboard", label: "Start", title: "Miasto" }, { id: "tasks", label: "Misje", title: "Zadania" }, { id: "bank", label: "Bank", title: "Bank" }, { id: "gym", label: "Silka", title: "Silownia" }, { id: "restaurant", label: "Jedzenie", title: "Restauracja" }, { id: "hospital", label: "Medyk", title: "Szpital" }, { id: "casino", label: "Kasyno", title: "Kasyno" }] },
-  { id: "heists", label: "Akcje", sections: [{ id: "solo", label: "Solo", title: "Napady" }, { id: "gang", label: "Ekipa", title: "Napady gangu" }, { id: "fightclub", label: "Fight", title: "Fightclub" }, { id: "prison", label: "Cela", title: "Wiezienie" }] },
-  { id: "empire", label: "Biznes", sections: [{ id: "businesses", label: "Cash", title: "Biznesy" }, { id: "factories", label: "Fabryki", title: "Fabryki" }, { id: "suppliers", label: "Dostawy", title: "Hurtownie" }, { id: "club", label: "Klub", title: "Klub" }] },
+  { id: "heists", label: "Napady", sections: [{ id: "solo", label: "Solo", title: "Napady" }, { id: "fightclub", label: "Fight", title: "Fightclub" }, { id: "prison", label: "Cela", title: "Wiezienie" }] },
+  { id: "empire", label: "Biznes", sections: [{ id: "businesses", label: "Biznesy", title: "Biznesy" }, { id: "factories", label: "Fabryki", title: "Fabryki" }, { id: "suppliers", label: "Dostawy", title: "Hurtownie" }, { id: "club", label: "Klub", title: "Klub" }] },
   { id: "market", label: "Rynek", sections: [{ id: "street", label: "Handel", title: "Handel" }, { id: "drugs", label: "Towar", title: "Narkotyki" }, { id: "boosts", label: "Boosty", title: "Boosty" }] },
-  { id: "gang", label: "Gang", sections: [{ id: "overview", label: "Gang", title: "Gang" }, { id: "members", label: "Sklad", title: "Czlonkowie" }, { id: "chat", label: "Chat", title: "Chat gangu" }, { id: "ops", label: "Akcje", title: "Operacje" }] },
-  { id: "online", label: "Social", sections: [{ id: "players", label: "Ludzie", title: "Gracze" }, { id: "friends", label: "Znajomi", title: "Znajomi" }, { id: "messages", label: "Msg", title: "Wiadomosci" }, { id: "rankings", label: "Top", title: "Rankingi" }] },
-  { id: "premium", label: "Sklep", sections: [{ id: "shop", label: "Sklep", title: "Mikroplatnosci" }, { id: "services", label: "Uslugi", title: "Uslugi premium" }, { id: "referrals", label: "Polecaj", title: "Program polecen" }] },
-  { id: "profile", label: "Profil", sections: [{ id: "summary", label: "Profil", title: "Profil" }, { id: "progress", label: "Ranga", title: "Szacun" }, { id: "protection", label: "Ochrona", title: "Ochrona" }, { id: "log", label: "Log", title: "Log wydarzen" }] },
+  { id: "gang", label: "Gang", sections: [{ id: "overview", label: "Gang", title: "Gang" }, { id: "heists", label: "Napady", title: "Napady gangu" }, { id: "members", label: "Sklad", title: "Czlonkowie" }, { id: "chat", label: "Chat", title: "Chat gangu" }, { id: "ops", label: "Akcje", title: "Operacje" }] },
+  {
+    id: "profile",
+    label: "Postac",
+    sections: [
+      { id: "summary", label: "Profil", title: "Profil" },
+      { id: "progress", label: "Ranga", title: "Szacun" },
+      { id: "protection", label: "Ochrona", title: "Ochrona" },
+      { id: "log", label: "Log", title: "Log wydarzen" },
+      { id: "utilities", label: "Narzedzia", title: "Narzedzia", hidden: true },
+      { id: "community", label: "Kontakt", title: "Spolecznosc", hidden: true },
+      { id: "casino", label: "Kasyno", title: "Kasyno", hidden: true },
+      { id: "tasks", label: "Misje", title: "Zadania", hidden: true },
+      { id: "bank", label: "Bank", title: "Bank", hidden: true },
+      { id: "gym", label: "Silownia", title: "Silownia", hidden: true },
+      { id: "restaurant", label: "Jedzenie", title: "Restauracja", hidden: true },
+      { id: "hospital", label: "Szpital", title: "Szpital", hidden: true },
+      { id: "players", label: "Gracze", title: "Gracze", hidden: true },
+      { id: "friends", label: "Znajomi", title: "Znajomi", hidden: true },
+      { id: "messages", label: "Wiadomosci", title: "Wiadomosci", hidden: true },
+      { id: "citychat", label: "Miasto", title: "Chat miasta", hidden: true },
+      { id: "rankings", label: "Rankingi", title: "Rankingi", hidden: true },
+    ],
+  },
 ];
 
 const DEFAULT_SECTIONS = TAB_DEFINITIONS.reduce((acc, tab) => {
@@ -479,15 +521,16 @@ const INITIAL = {
     name: "Vin Blaze",
     avatarId: "ghost",
     avatarCustomUri: null,
-    rank: "Mlody wilk",
-    cash: 5000000,
-    bank: 250000,
-    premiumTokens: 3,
+    rank: "Swiezak",
+    cash: 5000,
+    bank: 10000,
+    premiumTokens: 0,
     energy: 14,
     maxEnergy: 14,
     hp: 100,
     maxHp: 100,
-    respect: 7,
+    respect: 1,
+    xp: 0,
     attack: 11,
     defense: 8,
     dexterity: 7,
@@ -508,7 +551,7 @@ const INITIAL = {
     influence: 0,
     vault: 0,
     inviteRespectMin: 15,
-    createCost: 2,
+    createCost: 250000,
     chat: [],
     lastTributeAt: 0,
     gearScore: 62,
@@ -521,6 +564,7 @@ const INITIAL = {
     ],
   },
   businessesOwned: [],
+  businessUpgrades: {},
   escortsOwned: [],
   factoriesOwned: {},
   factoryState: {
@@ -584,7 +628,7 @@ const INITIAL = {
   lastTick: Date.now(),
   log: [
     "Hustle City wrze. Lokalne ekipy testuja kazdy nowy ruch na dzielni.",
-    "Potrzebujesz szacunu, hajsu i zaplecza, zeby wejsc na wyzszy poziom.",
+    "Potrzebujesz szacunu, hajsu i zaplecza, zeby wejsc na wyzszy prog szacunku.",
   ],
   prisonChat: [
     { id: "pr-1", author: "Bolo", text: "Kto ma kontakt na szybsza kaucje?", time: "13:58" },
@@ -594,6 +638,9 @@ const INITIAL = {
     roster: [],
     selectedPlayerId: null,
     selectedGangId: null,
+    cityChat: [
+      { id: "city-1", author: "System", text: "Chat miasta zyje. Tutaj zgadujesz sie z ludzmi na akcje i handel.", time: "14:18" },
+    ],
     friends: [],
     messages: [
       { id: "msg-1", from: "System", subject: "Miasto patrzy", preview: "Jak ludzie wejda online, tu poleca wiadomosci i ruch na miescie.", time: "14:22" },
@@ -702,13 +749,6 @@ function normalizeMarketPayload(payload, fallbackMarket, fallbackState, fallback
 function getGangVisual(name) {
   if (!name || name === "No gang") return GANG_VISUALS.default;
   return GANG_VISUALS[name] || GANG_VISUALS.default;
-}
-
-function getBusinessIncomePerMinute(state) {
-  return state.businessesOwned.reduce((sum, owned) => {
-    const business = BUSINESSES.find((entry) => entry.id === owned.id);
-    return sum + (business ? business.incomePerMinute * owned.count : 0);
-  }, 0);
 }
 
 function getEscortIncomePerMinute(state) {
@@ -996,13 +1036,17 @@ function getGangHeistOdds(player, effectivePlayer, gang, heist) {
   return { chance };
 }
 
+function getGangHeistBonusRate(gang) {
+  return clamp(gang.members * 0.01 + gang.influence * 0.004, 0, 0.24);
+}
+
 function getTaskStates(game) {
   const tasks = [
-    { id: "gym-pass", title: "Wejdz na silownie", description: "Kup dowolny karnet na silownie.", completed: hasGymPass(game.player), rewardCash: 500, rewardRespect: 2 },
-    { id: "first-wave", title: "Pierwsza fala napadow", description: "Wykonaj 3 napady.", completed: game.stats.heistsDone >= 3, rewardCash: 900, rewardRespect: 2 },
-    { id: "crew", title: "Rozbuduj ekipe", description: "Miej przynajmniej 6 ludzi w gangu.", completed: game.gang.members >= 6, rewardCash: 1300, rewardRespect: 3 },
-    { id: "lab", title: "Odpal pierwsza partie", description: "Wyprodukuj 2 partie dragow.", completed: game.stats.drugBatches >= 2, rewardCash: 2000, rewardRespect: 4 },
-    { id: "club", title: "Otworz klub", description: "Przejmij lub otworz swoj klub.", completed: game.club.owned, rewardCash: 3000, rewardRespect: 4 },
+    { id: "gym-pass", title: "Wejdz na silownie", description: "Kup dowolny karnet na silownie.", completed: hasGymPass(game.player), rewardCash: 500, rewardXp: 6 },
+    { id: "first-wave", title: "Pierwsza fala napadow", description: "Wykonaj 3 napady.", completed: game.stats.heistsDone >= 3, rewardCash: 900, rewardXp: 7 },
+    { id: "crew", title: "Rozbuduj ekipe", description: "Miej przynajmniej 6 ludzi w gangu.", completed: game.gang.members >= 6, rewardCash: 1300, rewardXp: 9 },
+    { id: "lab", title: "Odpal pierwsza partie", description: "Wyprodukuj 2 partie dragow.", completed: game.stats.drugBatches >= 2, rewardCash: 2000, rewardXp: 10 },
+    { id: "club", title: "Otworz klub", description: "Przejmij lub otworz swoj klub.", completed: game.club.owned, rewardCash: 3000, rewardXp: 12 },
   ];
 
   return tasks.map((task) => ({ ...task, claimed: game.tasksClaimed.includes(task.id) }));
@@ -1097,6 +1141,7 @@ function Tag({ text, warning }) {
 }
 
 function SceneArtwork({ eyebrow, title, lines, accent = ["#3a2919", "#120d09", "#050505"], source }) {
+  const summaryLine = Array.isArray(lines) && lines.length ? lines[0] : null;
   return (
     <View style={styles.sceneArtwork}>
       {source ? (
@@ -1105,20 +1150,16 @@ function SceneArtwork({ eyebrow, title, lines, accent = ["#3a2919", "#120d09", "
         <LinearGradient colors={accent} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sceneArtworkBackdrop} />
       )}
       <LinearGradient colors={["rgba(0,0,0,0.12)", "rgba(0,0,0,0.56)", "rgba(0,0,0,0.9)"]} start={{ x: 0.2, y: 0 }} end={{ x: 0.7, y: 1 }} style={styles.sceneArtworkTint} />
-      <View style={styles.sceneGlow} />
-      <View style={styles.sceneBars}>
-        {[44, 82, 58, 116, 72, 94, 52].map((height, index) => (
-          <View key={`${title}-${index}`} style={[styles.sceneBar, { height }]} />
-        ))}
-      </View>
       <View style={styles.sceneCopy}>
-        <Text style={styles.sceneEyebrow}>{eyebrow}</Text>
-        <Text style={styles.sceneTitle}>{title}</Text>
-        {lines.map((line, index) => (
-          <Text key={`${title}-line-${index}`} style={styles.sceneLine}>
-            {line}
+        {eyebrow ? <Text style={styles.sceneEyebrow} numberOfLines={1}>{eyebrow}</Text> : null}
+        <Text style={styles.sceneTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {summaryLine ? (
+          <Text style={styles.sceneLine} numberOfLines={1}>
+            {summaryLine}
           </Text>
-        ))}
+        ) : null}
       </View>
     </View>
   );
@@ -1142,7 +1183,7 @@ function PlayingCard({ card, hidden }) {
 }
 
 function EntityBadge({ visual, large }) {
-  const safeVisual = visual || { emoji: "⬛", code: "HC", colors: ["#3a3a3a", "#111111"] };
+  const safeVisual = visual || { icon: "shield-outline", code: "HC", colors: ["#3a3a3a", "#111111"] };
   return (
     <LinearGradient colors={safeVisual.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.entityBadge, large && styles.entityBadgeLarge]}>
       <View style={styles.entityBadgeGlow} />
@@ -1153,7 +1194,11 @@ function EntityBadge({ visual, large }) {
         </>
       ) : (
         <View style={styles.entityEmojiWrap}>
-          <Text style={[styles.entityEmoji, large && styles.entityEmojiLarge]}>{safeVisual.emoji}</Text>
+          {safeVisual.icon ? (
+            <MaterialCommunityIcons name={safeVisual.icon} size={large ? 30 : 24} color="#f0c75a" />
+          ) : (
+            <Text style={[styles.entityEmoji, large && styles.entityEmojiLarge]}>{safeVisual.emoji || "•"}</Text>
+          )}
         </View>
       )}
       <View style={styles.entityCodePill}>
@@ -1281,20 +1326,23 @@ class AppStartupBoundary extends React.Component {
 
 function AppRuntime() {
   const [game, setGame] = useState(INITIAL);
-  const [tab, setTab] = useState("city");
+  const [tab, setTab] = useState("heists");
+  const [isHubActive, setIsHubActive] = useState(true);
   const [sectionByTab, setSectionByTab] = useState(DEFAULT_SECTIONS);
   const [sessionToken, setSessionToken] = useState(null);
   const [apiStatus, setApiStatus] = useState("offline");
+  const gameMode = getGameMode({ sessionToken, apiStatus });
   const [authReady, setAuthReady] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [startupError, setStartupError] = useState("");
-  const [mobileHudOpen, setMobileHudOpen] = useState(false);
   const [gangMessage, setGangMessage] = useState("");
   const [prisonMessage, setPrisonMessage] = useState("");
+  const [cityMessage, setCityMessage] = useState("");
   const [gangDraftName, setGangDraftName] = useState("Night Reign");
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
   const [notice, setNotice] = useState(null);
+  const [quickActionModal, setQuickActionModal] = useState(null);
   const noticeOpacity = useRef(new Animated.Value(0)).current;
   const noticeTranslateY = useRef(new Animated.Value(-12)).current;
   const previousGameRef = useRef(INITIAL);
@@ -1305,6 +1353,10 @@ function AppRuntime() {
   const lastSyncedGameRef = useRef("");
   const [gangProfileView, setGangProfileView] = useState("actions");
   const [casinoState, setCasinoState] = useState({
+    slotBet: "200",
+    slotDisplay: ["MASK", "CASH", "CROWN"],
+    slotResult: null,
+    slotSpinning: false,
     rouletteChoice: "red",
     rouletteSpinning: false,
     rouletteDisplay: "00",
@@ -1335,6 +1387,7 @@ function AppRuntime() {
   const activeTab = TAB_DEFINITIONS.find((entry) => entry.id === tab) ?? TAB_DEFINITIONS[0];
   const activeSectionId = sectionByTab[tab] || activeTab.sections[0].id;
   const activeSection = activeTab.sections.find((entry) => entry.id === activeSectionId) || activeTab.sections[0];
+  const visibleSections = activeTab.sections.filter((entry) => !entry.hidden);
   const { respectInfo, effectivePlayer, activeAvatar, clubOwnerLabel, escortBaseFindChance } = usePlayerState({
     game,
     avatars: avatarOptions,
@@ -1361,9 +1414,10 @@ function AppRuntime() {
       ),
     [game.online, game.gang.inviteRespectMin, game.player.name]
   );
-  const successRate = game.stats.heistsDone > 0 ? Math.round((game.stats.heistsWon / game.stats.heistsDone) * 100) : 0;
   const jailRemaining = game.player.jailUntil ? Math.max(0, game.player.jailUntil - Date.now()) : 0;
   const taskStates = useMemo(() => getTaskStates(game), [game]);
+  const topTask = taskStates.find((task) => !task.claimed) || taskStates[0];
+  const nextHeistTier = getNextHeistTier(game.player.respect);
   const inGang = Boolean(game.gang.joined);
   const gangTributeRemaining = Math.max(0, GANG_TRIBUTE_COOLDOWN_MS - (Date.now() - (game.gang.lastTributeAt || 0)));
   const clubNightRemaining = Math.max(0, CLUB_NIGHT_COOLDOWN_MS - (Date.now() - (game.club.lastRunAt || 0)));
@@ -1386,14 +1440,21 @@ function AppRuntime() {
         cash: Number.isFinite(safeProfile.cash) ? safeProfile.cash : prev.player.cash,
         energy: Number.isFinite(safeProfile.energy) ? safeProfile.energy : prev.player.energy,
         maxEnergy: Number.isFinite(safeProfile.maxEnergy) ? safeProfile.maxEnergy : prev.player.maxEnergy,
-        hp: clamp(Number.isFinite(safeProfile.hp) ? safeProfile.hp : prev.player.hp, 0, prev.player.maxHp),
+        maxHp: Number.isFinite(safeProfile.maxHp) ? safeProfile.maxHp : prev.player.maxHp,
+        hp: clamp(
+          Number.isFinite(safeProfile.hp) ? safeProfile.hp : prev.player.hp,
+          0,
+          Number.isFinite(safeProfile.maxHp) ? safeProfile.maxHp : prev.player.maxHp
+        ),
         respect: Number.isFinite(safeProfile.respect) ? safeProfile.respect : prev.player.respect,
+        xp: Number.isFinite(safeProfile.xp) ? safeProfile.xp : prev.player.xp,
         attack: Number.isFinite(safeProfile.attack) ? safeProfile.attack : prev.player.attack,
         defense: Number.isFinite(safeProfile.defense) ? safeProfile.defense : prev.player.defense,
         dexterity: Number.isFinite(safeProfile.dexterity) ? safeProfile.dexterity : prev.player.dexterity,
         charisma: Number.isFinite(safeProfile.charisma) ? safeProfile.charisma : prev.player.charisma,
         heat: Number.isFinite(safeProfile.heat) ? safeProfile.heat : prev.player.heat,
         bank: Number.isFinite(safeProfile.bank) ? safeProfile.bank : prev.player.bank,
+        jailUntil: safeProfile.jailUntil ?? prev.player.jailUntil,
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
       inventory: serverUser.inventory || prev.inventory,
@@ -1433,7 +1494,12 @@ function AppRuntime() {
       setGame({
         ...INITIAL,
         ...snapshot,
-        player: { ...INITIAL.player, ...(snapshot.player || {}), avatarCustomUri: typeof snapshot.player?.avatarCustomUri === "string" ? snapshot.player.avatarCustomUri : INITIAL.player.avatarCustomUri },
+        player: {
+          ...INITIAL.player,
+          ...(snapshot.player || {}),
+          xp: Number.isFinite(snapshot.player?.xp) ? snapshot.player.xp : INITIAL.player.xp,
+          avatarCustomUri: typeof snapshot.player?.avatarCustomUri === "string" ? snapshot.player.avatarCustomUri : INITIAL.player.avatarCustomUri,
+        },
         stats: { ...INITIAL.stats, ...(snapshot.stats || {}) },
         inventory: { ...INITIAL.inventory, ...(snapshot.inventory || {}) },
         market: { ...INITIAL.market, ...(snapshot.market || {}) },
@@ -1447,6 +1513,7 @@ function AppRuntime() {
           ...INITIAL.online,
           ...(snapshot.online || {}),
           roster: [],
+          cityChat: Array.isArray(snapshot.online?.cityChat) ? snapshot.online.cityChat : INITIAL.online.cityChat,
         },
         supplierStock: { ...INITIAL.supplierStock, ...(snapshot.supplierStock || {}) },
         supplierOrderDraft: { ...INITIAL.supplierOrderDraft, ...(snapshot.supplierOrderDraft || {}) },
@@ -1500,6 +1567,40 @@ function AppRuntime() {
     }));
   };
 
+  const refreshSocialState = async (token = sessionToken) => {
+    if (!token) return;
+    const [playersSnapshot, rankingsSnapshot, chatSnapshot] = await Promise.all([
+      fetchSocialPlayers(token),
+      fetchRankingsOnline(token),
+      fetchGlobalChatOnline(token),
+    ]);
+
+    setGame((prev) => ({
+      ...prev,
+      online: {
+        ...prev.online,
+        roster: Array.isArray(playersSnapshot?.players) ? playersSnapshot.players : prev.online.roster,
+        rankings: rankingsSnapshot || prev.online.rankings,
+        cityChat: Array.isArray(chatSnapshot?.messages)
+          ? chatSnapshot.messages.map((entry) => ({
+              ...entry,
+              time:
+                typeof entry.time === "string" && entry.time.includes("T")
+                  ? new Date(entry.time).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+                  : entry.time,
+            }))
+          : prev.online.cityChat,
+      },
+    }));
+  };
+
+  const refreshProfileState = async (token = sessionToken) => {
+    if (!token) return;
+    const me = await fetchMe(token);
+    if (!me?.user?.profile) return;
+    mergeServerUser(me.user, { prices: me.market, products: me.marketState });
+  };
+
     const hydrateAuthenticatedSession = async (token) => {
       if (typeof token !== "string" || !token.trim()) {
         throw new Error("Brak poprawnego tokena sesji.");
@@ -1537,6 +1638,10 @@ function AppRuntime() {
         }));
       } catch (_error) {
         setCasinoState((prev) => ({ ...prev, backendMeta: null }));
+      }
+      try {
+        await refreshSocialState(token);
+      } catch (_error) {
       }
   };
 
@@ -1629,14 +1734,22 @@ function AppRuntime() {
   useEffect(() => {
     if (!sessionToken || apiStatus !== "online") return undefined;
     const timer = setInterval(() => {
+      refreshProfileState(sessionToken).catch(() => {});
       refreshMarketState(sessionToken).catch(() => {});
       refreshCasinoState(sessionToken).catch(() => {});
+      refreshSocialState(sessionToken).catch(() => {});
     }, 45000);
     return () => clearInterval(timer);
   }, [sessionToken, apiStatus]);
 
   useEffect(() => {
-    if (!sessionToken || apiStatus !== "online" || !authReady || !didHydrateSessionRef.current) {
+    if (
+      !sessionToken ||
+      apiStatus !== "online" ||
+      !authReady ||
+      !didHydrateSessionRef.current ||
+      gameMode === "online_alpha"
+    ) {
       return undefined;
     }
 
@@ -1676,7 +1789,7 @@ function AppRuntime() {
         const energyRecovered = Math.floor(energyPool / ENERGY_REGEN_SECONDS);
         const regenRemainder = energyPool % ENERGY_REGEN_SECONDS;
         const passiveMinutes = elapsedSeconds / 60;
-        const businessIncome = getBusinessIncomePerMinute(prev);
+        const businessIncome = getBusinessIncomePerMinute(prev, BUSINESSES);
         const escortIncome = getEscortIncomePerMinute(prev);
         const nextCollections = {
           businessCash: Math.min((prev.collections?.businessCash || 0) + businessIncome * passiveMinutes, getPassiveCapAmount(businessIncome)),
@@ -1882,15 +1995,19 @@ function AppRuntime() {
     });
   };
 
+  const openQuickAction = (action) => {
+    setNotice(null);
+    setQuickActionModal(action);
+  };
+
   const setActiveSection = (tabId, sectionId) => {
     setSectionByTab((prev) => ({ ...prev, [tabId]: sectionId }));
     if (tabId !== tab) setTab(tabId);
+    setIsHubActive(false);
   };
 
   useEffect(() => {
     pageScrollRef.current?.scrollTo?.({ y: 0, animated: false });
-    if (!isPhone) return;
-    setMobileHudOpen(false);
   }, [tab, activeSectionId, isPhone]);
 
   const canDoStreetAction = (message) => {
@@ -1901,12 +2018,29 @@ function AppRuntime() {
     return true;
   };
 
+  const requireOfflineDemoAuthority = (featureLabel) =>
+    !blockIfOnlineAlpha(gameMode, pushLog, featureLabel);
+
+  const applyProgressionToPlayer = (player, xpGain = 0) => {
+    const progression = applyXpProgression({ respect: player.respect, xp: player.xp }, xpGain);
+    return {
+      player: {
+        ...player,
+        respect: progression.respect,
+        xp: progression.xp,
+        rank: getRankTitle(progression.respect),
+      },
+      progression,
+    };
+  };
+
   const updateLocalPlayer = (changes, message) => {
     setGame((prev) => ({
       ...prev,
       player: {
         ...prev.player,
         ...changes,
+        xp: Number.isFinite(changes.xp) ? changes.xp : prev.player.xp,
         rank: getRankTitle(changes.respect ?? prev.player.respect),
       },
       log: message ? [message, ...prev.log].slice(0, 16) : prev.log,
@@ -1988,10 +2122,9 @@ function AppRuntime() {
       if (exercise.gains.dexterity) player.dexterity += exercise.gains.dexterity;
       if (exercise.gains.maxHp) player.maxHp += exercise.gains.maxHp;
       if (exercise.gains.hp) player.hp = clamp(prev.player.hp + exercise.gains.hp, 0, player.maxHp);
-
       return {
         ...prev,
-        player: { ...player, rank: getRankTitle(player.respect) },
+        player,
         log: [`Silownia zaliczona: ${exercise.name}. ${exercise.note}.`, ...prev.log].slice(0, 16),
       };
     });
@@ -2029,15 +2162,16 @@ function AppRuntime() {
     if (score >= 16) {
       setGame((prev) => ({
         ...prev,
-        player: {
-          ...prev.player,
-          energy: prev.player.energy - 3,
-          respect: prev.player.respect + 2,
-          attack: prev.player.attack + 1,
-          dexterity: prev.player.dexterity + 1,
-          rank: getRankTitle(prev.player.respect + 2),
-        },
-        log: ["Fightclub wygrany. +2 szacunu, +1 atak, +1 zrecznosc.", ...prev.log].slice(0, 16),
+        player: applyProgressionToPlayer(
+          {
+            ...prev.player,
+            energy: prev.player.energy - 3,
+            attack: prev.player.attack + 1,
+            dexterity: prev.player.dexterity + 1,
+          },
+          8
+        ).player,
+        log: ["Fightclub wygrany. +8 XP, +1 atak, +1 zrecznosc.", ...prev.log].slice(0, 16),
       }));
       return;
     }
@@ -2082,16 +2216,20 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - fallback solo heist roll/reward only exists for offline demo; online economy must stay server-authoritative
   const executeHeist = async (heist) => {
     if (!canDoStreetAction()) return;
-    if (game.player.respect < heist.respect) return pushLog(`Za niski szacun. Potrzebujesz ${heist.respect}.`);
+    if (game.player.respect < heist.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${heist.respect}.`);
     if (game.player.energy < heist.energy) return pushLog(`Brakuje energii. Potrzebujesz ${heist.energy}.`);
 
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await executeHeistOnline(sessionToken, heist.id);
         mergeServerUser(result.user);
+        if (result?.jailed || inJail(result?.user?.profile || {})) {
+          setActiveSection("heists", "prison");
+        }
         return;
       } catch (error) {
         pushLog(error.message);
+        return;
       }
     }
 
@@ -2099,24 +2237,25 @@ function AppRuntime() {
 
     if (Math.random() < chance) {
       const gain = randomBetween(heist.reward[0], heist.reward[1]);
-      const respectGain = Math.max(1, Math.floor(heist.respect / 5));
+      const xpGain = randomBetween(heist.xpGain[0], heist.xpGain[1]);
       setGame((prev) => ({
         ...prev,
-        player: {
-          ...prev.player,
-          cash: prev.player.cash + gain,
-          respect: prev.player.respect + respectGain,
-          energy: prev.player.energy - heist.energy,
-          heat: clamp(prev.player.heat + Math.ceil(heist.risk * 14), 0, 100),
-          rank: getRankTitle(prev.player.respect + respectGain),
-        },
+        player: applyProgressionToPlayer(
+          {
+            ...prev.player,
+            cash: prev.player.cash + gain,
+            energy: prev.player.energy - heist.energy,
+            heat: clamp(prev.player.heat + Math.ceil(heist.risk * 14), 0, 100),
+          },
+          xpGain
+        ).player,
         stats: {
           ...prev.stats,
           heistsDone: prev.stats.heistsDone + 1,
           heistsWon: prev.stats.heistsWon + 1,
           totalEarned: prev.stats.totalEarned + gain,
         },
-        log: [`Napad udany: ${heist.name}. Wpada ${formatMoney(gain)} i +${respectGain} szacunu.`, ...prev.log].slice(0, 16),
+        log: [`Napad udany: ${heist.name}. Wpada ${formatMoney(gain)} i +${xpGain} XP.`, ...prev.log].slice(0, 16),
       }));
       return;
     }
@@ -2138,7 +2277,7 @@ function AppRuntime() {
     }));
 
     if (Math.random() < jailChance) {
-      const sentence = 70 + heist.energy * 35 + Math.round(heist.risk * 180);
+      const sentence = 90 + heist.energy * 55 + Math.round(heist.risk * 360) + heist.respect * 4 + Math.round(game.player.heat * 1.5);
       applyJail(sentence, heist.name);
     }
   };
@@ -2146,30 +2285,33 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - gang heist outcome, jailed crew, vault changes and payout split must be validated on backend
   const executeGangHeist = (heist) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Napady gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     if (!canRunGangHeistRole(game.gang.role)) return pushLog("Napady gangu odpalaja tylko Boss, Vice Boss albo Zaufany.");
     if (game.gang.members < heist.minMembers) return pushLog(`Ten napad wymaga ${heist.minMembers} ludzi w ekipie.`);
     if (game.gang.members - game.gang.jailedCrew < heist.minMembers) return pushLog("Za duzo ludzi siedzi. Nie masz pelnego skladu do tej roboty.");
-    if (game.player.respect < heist.respect) return pushLog(`Za niski szacun. Potrzebujesz ${heist.respect}.`);
+    if (game.player.respect < heist.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${heist.respect}.`);
     if (game.player.energy < heist.energy) return pushLog(`Potrzebujesz ${heist.energy} energii.`);
 
     const { chance } = getGangHeistOdds(game.player, effectivePlayer, game.gang, heist);
     const participants = Math.min(game.gang.members - game.gang.jailedCrew, Math.max(heist.minMembers, heist.minMembers + Math.floor(game.gang.influence / 6)));
 
     if (Math.random() < chance) {
-      const gain = randomBetween(heist.reward[0], heist.reward[1]) + Math.floor(game.gang.gearScore * 60);
+      const gangBonusRate = getGangHeistBonusRate(game.gang);
+      const gain = Math.floor((randomBetween(heist.reward[0], heist.reward[1]) + Math.floor(game.gang.gearScore * 60)) * (1 + gangBonusRate));
       const share = Math.max(600, Math.floor(gain / participants));
-      const respectGain = Math.max(2, Math.floor(heist.respect / 5));
+      const xpGain = Math.max(7, randomBetween(Math.ceil(heist.minMembers * 2.5), heist.minMembers * 4));
       setGame((prev) => ({
         ...prev,
-        player: {
-          ...prev.player,
-          cash: prev.player.cash + share,
-          respect: prev.player.respect + respectGain,
-          energy: prev.player.energy - heist.energy,
-          heat: clamp(prev.player.heat + Math.ceil(heist.risk * 18), 0, 100),
-          rank: getRankTitle(prev.player.respect + respectGain),
-        },
+        player: applyProgressionToPlayer(
+          {
+            ...prev.player,
+            cash: prev.player.cash + share,
+            energy: prev.player.energy - heist.energy,
+            heat: clamp(prev.player.heat + Math.ceil(heist.risk * 18), 0, 100),
+          },
+          xpGain
+        ).player,
         gang: {
           ...prev.gang,
           vault: prev.gang.vault + Math.floor(gain * 0.12),
@@ -2183,7 +2325,7 @@ function AppRuntime() {
           gangHeistsWon: prev.stats.gangHeistsWon + 1,
           totalEarned: prev.stats.totalEarned + gain,
         },
-        log: [`Napad gangu udany: ${heist.name}. Uczestnikow ${participants}, Twoja dzialka ${formatMoney(share)}.`, ...prev.log].slice(0, 16),
+        log: [`Napad gangu udany: ${heist.name}. Uczestnikow ${participants}, Twoja dzialka ${formatMoney(share)} i +${xpGain} XP.`, ...prev.log].slice(0, 16),
       }));
       return;
     }
@@ -2217,7 +2359,8 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - business purchase cost, unlock validation and empire scaling should be stored server-side
   const buyBusiness = (business) => {
     if (!canDoStreetAction()) return;
-    if (game.player.respect < business.respect) return pushLog(`Najpierw wbij ${business.respect} szacunu.`);
+    if (!requireOfflineDemoAuthority("Kupowanie biznesow")) return;
+    if (game.player.respect < business.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${business.respect}.`);
     if (game.player.cash < business.cost) return pushLog(`Za malo gotowki na ${business.name}.`);
 
     setGame((prev) => {
@@ -2236,8 +2379,37 @@ function AppRuntime() {
     });
   };
 
+  const upgradeBusiness = (business, path) => {
+    if (!canDoStreetAction()) return;
+    const safePath = path === "speed" ? "speed" : "cash";
+    const owned = game.businessesOwned.find((entry) => entry.id === business.id);
+    if (!owned?.count) return pushLog("Najpierw musisz miec ten biznes.");
+    const cost = getBusinessUpgradeCost(game, business, safePath);
+    if (game.player.cash < cost) return pushLog(`Brakuje ${formatMoney(cost)} na upgrade ${business.name}.`);
+
+    setGame((prev) => {
+      const current = getBusinessUpgradeState(prev, business.id);
+      return {
+        ...prev,
+        player: { ...prev.player, cash: prev.player.cash - cost },
+        businessUpgrades: {
+          ...(prev.businessUpgrades || {}),
+          [business.id]:
+            safePath === "speed"
+              ? { speedLevel: current.speedLevel + 1, cashLevel: current.cashLevel }
+              : { speedLevel: current.speedLevel, cashLevel: current.cashLevel + 1 },
+        },
+        log: [
+          `${business.name}: ${safePath === "speed" ? "szybszy obrot" : "grubsza koperta"} wszedl za ${formatMoney(cost)}.`,
+          ...prev.log,
+        ].slice(0, 16),
+      };
+    });
+  };
+
   // TODO: TO_MIGRATE_TO_SERVER - passive business claim must come from server-side accrual and claim cap validation
   const collectBusinessIncome = () => {
+    if (!requireOfflineDemoAuthority("Odbior biznesow")) return;
     const payout = Math.floor(game.collections?.businessCash || 0);
     if (payout <= 0) return pushLog("Na razie nie ma co zgarnac z biznesow.");
 
@@ -2252,6 +2424,7 @@ function AppRuntime() {
 
   // TODO: TO_MIGRATE_TO_SERVER - street income claim, daily cap, anti-spam cooldown, district risk and heat scaling must be server-authoritative
   const collectEscortIncome = () => {
+    if (!requireOfflineDemoAuthority("Odbior ulicy")) return;
     const payout = Math.floor(game.collections?.escortCash || 0);
     if (payout <= 0) return pushLog("Na razie ulica nic jeszcze nie oddala.");
 
@@ -2267,6 +2440,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - escort acquisition and scaling need server validation before real multiplayer launch
   const buyEscort = (escort) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Kupowanie kontaktow")) return;
     if (game.player.respect < escort.respect) return pushLog(`Ten kontakt odblokuje sie przy ${escort.respect} szacunu.`);
     if (game.player.cash < escort.cost) return pushLog(`Za malo gotowki na ${escort.name}.`);
 
@@ -2288,6 +2462,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - club traffic, search cooldown and low-chance street trigger logic are still local economy logic
   const findEscortInClub = () => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Szukanie kontaktow w klubie")) return;
     if (!currentClubVenue) return pushLog("Najpierw wejdz do jakiegos klubu. Dopiero tam szukasz kontaktow.");
     if (game.player.cash < CLUB_ESCORT_SEARCH_COST) return pushLog(`Brakuje ${formatMoney(CLUB_ESCORT_SEARCH_COST)} na wejscie i szukanie kontaktow.`);
 
@@ -2313,14 +2488,16 @@ function AppRuntime() {
 
         if (eventRoll < currentClubProfile.contactChance) {
           const tipCash = Math.floor(180 + currentClubVenue.popularity * 14 + currentClubVenue.mood * 9);
-          const respectTip = currentClubVenue.popularity >= 32 ? 1 : 0;
+          const xpTip = currentClubVenue.popularity >= 32 ? 9 : 0;
           return setGame((prev) => ({
             ...prev,
-            player: {
-              ...prev.player,
-              cash: prev.player.cash - CLUB_ESCORT_SEARCH_COST + tipCash,
-              respect: prev.player.respect + respectTip,
-            },
+            player: applyProgressionToPlayer(
+              {
+                ...prev.player,
+                cash: prev.player.cash - CLUB_ESCORT_SEARCH_COST + tipCash,
+              },
+              xpTip
+            ).player,
             online: {
               ...prev.online,
               messages: [
@@ -2334,7 +2511,7 @@ function AppRuntime() {
                 ...prev.online.messages,
               ].slice(0, 12),
             },
-            log: [`${currentClubVenue.name} podrzuca kontakt. Wpada ${formatMoney(tipCash)}${respectTip ? " i +1 respektu" : ""}.`, ...prev.log].slice(0, 16),
+            log: [`${currentClubVenue.name} podrzuca kontakt. Wpada ${formatMoney(tipCash)}${xpTip ? ` i +${xpTip} XP` : ""}.`, ...prev.log].slice(0, 16),
           }));
         }
       }
@@ -2367,6 +2544,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - escort street assignment affects passive economy and must move to server state
   const assignEscortToStreet = (escort, districtId) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Wystawianie na ulice")) return;
     const district = STREET_DISTRICTS.find((entry) => entry.id === districtId);
     if (!district) return pushLog("Wybierz konkretna dzielnice.");
     if (game.player.respect < district.respect) return pushLog(`Na ${district.name} potrzebujesz ${district.respect} szacunu.`);
@@ -2389,6 +2567,7 @@ function AppRuntime() {
 
   const pullEscortFromStreet = (escort, districtId) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Sciaganie z ulicy")) return;
     const district = STREET_DISTRICTS.find((entry) => entry.id === districtId);
     if (!district) return pushLog("Wybierz konkretna dzielnice.");
     const assigned = getEscortDistrictCount(game, escort.id, district.id);
@@ -2412,6 +2591,7 @@ function AppRuntime() {
 
   const sellEscort = (escort) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Sprzedaz kontaktu")) return;
     if (getEscortReserveCount(game, escort.id) <= 0) return pushLog(`Najpierw sciagij z ulicy wolna sztuke ${escort.name}, zeby ja opchnac.`);
 
     setGame((prev) => {
@@ -2432,7 +2612,8 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - factory ownership, slot limits, diminishing returns and maintenance costs must be persisted server-side
   const buyFactory = (factory) => {
     if (!canDoStreetAction()) return;
-    if (game.player.respect < factory.respect) return pushLog(`Za niski szacun. Potrzebujesz ${factory.respect}.`);
+    if (!requireOfflineDemoAuthority("Kupowanie fabryk")) return;
+    if (game.player.respect < factory.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${factory.respect}.`);
     if (game.player.cash < factory.cost) return pushLog(`Brakuje ${formatMoney(factory.cost)} na ${factory.name}.`);
     if (hasFactory(game, factory.id)) return pushLog(`${factory.name} juz stoi.`);
 
@@ -2447,6 +2628,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - wholesale unlock, supplier tiers and component quality requirements should mutate server inventory, not local fallback state
   const buySupply = (supply) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Kupowanie dostaw")) return;
     if (game.player.cash < supply.price) return pushLog(`Brakuje gotowki na ${supply.name}.`);
 
     setGame((prev) => ({
@@ -2460,8 +2642,9 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - production recipes, raid risk, maintenance, yield scaling and inventory output are critical economy authority
   const produceDrug = (drug) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Produkcja w fabryce")) return;
     if (!hasFactory(game, drug.factoryId)) return pushLog(`Najpierw musisz miec ${FACTORIES.find((entry) => entry.id === drug.factoryId)?.name}.`);
-    if (game.player.respect < drug.unlockRespect) return pushLog(`Za niski szacun. Potrzebujesz ${drug.unlockRespect}.`);
+    if (game.player.respect < drug.unlockRespect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${drug.unlockRespect}.`);
 
     for (const [supplyId, amount] of Object.entries(drug.supplies)) {
       if (game.supplies[supplyId] < amount) {
@@ -2522,6 +2705,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - timed boosts, cooldowns, global caps and overdose odds affect heist balance and cannot stay client-authoritative
   const consumeDrug = (drug) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Boosty z towaru")) return;
     if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz na stanie: ${drug.name}.`);
 
     if (Math.random() < drug.overdoseRisk) {
@@ -2549,6 +2733,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - dealer stock and buy pricing must be centrally controlled to prevent client exploits
   const buyDrugFromDealer = (drug) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Dealer")) return;
     if (game.player.respect < drug.unlockRespect) return pushLog(`Diler puszcza ${drug.name} dopiero od ${drug.unlockRespect} szacunu.`);
     if ((game.dealerInventory?.[drug.id] || 0) <= 0) return pushLog(`Diler nie ma juz ${drug.name} na stanie.`);
     if (game.player.cash < drug.streetPrice) return pushLog(`Brakuje ${formatMoney(drug.streetPrice)} na ${drug.name}.`);
@@ -2565,6 +2750,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - dealer sell-back and stock refill loop must be validated on backend
   const sellDrugToDealer = (drug) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Dealer")) return;
     if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz czego sprzedac: ${drug.name}.`);
     const payout = Math.max(20, Math.floor(drug.streetPrice * 0.72));
 
@@ -2581,6 +2767,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - club takeover cost, ownership, player-driven traffic and upkeep need persistence and anti-abuse checks
   const openClub = (listing) => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Przejecie klubu")) return;
     if (game.club.owned) return pushLog("Klub juz jest Twoj.");
     if (!listing) return pushLog("Wybierz lokal z listy klubow.");
     if (game.player.respect < listing.respect) return pushLog(`Na ten lokal potrzebujesz ${listing.respect} szacunu.`);
@@ -2620,18 +2807,16 @@ function AppRuntime() {
     }));
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - premium shortcut and club founding must be validated server-side before production
-  const foundClub = (mode) => {
+  // TODO: TO_MIGRATE_TO_SERVER - club founding must be validated server-side before production
+  const foundClub = () => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Zakladanie klubu")) return;
     if (game.club.owned) return pushLog("Masz juz swoj klub.");
     if (!game.gang.joined) return pushLog("Nowy klub od zera stawia juz konkretna ekipa, nie solo typ.");
     if (game.gang.role !== "Boss") return pushLog("Nowy lokal moze postawic tylko boss gangu.");
     if (game.player.respect < 26) return pushLog("Na zalozenie nowego klubu potrzebujesz minimum 26 szacunu.");
 
-    if (mode === "premium" && game.player.premiumTokens < CLUB_FOUNDING_PREMIUM_COST) {
-      return pushLog(`Brakuje ${CLUB_FOUNDING_PREMIUM_COST} premium na ekspresowe postawienie lokalu.`);
-    }
-    if (mode !== "premium" && game.player.cash < CLUB_FOUNDING_CASH_COST) {
+    if (game.player.cash < CLUB_FOUNDING_CASH_COST) {
       return pushLog(`Nowy klub od zera kosztuje ${formatMoney(CLUB_FOUNDING_CASH_COST)}.`);
     }
 
@@ -2654,8 +2839,7 @@ function AppRuntime() {
       ...prev,
       player: {
         ...prev.player,
-        cash: mode === "premium" ? prev.player.cash : prev.player.cash - CLUB_FOUNDING_CASH_COST,
-        premiumTokens: mode === "premium" ? prev.player.premiumTokens - CLUB_FOUNDING_PREMIUM_COST : prev.player.premiumTokens,
+        cash: prev.player.cash - CLUB_FOUNDING_CASH_COST,
       },
       club: {
         ...prev.club,
@@ -2671,9 +2855,7 @@ function AppRuntime() {
       },
       clubListings: syncClubListing(prev.clubListings, { ...prev.club, ...newListing, owned: true }, ownerLabel),
       log: [
-        mode === "premium"
-          ? `Premium poszlo w ruch. ${clubName} otwiera sie od razu na mapie miasta.`
-          : `Wylales gruby hajs i postawiles od zera ${clubName}.`,
+        `Wylales gruby hajs i postawiles od zera ${clubName}.`,
         ...prev.log,
       ].slice(0, 16),
     }));
@@ -2681,6 +2863,7 @@ function AppRuntime() {
 
   // TODO: TO_MIGRATE_TO_SERVER - club stash is economy state and must not live only on the client
   const moveDrugToClub = (drug) => {
+    if (!requireOfflineDemoAuthority("Stash klubu")) return;
     if (!game.club.owned) return pushLog("Najpierw musisz miec klub.");
     if (!insideOwnClub) return pushLog("Musisz fizycznie wejsc do swojego klubu, zeby wrzucic towar na stash.");
     if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz na stanie ${drug.name}.`);
@@ -2696,6 +2879,7 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - club tick income, player-driven traffic, raid rolls and stash consumption are high-value economy actions
   const runClubNight = () => {
     if (!canDoStreetAction()) return;
+    if (!requireOfflineDemoAuthority("Noc klubu")) return;
     if (!game.club.owned) return pushLog("Bez klubu nie ma co odpalac nocy.");
     if (!insideOwnClub) return pushLog("Musisz siedziec we wlasnym klubie, zeby odpalic noc i pilnowac stolow.");
     if (clubNightRemaining > 0) return pushLog(`Klub juz pracuje. Wroc za ${formatCooldown(clubNightRemaining)}.`);
@@ -2798,6 +2982,7 @@ function AppRuntime() {
   };
 
   const promoteClub = () => {
+    if (!requireOfflineDemoAuthority("Promocja klubu")) return;
     if (!game.club.owned) return pushLog("Najpierw otworz klub.");
     if (!insideOwnClub) return pushLog("Promo lokalu odpalasz tylko bedac w srodku swojego klubu.");
     if (game.player.cash < 1200) return pushLog("Brakuje kasy na promo lokalu.");
@@ -2823,6 +3008,7 @@ function AppRuntime() {
         return;
       } catch (error) {
         pushLog(error.message);
+        return;
       }
     }
 
@@ -2848,6 +3034,7 @@ function AppRuntime() {
         return;
       } catch (error) {
         pushLog(error.message);
+        return;
       }
     }
 
@@ -2919,6 +3106,24 @@ function AppRuntime() {
     setGangMessage("");
   };
 
+  const depositGangCash = () => {
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    const amount = Number(bankAmountDraft || 0);
+    if (!amount || amount <= 0) return pushLog("Wpisz kwote do zasilenia skarbca.");
+    if (game.player.cash < amount) return pushLog(`Brakuje ${formatMoney(amount)} w gotowce.`);
+
+    setGame((prev) => ({
+      ...prev,
+      player: { ...prev.player, cash: prev.player.cash - amount },
+      gang: {
+        ...prev.gang,
+        vault: prev.gang.vault + amount,
+        chat: [{ id: `gang-${Date.now()}`, author: "System", text: `${prev.player.name} wrzucil do skarbca ${formatMoney(amount)}.`, time: nowTimeLabel() }, ...prev.gang.chat].slice(0, 14),
+      },
+      log: [`Wrzuciles do skarbca gangu ${formatMoney(amount)}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
   const sendPrisonMessage = () => {
     if (!inJail(game.player)) return;
     if (!prisonMessage.trim()) return;
@@ -2929,10 +3134,50 @@ function AppRuntime() {
     setPrisonMessage("");
   };
 
+  const sendCityMessage = async () => {
+    const text = cityMessage.trim();
+    if (!text) return;
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await sendGlobalChatMessageOnline(sessionToken, text);
+        setGame((prev) => ({
+          ...prev,
+          online: {
+            ...prev.online,
+            cityChat: Array.isArray(result?.messages)
+              ? result.messages.map((entry) => ({
+                  ...entry,
+                  time:
+                    typeof entry.time === "string" && entry.time.includes("T")
+                      ? new Date(entry.time).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+                      : entry.time,
+                }))
+              : prev.online.cityChat,
+          },
+        }));
+        setCityMessage("");
+        return;
+      } catch (error) {
+        pushLog(error.message || "Nie wyszlo wyslac wiadomosci do miasta.");
+        return;
+      }
+    }
+
+    setGame((prev) => ({
+      ...prev,
+      online: {
+        ...prev.online,
+        cityChat: [{ id: `city-${Date.now()}`, author: prev.player.name, text, time: nowTimeLabel() }, ...prev.online.cityChat].slice(0, 30),
+      },
+    }));
+    setCityMessage("");
+  };
+
   const createGang = () => {
     if (!canDoStreetAction("Gangu nie zakladasz z celi.")) return;
     if (game.gang.joined) return pushLog("Juz jestes w gangu.");
-    if (game.player.premiumTokens < game.gang.createCost) return pushLog(`Zalozenie gangu kosztuje ${game.gang.createCost} premium.`);
+    if (game.player.cash < game.gang.createCost) return pushLog(`Zalozenie gangu kosztuje ${formatMoney(game.gang.createCost)}.`);
     if (game.player.respect < 15) return pushLog("Na zalozenie gangu potrzebujesz co najmniej 15 szacunu.");
 
     const cleanName = gangDraftName.trim();
@@ -2940,7 +3185,7 @@ function AppRuntime() {
 
     setGame((prev) => ({
       ...prev,
-      player: { ...prev.player, premiumTokens: prev.player.premiumTokens - prev.gang.createCost },
+      player: { ...prev.player, cash: prev.player.cash - prev.gang.createCost },
       gang: {
         ...prev.gang,
         joined: true,
@@ -2959,7 +3204,7 @@ function AppRuntime() {
           { id: `gang-${Date.now() + 1}`, author: "System", text: "Startujesz solo. Reszte skladu musza stanowic prawdziwi gracze z zaproszen.", time: nowTimeLabel() },
         ],
       },
-      log: [`Zakladasz gang ${cleanName}. Premium -${prev.gang.createCost}.`, ...prev.log].slice(0, 16),
+      log: [`Zakladasz gang ${cleanName}. Kasa -${formatMoney(prev.gang.createCost)}.`, ...prev.log].slice(0, 16),
     }));
   };
 
@@ -3075,6 +3320,7 @@ function AppRuntime() {
         return;
       } catch (error) {
         pushLog(error.message);
+        return;
       }
     }
 
@@ -3100,6 +3346,7 @@ function AppRuntime() {
         return;
       } catch (error) {
         pushLog(error.message);
+        return;
       }
     }
 
@@ -3111,10 +3358,13 @@ function AppRuntime() {
     if (!task.completed || task.claimed) return;
     setGame((prev) => ({
       ...prev,
-      player: { ...prev.player, cash: prev.player.cash + task.rewardCash, respect: prev.player.respect + task.rewardRespect, rank: getRankTitle(prev.player.respect + task.rewardRespect) },
+      player: applyProgressionToPlayer(
+        { ...prev.player, cash: prev.player.cash + task.rewardCash },
+        task.rewardXp
+      ).player,
       tasksClaimed: [...prev.tasksClaimed, task.id],
       stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + task.rewardCash },
-      log: [`Odebrano zadanie: ${task.title}. ${formatMoney(task.rewardCash)} i +${task.rewardRespect} szacunu.`, ...prev.log].slice(0, 16),
+      log: [`Odebrano zadanie: ${task.title}. ${formatMoney(task.rewardCash)} i +${task.rewardXp} XP.`, ...prev.log].slice(0, 16),
     }));
   };
 
@@ -3124,19 +3374,19 @@ function AppRuntime() {
 
     setGame((prev) => ({
       ...prev,
-      player: {
-        ...prev.player,
-        cash: prev.player.cash + milestone.rewardCash,
-        premiumTokens: prev.player.premiumTokens + milestone.rewardPremium,
-        respect: prev.player.respect + milestone.rewardRespect,
-        rank: getRankTitle(prev.player.respect + milestone.rewardRespect),
-      },
+      player: applyProgressionToPlayer(
+        {
+          ...prev.player,
+          cash: prev.player.cash + milestone.rewardCash,
+        },
+        milestone.rewardXp
+      ).player,
       referrals: {
         ...prev.referrals,
         claimedMilestones: [...prev.referrals.claimedMilestones, milestone.id],
       },
       log: [
-        `Program polecen: odebrane ${formatMoney(milestone.rewardCash)}, +${milestone.rewardPremium} premium${milestone.rewardRespect ? ` i +${milestone.rewardRespect} szacunu` : ""}.`,
+        `Program polecen: odebrane ${formatMoney(milestone.rewardCash)}${milestone.rewardXp ? ` i +${milestone.rewardXp} XP` : ""}.`,
         ...prev.log,
       ].slice(0, 16),
     }));
@@ -3251,6 +3501,7 @@ function AppRuntime() {
   const attackGangProfile = async (gangProfile) => {
     if (!gangProfile || gangProfile.self) return pushLog("Nie zaatakujesz wlasnego gangu z poziomu tej akcji.");
     if (!canDoStreetAction("Atak na gang odpalasz dopiero po wyjsciu z celi.")) return;
+    if (!requireOfflineDemoAuthority("Finalny wynik PvP")) return;
     if (!game.gang.joined) return pushLog("Na gang idzie sie ze swoja ekipa, nie solo.");
     if (game.player.energy < 3) return pushLog("Potrzebujesz 3 energii na akcje przeciw gangowi.");
 
@@ -3352,7 +3603,7 @@ function AppRuntime() {
       },
       log: [`Odpaliles szybka wiadomosc do ${player.name}.`, ...prev.log].slice(0, 16),
     }));
-    setActiveSection("online", "messages");
+    setActiveSection("profile", "messages");
   };
 
   const placeBountyOnPlayer = (player) => {
@@ -3457,6 +3708,162 @@ function AppRuntime() {
     }, 120);
   };
 
+  const SLOT_SYMBOL_SETS = {
+    jackpot: ["CROWN", "CROWN", "CROWN"],
+    triple: ["MASK", "MASK", "MASK"],
+    double: ["CASH", "CASH", "BAR"],
+    single: ["CASH", "BAR", "DICE"],
+    miss: ["MASK", "DICE", "SKULL"],
+  };
+
+  const animateSlotResult = (symbols, onFinish) => {
+    const pool = ["MASK", "CASH", "BAR", "DICE", "SKULL", "CROWN"];
+    let ticks = 0;
+    const interval = setInterval(() => {
+      ticks += 1;
+      setCasinoState((prev) => ({
+        ...prev,
+        slotDisplay: [
+          pool[randomBetween(0, pool.length - 1)],
+          pool[randomBetween(0, pool.length - 1)],
+          pool[randomBetween(0, pool.length - 1)],
+        ],
+      }));
+
+      if (ticks >= 16) {
+        clearInterval(interval);
+        setCasinoState((prev) => ({
+          ...prev,
+          slotSpinning: false,
+          slotDisplay: symbols,
+        }));
+        onFinish?.();
+      }
+    }, 95);
+  };
+
+  const spinSlot = async () => {
+    if (!canDoStreetAction("Kasyno nie wpuszcza ludzi w kajdankach.")) return;
+    if (casinoState.slotSpinning) return;
+    const bet = Number(casinoState.slotBet || 0);
+    if (bet < 100) return pushLog("Minimalna stawka slota to $100.");
+    if (bet > 50000) {
+      setCasinoState((prev) => ({ ...prev, slotBet: "50000" }));
+      return pushLog("Na ten automat max stawka to $50tys.");
+    }
+    if (game.player.cash < bet) return pushLog(`Potrzebujesz ${formatMoney(bet)} na spin automatu.`);
+
+    if (sessionToken && apiStatus === "online") {
+      setCasinoState((prev) => ({
+        ...prev,
+        slotSpinning: true,
+        slotResult: null,
+        serverGame: null,
+      }));
+      try {
+        const result = await playSlotOnline(sessionToken, bet);
+        const symbols = Array.isArray(result?.outcome?.symbols) && result.outcome.symbols.length === 3
+          ? result.outcome.symbols
+          : SLOT_SYMBOL_SETS[result?.outcome?.id] || SLOT_SYMBOL_SETS.miss;
+
+        animateSlotResult(symbols, () => {
+          mergeServerUser(result.user);
+          setCasinoState((prev) => ({
+            ...prev,
+            slotResult: result.outcome || null,
+            serverGame: {
+              mode: "slot",
+              win: (result.totalReturn || 0) > 0,
+              stake: result.stake,
+              totalReturn: result.totalReturn,
+              net: result.net,
+              outcome: result.outcome || null,
+            },
+          }));
+          if (result?.outcome?.id === "jackpot") {
+            setNotice({
+              tone: "success",
+              title: "JACKPOT",
+              message: `Automat eksploduje. Wpada ${formatMoney(result.totalReturn || 0)}.`,
+            });
+          }
+          refreshCasinoState(sessionToken).catch(() => {});
+        });
+        return;
+      } catch (error) {
+        setCasinoState((prev) => ({ ...prev, slotSpinning: false }));
+        pushLog(error.message);
+        return;
+      }
+    }
+
+    updateLocalPlayer({ cash: game.player.cash - bet }, `Wrzucasz ${formatMoney(bet)} do automatu.`);
+    setCasinoState((prev) => ({
+      ...prev,
+      slotSpinning: true,
+      slotResult: null,
+      serverGame: null,
+    }));
+
+    const outcomes = [
+      { id: "jackpot", weight: 8, multiplier: 28, label: "777 JACKPOT", symbols: SLOT_SYMBOL_SETS.jackpot },
+      { id: "triple", weight: 30, multiplier: 8, label: "Triple hit", symbols: SLOT_SYMBOL_SETS.triple },
+      { id: "double", weight: 120, multiplier: 2, label: "Double match", symbols: SLOT_SYMBOL_SETS.double },
+      { id: "single", weight: 160, multiplier: 1.15, label: "Lucky line", symbols: SLOT_SYMBOL_SETS.single },
+      { id: "miss", weight: 682, multiplier: 0, label: "Miss", symbols: SLOT_SYMBOL_SETS.miss },
+    ];
+    const totalWeight = outcomes.reduce((sum, item) => sum + item.weight, 0);
+    const roll = randomBetween(1, totalWeight);
+    let cursor = 0;
+    const picked = outcomes.find((item) => {
+      cursor += item.weight;
+      return roll <= cursor;
+    }) || outcomes[outcomes.length - 1];
+
+    animateSlotResult(picked.symbols, () => {
+      const payout = Math.floor(bet * picked.multiplier);
+      if (payout > 0) {
+        setGame((prev) => ({
+          ...prev,
+          player: { ...prev.player, cash: prev.player.cash + payout },
+          stats: {
+            ...prev.stats,
+            casinoWins: prev.stats.casinoWins + 1,
+            totalEarned: prev.stats.totalEarned + payout,
+          },
+          log: [
+            picked.id === "jackpot"
+              ? `Jackpot na slocie. Automat oddaje ${formatMoney(payout)}.`
+              : `Slot: ${picked.label}. Wraca ${formatMoney(payout)}.`,
+            ...prev.log,
+          ].slice(0, 16),
+        }));
+        if (picked.id === "jackpot") {
+          setNotice({
+            tone: "success",
+            title: "JACKPOT",
+            message: `Automat oddaje ${formatMoney(payout)}. Miasto to widzi.`,
+          });
+        }
+      } else {
+        pushLog("Slot: pudlo. Automat bierze wrzute.");
+      }
+
+      setCasinoState((prev) => ({
+        ...prev,
+        slotResult: picked,
+        serverGame: {
+          mode: "slot",
+          win: payout > 0,
+          stake: bet,
+          totalReturn: payout,
+          net: payout - bet,
+          outcome: picked,
+        },
+      }));
+    });
+  };
+
   // TODO: TO_MIGRATE_TO_SERVER - roulette still has an offline fallback path below.
   // Online mode already delegates stake validation, cooldowns, RNG and rewards to backend high-risk bet rules.
   const spinRoulette = async () => {
@@ -3505,6 +3912,7 @@ function AppRuntime() {
       } catch (error) {
         setCasinoState((prev) => ({ ...prev, rouletteSpinning: false }));
         pushLog(error.message);
+        return;
       }
     }
 
@@ -3561,6 +3969,7 @@ function AppRuntime() {
 
   const startBlackjack = async () => {
     if (!canDoStreetAction("Kasyno nie wpuszcza ludzi w kajdankach.")) return;
+    setNotice(null);
     if (sessionToken && apiStatus === "online") {
       const bet = Number(casinoState.blackjack.bet || 0);
       try {
@@ -3727,7 +4136,7 @@ function AppRuntime() {
     }, 700);
   };
 
-  const totalBusinessIncome = getBusinessIncomePerMinute(game);
+  const totalBusinessIncome = getBusinessIncomePerMinute(game, BUSINESSES);
   const totalEscortIncome = getEscortIncomePerMinute(game);
   const businessCollectionCap = getPassiveCapAmount(totalBusinessIncome);
   const escortCollectionCap = getPassiveCapAmount(totalEscortIncome);
@@ -3742,11 +4151,11 @@ function AppRuntime() {
       <SceneArtwork
         eyebrow="Napady"
         title="Kazdy prog ma swoja cene"
-        lines={["Atak, obrona i zrecznosc realnie pompuja szanse wejscia oraz wyjscia z akcji.", "Im grubszy napad, tym wieksza wyplata, ale tez ryzyko odsiadki i utraty hajsu."]}
+        lines={["Szansa, ryzyko i wyplata na jednym ekranie."]}
         accent={["#4f2219", "#180d0a", "#050505"]}
         source={SCENE_BACKGROUNDS.heists}
       />
-      <SectionCard title="Napady" subtitle="Zrecznosc juz dziala w formule sukcesu, tak samo heat i obrona.">
+      <SectionCard title="Napady" subtitle="Klikasz prog i wchodzisz w akcje.">
         {HEISTS.map((heist) => {
           const locked = game.player.respect < heist.respect;
           const odds = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist);
@@ -3788,11 +4197,11 @@ function AppRuntime() {
       <SceneArtwork
         eyebrow="Gang"
         title="Robota dla calej organizacji"
-        lines={["Najlatwiejszy skok rusza od 3 ludzi, a najwyzsze progi chca juz pelnej maszyny.", "Tu liczy sie szacun, liczebnosc, wplywy i to czy Twoj gang wyglada jak instytucja."]}
+        lines={["Sklad, szacun i wplywy decyduja, czy robota siada."]}
         accent={["#422418", "#160f0c", "#050505"]}
         source={SCENE_BACKGROUNDS.gangWide}
       />
-      <SectionCard title="Napady gangu" subtitle="Kazdy skok ma wymagana liczbe ludzi. Najlatwiejszy rusza od 3 osob.">
+      <SectionCard title="Napady gangu" subtitle="Sklad i szacun decyduja o wejsciu.">
         {GANG_HEISTS.map((heist) => {
           const locked = game.player.respect < heist.respect || game.gang.members < heist.minMembers;
           const odds = getGangHeistOdds(game.player, effectivePlayer, game.gang, heist);
@@ -3830,11 +4239,11 @@ function AppRuntime() {
   );
 
   const renderPrison = () => (
-    <SectionCard title="Wiezienie" subtitle="Jesli akcja nie siada, mozesz tu trafic. Jest licznik, kaucja i osobny chat celi.">
+    <SectionCard title="Wiezienie" subtitle="Cela, kaucja i chat celi.">
       <SceneArtwork
         eyebrow="Cela"
         title="Zimna odsiadka"
-        lines={["Krata, beton i szept ludzi, ktorzy wpadli na zlej akcji.", "Chat celi jest widoczny tylko dla tych, ktorzy siedza."]}
+        lines={["Krata, licznik i szybka kaucja."]}
         accent={["#2b2f34", "#121417", "#040404"]}
         source={SCENE_BACKGROUNDS.prison}
       />
@@ -3869,9 +4278,9 @@ function AppRuntime() {
   );
 
   const renderGangOverview = () => (
-    <SectionCard title="Gang" subtitle="To instytucja, do ktorej nie wpadasz od razu. Najpierw zakladasz premium albo przyjmujesz zaproszenie.">
+    <SectionCard title="Gang" subtitle="Ekipa, sklad i szybkie akcje.">
       {selectedGangProfile ? (
-        <SectionCard title="Profil gangu" subtitle="Klikasz nazwe gangu i wpadasz w jego karte tak samo jak przy profilu gracza.">
+        <SectionCard title="Profil gangu" subtitle="Boss, sklad, skarbiec i ruchy ekipy.">
           <View style={styles.playerProfilePanel}>
             <View style={styles.playerProfileMain}>
               <LinearGradient colors={["#4f2a18", "#17100c"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.playerProfileHero}>
@@ -3927,10 +4336,7 @@ function AppRuntime() {
             {gangProfileView === "actions" ? (
               <View style={styles.listCard}>
                 <Text style={styles.listCardTitle}>Akcje wobec gangu</Text>
-                <Text style={styles.listCardMeta}>
-                  Tu masz szybki dostep do rzeczy, ktore w starej browserowce odpalalo sie od razu z profilu ekipy:
-                  wiadomosc do bossa, propozycja sojuszu, rozpoznanie skladu i szybki nacisk na ich zaplecze.
-                </Text>
+                <Text style={styles.listCardMeta}>Szybkie akcje wobec ekipy.</Text>
                 <StatLine label="Boss" value={selectedGangProfile.boss} />
                 <StatLine label="Vice Boss" value={selectedGangProfile.viceBoss} />
                 <StatLine label="Potencjal skladu" value={`${selectedGangProfile.members} ludzi | ${selectedGangProfile.influence} wplywu | ${selectedGangProfile.territory} dzielnice`} />
@@ -3940,7 +4346,7 @@ function AppRuntime() {
             {gangProfileView === "members" ? (
               <View style={styles.listCard}>
                 <Text style={styles.listCardTitle}>Sklad gangu</Text>
-                <Text style={styles.listCardMeta}>Boss, vice boss, zaufani i zwykli ludzie ekipy. To ma dawac szybki ogląd, z kim masz do czynienia.</Text>
+                <Text style={styles.listCardMeta}>Boss, zaufani i zwykli ludzie ekipy.</Text>
                 {selectedGangProfile.membersList?.map((member) => (
                   <View key={member.id} style={styles.listCard}>
                     <View style={styles.inlineRow}>
@@ -3958,7 +4364,7 @@ function AppRuntime() {
             {gangProfileView === "log" ? (
               <View style={styles.listCard}>
                 <Text style={styles.listCardTitle}>Log wydarzen gangu</Text>
-                <Text style={styles.listCardMeta}>Szybki podglad ostatnich ruchow, klimatu i aktywnosci ekipy.</Text>
+                <Text style={styles.listCardMeta}>Ostatnie ruchy ekipy.</Text>
                 {(selectedGangProfile.eventLog || []).map((entry) => (
                   <View key={entry.id} style={styles.chatBubble}>
                     <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
@@ -3976,7 +4382,7 @@ function AppRuntime() {
         lines={
           game.gang.joined
             ? ["Pilnujesz progu wejscia, ludzi, skarbca i napadow gangu.", "Tu ma sie czuc, ze to organizacja, a nie pojedynczy przycisk."]
-            : ["Zakladasz wlasny gang premium albo przyjmujesz zaproszenie od ekipy.", "Po wejsciu odblokowuje sie sklad, operacje i chat gangu."]
+            : ["Zakladasz wlasny gang za gruby hajs albo przyjmujesz zaproszenie od ekipy.", "Po wejsciu odblokowuje sie sklad, operacje i chat gangu."]
         }
         accent={["#3d2418", "#17100c", "#050505"]}
         source={SCENE_BACKGROUNDS.gangWide}
@@ -3985,20 +4391,20 @@ function AppRuntime() {
         <>
           <View style={styles.heroBanner}>
             <Text style={styles.heroBannerTitle}>Brak gangu</Text>
-            <Text style={styles.heroBannerText}>Zakladka sluzy teraz do zalozenia wlasnej organizacji albo wejscia do jednej z ekip, ktore juz chodza po miescie.</Text>
+            <Text style={styles.heroBannerText}>Zakladasz ekipe albo wchodzisz do jednej z nich.</Text>
           </View>
           <View style={styles.listCard}>
             <Text style={styles.listCardTitle}>Zaloz wlasny gang</Text>
-            <Text style={styles.listCardMeta}>Koszt premium: {game.gang.createCost}. Potrzebujesz tez 15 szacunu.</Text>
+            <Text style={styles.listCardMeta}>Koszt: {formatMoney(game.gang.createCost)}. Potrzebujesz tez 15 szacunu.</Text>
             <View style={styles.inlineRow}>
               <TextInput value={gangDraftName} onChangeText={setGangDraftName} placeholder="Nazwa gangu" placeholderTextColor="#6c6c6c" style={styles.chatInput} />
               <Pressable onPress={createGang} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Zaloz</Text>
               </Pressable>
             </View>
-            <Text style={styles.listCardMeta}>Masz premium: {game.player.premiumTokens}</Text>
+            <Text style={styles.listCardMeta}>Masz przy sobie: {formatMoney(game.player.cash)}</Text>
           </View>
-          <SectionCard title="Zaproszenia" subtitle="Dolaczyc mozesz tylko wtedy, gdy dobijasz do progu szacunu.">
+          <SectionCard title="Zaproszenia" subtitle="Wejscie od progu szacunu.">
             {game.gang.invites.map((invite) => (
               <View key={invite.id} style={styles.listCard}>
                 <View style={styles.inlineRow}>
@@ -4021,32 +4427,46 @@ function AppRuntime() {
         <>
           <View style={styles.heroBanner}>
             <Text style={styles.heroBannerTitle}>{game.gang.name}</Text>
-            <Text style={styles.heroBannerText}>Rola: {game.gang.role}. Pilnujesz progu zaproszen, skarbca i ludzi w ekipie.</Text>
+            <Text style={styles.heroBannerText}>Rola: {game.gang.role}. Tutaj widzisz skarbiec, bonus ekipy i 3 najwazniejsze wejscia.</Text>
           </View>
-          <StatLine label="Nazwa" value={game.gang.name} />
-          <StatLine label="Liczba ludzi" value={`${game.gang.members}/${game.gang.maxMembers}`} />
-          <StatLine label="Teren" value={`${game.gang.territory}`} />
-          <StatLine label="Wplywy" value={`${game.gang.influence}`} />
-          <StatLine label="Skarbiec" value={formatMoney(game.gang.vault)} />
-          <StatLine label="Sprzet gangu" value={`${game.gang.gearScore}/100`} />
-          <StatLine label="Ludzie w celi" value={game.gang.jailedCrew ? `${game.gang.jailedCrew} (${formatDuration(crewLockdownRemaining)})` : "0"} />
-          <StatLine label="Prog zaproszen" value={`${game.gang.inviteRespectMin} szacunu`} />
-          <StatLine label="Nastepny haracz" value={formatCooldown(gangTributeRemaining)} />
+          <SectionCard title="Rdzen ekipy" subtitle="To ma byc prosty panel glowny gangu.">
+            <StatLine label="Rola" value={game.gang.role} />
+            <StatLine label="Ludzie" value={`${game.gang.members}/${game.gang.maxMembers}`} />
+            <StatLine label="Skarbiec" value={formatMoney(game.gang.vault)} />
+            <StatLine label="Bonus do napadow gangu" value={`+${Math.round(getGangHeistBonusRate(game.gang) * 100)}% hajsu`} />
+            <StatLine label="Ludzie w celi" value={game.gang.jailedCrew ? `${game.gang.jailedCrew} (${formatDuration(crewLockdownRemaining)})` : "0"} />
+          </SectionCard>
+
+          <SectionCard title="Skarbiec" subtitle="Wrzucone tu pieniadze wzmacniaja zaplecze ekipy.">
+            <View style={styles.inlineRow}>
+              <TextInput value={bankAmountDraft} onChangeText={setBankAmountDraft} placeholder="Kwota dla gangu" placeholderTextColor="#6c6c6c" keyboardType="numeric" style={styles.chatInput} />
+              <Pressable onPress={depositGangCash} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Wrzuc do gangu</Text>
+              </Pressable>
+            </View>
+          </SectionCard>
+
           <View style={styles.grid}>
-            <ActionTile title="Odbierz haracz" subtitle={gangTributeRemaining > 0 ? `Kolejna koperta za ${formatCooldown(gangTributeRemaining)}.` : "Regularna wyplata z terenu i ochrony."} onPress={collectGangTribute} disabled={gangTributeRemaining > 0} danger />
-            <ActionTile title="Podnies prog" subtitle="Boss moze zaostrzyc wejscie do gangu." onPress={() => changeGangInviteThreshold(1)} disabled={game.gang.role !== "Boss"} />
-            <ActionTile title="Obniz prog" subtitle="Najnizej do 15 szacunu." onPress={() => changeGangInviteThreshold(-1)} disabled={game.gang.role !== "Boss"} />
-            <ActionTile title="Awansuj vicebossa" subtitle="Boss moze wskazac nowa prawa reke z zaufanych." onPress={() => promoteGangMember("Vice Boss")} disabled={game.gang.role !== "Boss"} />
-            <ActionTile title="Awansuj zaufanego" subtitle="Boss podnosi zwyklego czlonka do robot na zaufaniu." onPress={() => promoteGangMember("Zaufany")} disabled={game.gang.role !== "Boss"} />
-            <ActionTile title="Opusc gang" subtitle="Wychodzisz i wracasz na solo." onPress={leaveGang} />
+            <ActionTile title="Wplac do skarbca" subtitle="Szybkie zasilenie wspolnej kasy." onPress={depositGangCash} visual={SYSTEM_VISUALS.bank} />
+            <ActionTile title="Napad gangu" subtitle="Wskocz od razu do roboty ekipy." onPress={() => setActiveSection("gang", "heists")} visual={SYSTEM_VISUALS.heist} danger />
+            <ActionTile title="Czlonkowie" subtitle="Sprawdz sklad i zaproszenia." onPress={() => setActiveSection("gang", "members")} visual={SYSTEM_VISUALS.gang} />
           </View>
+
+          <SectionCard title="Ostatnia aktywnosc" subtitle="Krotki log ekipy bez grzebania po calym chacie.">
+            {(game.gang.chat || []).slice(0, 4).map((entry) => (
+              <View key={entry.id} style={styles.chatBubble}>
+                <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
+                <Text style={styles.chatText}>{entry.text}</Text>
+              </View>
+            ))}
+          </SectionCard>
         </>
       )}
     </SectionCard>
   );
 
   const renderGangMembers = () => (
-    <SectionCard title="Czlonkowie" subtitle="Napady gangu maja opierac sie o prawdziwych graczy. Najprostszy wymaga 3 ludzi.">
+    <SectionCard title="Czlonkowie" subtitle="Prawdziwi ludzie w ekipie.">
       {!game.gang.joined ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Najpierw musisz miec wlasny gang albo przyjac zaproszenie.</Text>
@@ -4090,7 +4510,7 @@ function AppRuntime() {
   );
 
   const renderGangChat = () => (
-    <SectionCard title="Chat gangu" subtitle="To juz nie martwa zakladka. Mozesz pisac i widziec log ekipy.">
+    <SectionCard title="Chat gangu" subtitle="Wiadomosci ekipy.">
       {!game.gang.joined ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Bez gangu nie ma dostepu do chatu gangu.</Text>
@@ -4115,7 +4535,7 @@ function AppRuntime() {
   );
 
   const renderGangOps = () => (
-    <SectionCard title="Operacje gangu" subtitle="Szybki podglad, czy ekipa jest gotowa na grubsze roboty.">
+    <SectionCard title="Operacje gangu" subtitle="Gotowosc ekipy na robote.">
       {!game.gang.joined ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Operacje gangu odblokuja sie dopiero po wejsciu do organizacji.</Text>
@@ -4157,12 +4577,12 @@ function AppRuntime() {
       <SceneArtwork
         eyebrow="Gracze"
         title="Kto siedzi online"
-        lines={["Tu maja byc prawdziwi ludzie, nie boty."]}
+        lines={["Prawdziwi gracze online."]}
         accent={["#342418", "#140f0c", "#050505"]}
         source={SCENE_BACKGROUNDS.gang}
       />
       {selectedWorldPlayer ? (
-        <SectionCard title="Profil gracza" subtitle="Krotka karta i szybkie akcje.">
+      <SectionCard title="Profil gracza" subtitle="Szybka karta gracza.">
           <View style={styles.playerProfilePanel}>
             <View style={styles.playerProfileMain}>
               <LinearGradient colors={selectedWorldPlayer.online ? ["#57411a", "#1a1209"] : ["#363636", "#111111"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.playerProfileHero}>
@@ -4211,7 +4631,7 @@ function AppRuntime() {
           </View>
         </SectionCard>
       ) : null}
-      <SectionCard title="Gracze" subtitle="Ludzie online na serwerze.">
+      <SectionCard title="Gracze" subtitle="Lista ludzi online.">
         {!game.online.roster.length ? (
           <View style={styles.lockedPanel}>
             <Text style={styles.lockedPanelText}>Na razie pusto. Jak ludzie wejda online, pojawia sie tutaj.</Text>
@@ -4250,7 +4670,7 @@ function AppRuntime() {
   );
 
   const renderOnlineFriends = () => (
-    <SectionCard title="Znajomi" subtitle="Tu laduja ludzie, ktorych chcesz miec pod reka do kontaktu albo wspolnego grania.">
+    <SectionCard title="Znajomi" subtitle="Ludzie pod reka.">
       {!game.online.friends.length ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Na razie pusto. Kliknij kogos z listy graczy i dodaj go do znajomych.</Text>
@@ -4271,7 +4691,7 @@ function AppRuntime() {
   );
 
   const renderOnlineMessages = () => (
-    <SectionCard title="Wiadomosci" subtitle="Tu pojdzie prywatna skrzynka i rozmowy 1 na 1.">
+    <SectionCard title="Wiadomosci" subtitle="Prywatna skrzynka.">
       {game.online.messages.map((message) => (
         <View key={message.id} style={styles.listCard}>
           <View style={styles.listCardHeader}>
@@ -4285,6 +4705,38 @@ function AppRuntime() {
         </View>
       ))}
     </SectionCard>
+  );
+
+  const renderCityChat = () => (
+    <>
+      <SceneArtwork
+        eyebrow="Miasto"
+        title="Chat miasta"
+        lines={["Tutaj lapiesz ludzi do akcji, handlu i testow."]}
+        accent={["#2d2417", "#110f0c", "#050505"]}
+        source={SCENE_BACKGROUNDS.city}
+      />
+      <SectionCard title="Globalny chat" subtitle="Wszyscy online widza ten kanal miasta.">
+        <View style={styles.chatComposer}>
+          <TextInput
+            value={cityMessage}
+            onChangeText={setCityMessage}
+            placeholder="Napisz do miasta..."
+            placeholderTextColor="#6c6c6c"
+            style={styles.chatInput}
+          />
+          <Pressable onPress={sendCityMessage} style={styles.inlineButton}>
+            <Text style={styles.inlineButtonText}>Wyslij</Text>
+          </Pressable>
+        </View>
+        {(game.online.cityChat || []).map((entry) => (
+          <View key={entry.id} style={styles.chatBubble}>
+            <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
+            <Text style={styles.chatText}>{entry.text}</Text>
+          </View>
+        ))}
+      </SectionCard>
+    </>
   );
 
   const renderRankings = () => {
@@ -4315,10 +4767,10 @@ function AppRuntime() {
 
     return (
       <>
-        <SceneArtwork
-          eyebrow="Rankingi"
-          title="Topka miasta"
-          lines={["Szacun, hajs, napady i kasyno. Te listy maja od razu mowic, kto jest grubym graczem.", "Docelowo beda lecialy z prawdziwej bazy i zywych statystyk online."]}
+      <SceneArtwork
+        eyebrow="Rankingi"
+        title="Topka miasta"
+        lines={["Szacun, kasa, napady i kasyno."]}
           accent={["#382417", "#140f0c", "#050505"]}
           source={SCENE_BACKGROUNDS.profile}
         />
@@ -4330,69 +4782,19 @@ function AppRuntime() {
     );
   };
 
-  const renderPremiumShop = () => (
-    <>
-      <SceneArtwork
-        eyebrow="Premium"
-        title="Miejsce na mikroplatnosci"
-        lines={["Jest gdzie monetyzowac gre: tokeny, uslugi premium i pozniejsze eventy.", "To jest UI pod sklep i oferty, zamiast doklejania ich na sile gdzies z boku."]}
-        accent={["#4b2a18", "#160f0c", "#050505"]}
-        source={SCENE_BACKGROUNDS.casino}
-      />
-      <SectionCard title="Pakiety tokenow" subtitle="Sklep jest czytelny i gotowy pod pozniejsze spiecie z platnosciami.">
-        {PREMIUM_PACKAGES.map((pack) => (
-          <View key={pack.id} style={styles.listCard}>
-            <View style={styles.listCardHeader}>
-              <View style={styles.entityHead}>
-                <EntityBadge visual={BUSINESS_VISUALS.tower} />
-                <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{pack.name}</Text>
-                  <Text style={styles.listCardMeta}>{pack.tokens} tokenow | {pack.bonus}</Text>
-                </View>
-              </View>
-              <Text style={styles.listCardReward}>{pack.priceLabel}</Text>
-            </View>
-          </View>
-        ))}
-      </SectionCard>
-    </>
-  );
-
-  const renderPremiumServices = () => (
-    <SectionCard title="Uslugi premium" subtitle="Tu beda trafialy wszystkie sensowne uslugi monetizacyjne bez rozwalania balansu gry.">
-      {PREMIUM_SERVICES.map((service) => (
-        <View key={service.id} style={styles.listCard}>
-          <View style={styles.listCardHeader}>
-            <View style={styles.entityHead}>
-              <EntityBadge visual={PRODUCT_VISUALS.crystal} />
-              <View style={styles.flexOne}>
-                <Text style={styles.listCardTitle}>{service.name}</Text>
-                <Text style={styles.listCardMeta}>{service.description}</Text>
-              </View>
-            </View>
-            <Tag text={`${service.cost} premium`} warning />
-          </View>
-        </View>
-      ))}
-      <View style={styles.lockedPanel}>
-        <Text style={styles.lockedPanelText}>Google login i prawdziwe zakupy w sklepie wymagaja jeszcze podpiecia backendu, OAuth i sklepowych integracji. UI i miejsce w grze sa juz przygotowane.</Text>
-      </View>
-    </SectionCard>
-  );
-
   const renderReferralProgram = () => (
     <>
       <SceneArtwork
         eyebrow="Polecenia"
         title="Program polecen pod wzrost gry"
-        lines={["To ma byc zdrowy viral: nagradzamy za aktywnego gracza, nie za samo zalozenie multikonta.", "Docelowo polecony powinien dobic np. 15 szacunu i chwile pograc, zanim odpali nagrode."]}
+        lines={["Nagrody za aktywnych poleconych."]}
         accent={["#4b2f18", "#160f0c", "#050505"]}
         source={SCENE_BACKGROUNDS.city}
       />
-      <SectionCard title="Twoj kod polecajacy" subtitle="Ten system nadaje sie idealnie pod start gry, promocje ekip i pozniejszy marketing.">
+      <SectionCard title="Twoj kod polecajacy" subtitle="Kod, aktywacje i progi.">
         <View style={styles.heroBanner}>
           <Text style={styles.heroBannerTitle}>{game.referrals.code}</Text>
-          <Text style={styles.heroBannerText}>Kod powinien dzialac przy pierwszym logowaniu lub zakladaniu konta. Nagroda wpada dopiero za aktywnego poleconego.</Text>
+          <Text style={styles.heroBannerText}>Nagroda wpada dopiero za aktywnego poleconego.</Text>
         </View>
         <StatLine label="Wyslane zaproszenia" value={`${game.referrals.invited}`} />
         <StatLine label="Aktywni poleceni" value={`${game.referrals.verified}`} />
@@ -4400,7 +4802,7 @@ function AppRuntime() {
         <StatLine label="Zasada anty-farm" value="Nagroda dopiero po progresie poleconego" />
       </SectionCard>
 
-      <SectionCard title="Progi nagrod" subtitle="Nagrody sa fajne, ale nie moga rozwalac balansu. Tu lepiej dawac premium, troche kasy i lekki bonus szacunu.">
+      <SectionCard title="Progi nagrod" subtitle="Cash i bonus XP za aktywnych poleconych.">
         {REFERRAL_MILESTONES.map((milestone) => {
           const claimed = game.referrals.claimedMilestones.includes(milestone.id);
           const unlocked = game.referrals.verified >= milestone.verified;
@@ -4412,7 +4814,7 @@ function AppRuntime() {
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{milestone.verified} aktywnych poleconych</Text>
                     <Text style={styles.listCardMeta}>
-                      {formatMoney(milestone.rewardCash)} | +{milestone.rewardPremium} premium{milestone.rewardRespect ? ` | +${milestone.rewardRespect} szacunu` : ""}
+                      {formatMoney(milestone.rewardCash)}{milestone.rewardXp ? ` | +${milestone.rewardXp} XP` : ""}
                     </Text>
                   </View>
                 </View>
@@ -4429,9 +4831,9 @@ function AppRuntime() {
         })}
       </SectionCard>
 
-      <SectionCard title="Docelowe spiecie online" subtitle="To powinno byc w backendzie, bo inaczej ludzie beda to farmic.">
+      <SectionCard title="Docelowe spiecie online" subtitle="To musi siedziec na backendzie.">
         <View style={styles.lockedPanel}>
-          <Text style={styles.lockedPanelText}>Najlepsza wersja: kod przy rejestracji, aktywacja nagrody dopiero po wbiciu progu gry, blokada self-ref i kontrola urzadzen/IP. Wtedy masz i wzrost, i monetyzacje bez smieci.</Text>
+          <Text style={styles.lockedPanelText}>Kod przy rejestracji, prog aktywacji i blokada farmy.</Text>
         </View>
       </SectionCard>
     </>
@@ -4498,6 +4900,7 @@ function AppRuntime() {
       nextHeistName: HEISTS.find((entry) => entry.respect > game.player.respect)?.name ?? "Wszystkie odblokowane",
     },
     actions: {
+      openSection: setActiveSection,
       quickHeist: () => {
         const available = HEISTS.filter((entry) => entry.respect <= game.player.respect);
         executeHeist(available[available.length - 1] ?? HEISTS[0]);
@@ -4511,13 +4914,32 @@ function AppRuntime() {
       depositCash,
       withdrawCash,
       buyGymPass,
-      doGymExercise,
-      buyMeal,
-      heal,
+      handleTrain: doGymExercise,
+      handleEat: buyMeal,
+      handleHeal: heal,
       bribeOutOfJail,
     },
   };
 
+  const hubScreenProps = {
+    styles,
+    SceneArtwork,
+    SectionCard,
+    ActionTile,
+    StatLine,
+    sceneBackgrounds: SCENE_BACKGROUNDS,
+    systemVisuals: SYSTEM_VISUALS,
+    formatMoney,
+    topTask,
+    totalBusinessIncome,
+    totalEscortIncome,
+    onlinePlayerCount: game.online.roster.length,
+    nextHeistTierLabel: nextHeistTier ? `${nextHeistTier.title} przy ${nextHeistTier.unlockRespect} RES` : "Masz wszystkie tiery",
+    actions: {
+      openSection: setActiveSection,
+      openQuickAction,
+    },
+  };
   const casinoScreenProps = {
     apiStatus,
     casinoState,
@@ -4530,14 +4952,15 @@ function AppRuntime() {
     EntityBadge,
     sceneBackgrounds: SCENE_BACKGROUNDS,
     systemVisuals: SYSTEM_VISUALS,
-    formatMoney,
-    handValue,
-    setCasinoState,
-    spinRoulette,
-    startBlackjack,
-    hitBlackjack,
-    standBlackjack,
-  };
+      formatMoney,
+      handValue,
+      setCasinoState,
+      spinRoulette,
+      spinSlot,
+      startBlackjack,
+      hitBlackjack,
+      standBlackjack,
+    };
 
   const empireScreenBaseProps = {
     game,
@@ -4566,7 +4989,6 @@ function AppRuntime() {
     drugs: DRUGS,
     suppliers: SUPPLIERS,
     clubFoundingCashCost: CLUB_FOUNDING_CASH_COST,
-    clubFoundingPremiumCost: CLUB_FOUNDING_PREMIUM_COST,
     clubEscortSearchCost: CLUB_ESCORT_SEARCH_COST,
     totalBusinessIncome,
     businessCollectionCap,
@@ -4580,11 +5002,21 @@ function AppRuntime() {
     insideOwnClub,
     escortFindChance,
     clubNightRemaining,
-    helpers: { getOwnedEscort, getEscortWorkingCount, getEscortDistrictCount, hasFactory, getDrugPoliceProfile, getClubVenueProfile },
+    helpers: {
+      getOwnedEscort,
+      getEscortWorkingCount,
+      getEscortDistrictCount,
+      hasFactory,
+      getDrugPoliceProfile,
+      getClubVenueProfile,
+      getBusinessUpgradeState,
+      getBusinessUpgradePreview,
+    },
     actions: {
       collectBusinessIncome,
       collectEscortIncome,
       buyBusiness,
+      upgradeBusiness,
       buyEscort,
       assignEscortToStreet,
       pullEscortFromStreet,
@@ -4624,21 +5056,69 @@ function AppRuntime() {
     sceneBackgrounds: SCENE_BACKGROUNDS,
   };
 
+  const profileMenuScreenProps = {
+    styles,
+    SceneArtwork,
+    SectionCard,
+    ActionTile,
+    sceneBackgrounds: SCENE_BACKGROUNDS,
+    systemVisuals: SYSTEM_VISUALS,
+    actions: {
+      openSection: setActiveSection,
+    },
+  };
+
+  const heistsScreenProps = {
+    heists: HEISTS,
+    game,
+    effectivePlayer,
+    styles,
+    SceneArtwork,
+    SectionCard,
+    StatLine,
+    formatMoney,
+    getSoloHeistOdds,
+    onExecuteHeist: executeHeist,
+    sceneBackgrounds: SCENE_BACKGROUNDS,
+  };
+
+  const renderQuickActionContent = () => {
+    switch (quickActionModal) {
+      case "bank":
+        return <CityScreen {...cityScreenProps} section="bank" />;
+      case "casino":
+        return <CasinoScreen {...casinoScreenProps} />;
+      case "restaurant":
+        return <CityScreen {...cityScreenProps} section="restaurant" />;
+      case "hospital":
+        return <CityScreen {...cityScreenProps} section="hospital" />;
+      case "gym":
+        return <CityScreen {...cityScreenProps} section="gym" />;
+      default:
+        return null;
+    }
+  };
+
+  const quickActionModalTitles = {
+    bank: "Bank",
+    casino: "Kasyno",
+    restaurant: "Jedzenie",
+    hospital: "Szpital",
+    gym: "Trening",
+  };
+
   const renderActiveSection = () => {
     switch (`${tab}:${activeSectionId}`) {
-      case "city:dashboard":
-      case "city:tasks":
-      case "city:bank":
-      case "city:gym":
-      case "city:restaurant":
-      case "city:hospital":
-        return <CityScreen {...cityScreenProps} />;
-      case "city:casino":
+      case "profile:tasks":
+      case "profile:bank":
+      case "profile:gym":
+      case "profile:restaurant":
+      case "profile:hospital":
+        return <CityScreen {...cityScreenProps} section={activeSectionId} />;
+      case "profile:casino":
         return <CasinoScreen {...casinoScreenProps} />;
       case "heists:solo":
-        return renderSoloHeists();
-      case "heists:gang":
-        return renderGangHeists();
+        return <HeistsScreen {...heistsScreenProps} />;
       case "heists:fightclub":
         return (
           <SectionCard title="Fightclub" subtitle="Szybki sparing pod staty i respekt.">
@@ -4665,52 +5145,45 @@ function AppRuntime() {
         return <MarketScreen section="boosts" {...marketScreenBaseProps} />;
       case "gang:overview":
         return renderGangOverview();
+      case "gang:heists":
+        return renderGangHeists();
       case "gang:members":
         return renderGangMembers();
       case "gang:chat":
         return renderGangChat();
       case "gang:ops":
         return renderGangOps();
-      case "online:players":
+      case "profile:players":
         return renderOnlinePlayers();
-      case "online:friends":
+      case "profile:friends":
         return renderOnlineFriends();
-      case "online:messages":
+      case "profile:messages":
         return renderOnlineMessages();
-      case "online:rankings":
+      case "profile:citychat":
+        return renderCityChat();
+      case "profile:rankings":
         return renderRankings();
-      case "premium:shop":
-        return renderPremiumShop();
-      case "premium:services":
-        return renderPremiumServices();
-      case "premium:referrals":
-        return renderReferralProgram();
       case "profile:summary":
         return <ProfileScreen section="summary" {...profileScreenBaseProps} />;
       case "profile:progress":
         return <ProfileScreen section="progress" {...profileScreenBaseProps} />;
       case "profile:protection":
         return <ProfileScreen section="protection" {...profileScreenBaseProps} />;
+      case "profile:utilities":
+        return <ProfileMenuScreen section="utilities" {...profileMenuScreenProps} />;
+      case "profile:community":
+        return <ProfileMenuScreen section="community" {...profileMenuScreenProps} />;
       case "profile:log":
         return <ProfileScreen section="log" {...profileScreenBaseProps} />;
       default:
-        return <CityScreen {...cityScreenProps} />;
+        return renderSoloHeists();
     }
   };
 
-  const topTask = taskStates.find((task) => !task.claimed) || taskStates[0];
-  const mobileStatusCards = [
-    { label: "Bank", value: formatMoney(game.player.bank || 0) },
-    { label: "Napady", value: `${game.stats.heistsDone}` },
-    { label: "Skutecznosc", value: `${successRate}%` },
-    { label: "Gang", value: `${game.gang.members}/30` },
-    { label: "Heat", value: `${game.player.heat}%` },
-    { label: "Boosty", value: `${game.activeBoosts.length}` },
-  ];
   let activeSectionContent;
 
   try {
-    activeSectionContent = renderActiveSection();
+    activeSectionContent = isHubActive ? <HubScreen {...hubScreenProps} /> : renderActiveSection();
   } catch (error) {
     console.error("Section render crash", error);
     activeSectionContent = (
@@ -4753,74 +5226,23 @@ function AppRuntime() {
           <LinearGradient colors={["rgba(170,170,170,0.16)", "rgba(0,0,0,0)"]} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={styles.ambientGlowTwo} />
 
           <View style={styles.gameShell}>
-            <LinearGradient colors={["#505050", "#1b1b1b", "#090909"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.topStrip}>
-              <View style={styles.topStripVisual}>
-                <ImageBackground source={SCENE_BACKGROUNDS.city} style={styles.topStripVisualImage} imageStyle={styles.topStripVisualImageInner} />
-                <LinearGradient colors={["rgba(0,0,0,0.2)", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.82)"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.topStripVisualScrim} />
-                <View style={styles.topStripPhotoLarge} />
-                <View style={styles.topStripPhotoSmall} />
-              </View>
+            <GameHeader
+              playerName={game.player.name}
+              rankTitle={getRankTitle(game.player.respect)}
+              statusLabel={gameMode === "online_alpha" ? "ONLINE" : "DEMO"}
+              level={game.player.respect}
+              xp={respectInfo.currentXp}
+              xpRequired={respectInfo.requirement}
+              xpProgress={respectInfo.progress}
+              cash={formatMoney(game.player.cash)}
+              hp={game.player.hp}
+              maxHp={game.player.maxHp}
+              energy={game.player.energy}
+              maxEnergy={game.player.maxEnergy}
+              activeAvatar={activeAvatar}
+            />
 
-              <View style={[styles.topStripContent, isPhone && styles.topStripContentPhone]}>
-                <View style={[styles.topStripProfile, isPhone && styles.topStripProfilePhone]}>
-                  <LinearGradient colors={activeAvatar.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.profileShot}>
-                    {activeAvatar.image ? <Image source={activeAvatar.image} style={styles.profileShotImage} /> : null}
-                    {activeAvatar.image ? <View style={styles.profileShotScrim} /> : null}
-                    {!activeAvatar.image ? <Text style={styles.profileShotSigil}>{activeAvatar.sigil}</Text> : null}
-                    <Text style={styles.profileShotLevel}>LVL {respectInfo.level}</Text>
-                  </LinearGradient>
-                  <View style={styles.profileMeta}>
-                    <Text style={styles.playerAlias}>{game.player.name}</Text>
-                    <Text style={styles.playerRank}>{getRankTitle(game.player.respect)}</Text>
-                    <Text style={styles.playerSmall}>Status API: {apiStatus === "online" ? "online" : "lokalny fallback"}</Text>
-                  </View>
-                </View>
-
-                <View style={[styles.statCluster, isPhone && styles.statClusterPhone]}>
-                  <View style={styles.statColumn}>
-                    <HeaderStat label="Energia" value={`${game.player.energy}/${game.player.maxEnergy}`} />
-                    <HeaderStat label="Atak" value={`${effectivePlayer.attack}`} />
-                    <HeaderStat label="Zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} />
-                  </View>
-                  <View style={styles.statColumn}>
-                    <HeaderStat label="Obrona" value={`${effectivePlayer.defense}`} />
-                    <HeaderStat label="Zrecznosc" value={`${effectivePlayer.dexterity}`} />
-                    <HeaderStat label="Kasa" value={formatMoney(game.player.cash)} />
-                  </View>
-                  <View style={styles.statColumnWide}>
-                    <Text style={styles.topStatLabel}>Szacun</Text>
-                    <Text style={styles.topStatValue}>{game.player.respect}</Text>
-                    <ProgressBar progress={respectInfo.progress} />
-                    <ProgressDots progress={respectInfo.progress} />
-                  </View>
-                </View>
-              </View>
-            </LinearGradient>
-
-            <View style={styles.mastheadPanel}>
-              <ImageBackground
-                source={SCENE_BACKGROUNDS.gangWide}
-                style={[styles.mastheadImage, isPhone && styles.mastheadImagePhone]}
-                imageStyle={[styles.mastheadImageInner, isPhone && styles.mastheadImageInnerPhone]}
-              >
-                <LinearGradient colors={["rgba(8,8,8,0.05)", "rgba(8,8,8,0.28)", "rgba(8,8,8,0.9)"]} start={{ x: 0.1, y: 0 }} end={{ x: 0.85, y: 1 }} style={styles.mastheadOverlay}>
-                  <View style={styles.mastheadHeroCopy}>
-                    <Text style={styles.mastheadEyebrow}>Hustle City</Text>
-                    <Text style={styles.mastheadHeroTitle}>Miasto bierzesz po swojemu</Text>
-                    <Text style={styles.mastheadHeroText}>{inJail(game.player) ? `Cela jeszcze ${formatDuration(jailRemaining)}.` : "Fury, stol, bron i szybka kasa."}</Text>
-                    <View style={styles.mastheadHeroTags}>
-                      <Tag text="Fury" />
-                      <Tag text="Kluby" />
-                      <Tag text="Blackjack" />
-                      <Tag text="Napady" warning />
-                      <Tag text="Towar" />
-                    </View>
-                  </View>
-                </LinearGradient>
-              </ImageBackground>
-            </View>
-
-            {notice ? (
+            {notice && !isPhone ? (
               <Animated.View
                 style={[
                   styles.noticeBanner,
@@ -4876,41 +5298,62 @@ function AppRuntime() {
               </Animated.View>
             ) : null}
 
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.tabBarClassic}
-              contentContainerStyle={styles.tabBarClassicContent}
-            >
-              {TAB_DEFINITIONS.map((item) => (
-                <Pressable key={item.id} onPress={() => setTab(item.id)} style={[styles.tabButtonClassic, tab === item.id && styles.tabButtonClassicActive]}>
-                  <Text style={[styles.tabButtonClassicText, tab === item.id && styles.tabButtonClassicTextActive]}>{item.label}</Text>
+              <View style={styles.tabBarShell}>
+                <Pressable onPress={() => setIsHubActive(true)} style={[styles.tabButtonClassic, isHubActive && styles.tabButtonClassicActive, styles.tabButtonHub]}>
+                  <View style={styles.tabButtonClassicInner}>
+                    <Text style={[styles.tabButtonClassicIcon, isHubActive && styles.tabButtonClassicIconActive]}>{TAB_SIGILS.start}</Text>
+                    <Text style={[styles.tabButtonClassicText, isHubActive && styles.tabButtonClassicTextActive]}>Start</Text>
+                  </View>
                 </Pressable>
-              ))}
-            </ScrollView>
-
-            {isPhone ? (
-              <View style={styles.mobileTopSectionRail}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileTopSectionRailContent}>
-                  {activeTab.sections.map((item) => (
-                    <Pressable key={item.id} onPress={() => setActiveSection(tab, item.id)} style={[styles.mobileTopSectionChip, activeSectionId === item.id && styles.mobileTopSectionChipActive]}>
-                      <Text style={[styles.mobileTopSectionText, activeSectionId === item.id && styles.mobileTopSectionTextActive]}>{item.label}</Text>
+                <ScrollView
+                  horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.tabBarClassic}
+                contentContainerStyle={styles.tabBarClassicContent}
+              >
+                {TAB_DEFINITIONS.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      setTab(item.id);
+                      setIsHubActive(false);
+                    }}
+                    style={[styles.tabButtonClassic, !isHubActive && tab === item.id && styles.tabButtonClassicActive]}
+                    >
+                      <View style={styles.tabButtonClassicInner}>
+                        <Text style={[styles.tabButtonClassicIcon, !isHubActive && tab === item.id && styles.tabButtonClassicIconActive]}>{TAB_SIGILS[item.id]}</Text>
+                        <Text style={[styles.tabButtonClassicText, !isHubActive && tab === item.id && styles.tabButtonClassicTextActive]}>{item.label}</Text>
+                      </View>
                     </Pressable>
                   ))}
                 </ScrollView>
+            </View>
+
+            {!isHubActive && isPhone && visibleSections.length > 1 ? (
+              <View style={styles.mobileTopSectionRail}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileTopSectionRailContent}>
+                    {visibleSections.map((item) => (
+                      <Pressable key={item.id} onPress={() => setActiveSection(tab, item.id)} style={[styles.mobileTopSectionChip, activeSectionId === item.id && styles.mobileTopSectionChipActive]}>
+                        <View style={styles.mobileTopSectionInner}>
+                          <Text style={[styles.mobileTopSectionIcon, activeSectionId === item.id && styles.mobileTopSectionIconActive]}>{TAB_SIGILS[item.id] || "•"}</Text>
+                          <Text style={[styles.mobileTopSectionText, activeSectionId === item.id && styles.mobileTopSectionTextActive]}>{item.label}</Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
               </View>
             ) : null}
 
             <View style={[styles.mainBoard, isCompact && styles.mainBoardCompact]}>
-              {isPhone ? null : (
+              {isPhone || isHubActive || visibleSections.length <= 1 ? null : (
                 <View style={[styles.leftRail, isCompact && styles.railCompact]}>
                   <Text style={styles.railHeading}>Menu</Text>
-                  {activeTab.sections.map((item) => (
+                  {visibleSections.map((item) => (
                     <Pressable key={item.id} onPress={() => setActiveSection(tab, item.id)} style={[styles.railLink, activeSectionId === item.id && styles.railLinkActive]}>
                       <Text style={[styles.railLinkText, activeSectionId === item.id && styles.railLinkTextActive]}>{item.label}</Text>
                     </Pressable>
                   ))}
-                  <Pressable onPress={() => setActiveSection("city", "tasks")} style={styles.cashButtonFrame}>
+                  <Pressable onPress={() => setActiveSection("profile", "tasks")} style={styles.cashButtonFrame}>
                     <Text style={styles.cashButtonText}>Zadania</Text>
                   </Pressable>
                 </View>
@@ -4921,74 +5364,48 @@ function AppRuntime() {
                   <></>
                 ) : null}
                 <View style={styles.contentHeaderBar}>
-                  <Text style={styles.contentHeaderLabel}>{activeSection.title}</Text>
-                  <Text style={styles.contentHeaderSub}>Hustle City</Text>
+                  <Text style={styles.contentHeaderLabel}>{isHubActive ? "Start" : activeSection.title}</Text>
+                  <Text style={styles.contentHeaderSub}>{isHubActive ? "Hub gry" : "Hustle City"}</Text>
                 </View>
                 {activeSectionContent}
-                {isPhone ? (
-                  <View style={styles.mobileBottomDock}>
-                    <Pressable onPress={() => setMobileHudOpen((prev) => !prev)} style={[styles.mobileHudToggle, mobileHudOpen && styles.mobileHudToggleActive]}>
-                      <Text style={styles.mobileHudToggleTitle}>{mobileHudOpen ? "Schowaj panel" : "Panel gracza"}</Text>
-                      <Text style={styles.mobileHudToggleMeta}>{topTask?.title || "Brak zadania"}</Text>
-                    </Pressable>
-                    {mobileHudOpen ? (
-                      <View style={styles.mobileQuickBoard}>
-                        <Pressable onPress={() => setActiveSection("city", "tasks")} style={styles.mobileTaskCard}>
-                          <Text style={styles.mobileTaskEyebrow}>Misja</Text>
-                          <Text style={styles.mobileTaskTitle}>{topTask.title}</Text>
-                          <Text style={styles.mobileTaskText}>{topTask.description}</Text>
-                        </Pressable>
-                        <View style={styles.mobileStatusGrid}>
-                          {mobileStatusCards.map((card) => (
-                            <View key={card.label} style={styles.mobileStatusCard}>
-                              <Text style={styles.mobileStatusLabel}>{card.label}</Text>
-                              <Text style={styles.mobileStatusValue}>{card.value}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
               </View>
 
               {isPhone ? null : (
                 <View style={[styles.rightRail, isCompact && styles.railCompact]}>
-                  <Pressable onPress={() => setActiveSection("city", "tasks")} style={styles.sidebarCard}>
-                    <Text style={styles.sidebarTitle}>Zadanie</Text>
-                    <Text style={styles.sidebarText}>{topTask.title}</Text>
-                    <Text style={styles.sidebarTinyText}>{topTask.description}</Text>
+                  <Pressable onPress={() => setIsHubActive(true)} style={styles.sidebarCard}>
+                    <Text style={styles.sidebarTitle}>Hub</Text>
+                    <Text style={styles.sidebarText}>Wroc do glownego wejscia gry.</Text>
+                    <Text style={styles.sidebarTinyText}>Najwazniejsze systemy sa zebrane w jednym miejscu.</Text>
                   </Pressable>
 
-                  <View style={styles.sidebarCard}>
-                    <Text style={styles.sidebarTitle}>Status</Text>
-                    <StatLine label="Bank" value={formatMoney(game.player.bank || 0)} visual={SYSTEM_VISUALS.bank} />
-                    <StatLine label="Napady" value={`${game.stats.heistsDone}`} visual={SYSTEM_VISUALS.heist} />
-                    <StatLine label="Skutecznosc" value={`${successRate}%`} visual={SYSTEM_VISUALS.respect} />
-                    <StatLine label="Gang" value={`${game.gang.members}/30`} visual={SYSTEM_VISUALS.gang} />
-                  </View>
-
-                  <View style={styles.sidebarCard}>
-                    <Text style={styles.sidebarTitle}>Szacun</Text>
-                    <Text style={styles.sidebarText}>Poziom {respectInfo.level}</Text>
-                    <ProgressBar progress={respectInfo.progress} />
-                    <ProgressDots progress={respectInfo.progress} />
-                  </View>
-
-                  <View style={styles.sidebarCardTall}>
-                    <Text style={styles.sidebarTiny}>Heat</Text>
-                    <Text style={styles.sidebarOnline}>{game.player.heat}%</Text>
-                    <Text style={styles.sidebarTiny}>Odsiadka</Text>
-                    <Text style={styles.sidebarNumberSmall}>{inJail(game.player) ? formatDuration(jailRemaining) : "WOLNY"}</Text>
-                    <Text style={styles.sidebarTiny}>Boosty</Text>
-                    <Text style={styles.sidebarOnline}>{game.activeBoosts.length}</Text>
-                  </View>
+                  <Pressable onPress={() => setActiveSection("profile", "tasks")} style={styles.sidebarCard}>
+                    <Text style={styles.sidebarTitle}>Aktywna misja</Text>
+                    <Text style={styles.sidebarText}>{topTask?.title || "Brak aktywnej misji"}</Text>
+                    <Text style={styles.sidebarTinyText}>{topTask?.description || "Wskocz do misji i odbierz nagrody."}</Text>
+                  </Pressable>
                 </View>
               )}
             </View>
           </View>
         </View>
       </ScrollView>
+      <QuickActionModal
+        visible={Boolean(quickActionModal)}
+        title={quickActionModalTitles[quickActionModal] || "Szybka akcja"}
+        onClose={() => {
+          setQuickActionModal(null);
+          setNotice(null);
+        }}
+      >
+        {renderQuickActionContent()}
+      </QuickActionModal>
+      <ResultModal
+        visible={Boolean(notice && isPhone && !quickActionModal)}
+        tone={notice?.tone === "failure" ? "failure" : notice?.tone === "success" ? "success" : "warning"}
+        title={notice?.title || "INFO"}
+        message={notice?.message || ""}
+        onClose={() => setNotice(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -5052,7 +5469,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
   },
   topStripContent: { flexDirection: "row", justifyContent: "space-between", gap: 18, paddingHorizontal: 14, paddingVertical: 10, alignItems: "flex-start" },
-  topStripContentPhone: { flexDirection: "column" },
+  topStripContentPhone: { flexDirection: "column", gap: 10, paddingTop: 8, paddingBottom: 8 },
   topStripProfile: { flexDirection: "row", gap: 10, alignItems: "flex-start", width: "32%" },
   topStripProfilePhone: { width: "100%" },
   profileShot: { width: 64, height: 78, borderWidth: 1, borderColor: "#7a7a7a", justifyContent: "space-between", padding: 6 },
@@ -5065,9 +5482,9 @@ const styles = StyleSheet.create({
   playerRank: { color: "#bcbcbc", fontSize: 12 },
   playerSmall: { color: "#b5912d", fontSize: 11 },
   statCluster: { flexDirection: "row", gap: 14, flex: 1, justifyContent: "flex-end" },
-  statClusterPhone: { width: "100%", justifyContent: "flex-start" },
-  statColumn: { gap: 6, width: 90 },
-  statColumnWide: { gap: 6, width: 120 },
+  statClusterPhone: { width: "100%", justifyContent: "flex-start", flexWrap: "wrap", gap: 10 },
+  statColumn: { gap: 6, width: 84 },
+  statColumnWide: { gap: 6, width: 112 },
   headerStat: { gap: 2 },
   headerStatLabel: { color: "#d0b34d", fontSize: 10, textTransform: "uppercase" },
   headerStatValue: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
@@ -5109,11 +5526,16 @@ const styles = StyleSheet.create({
   noticeDeltaChipNegative: { backgroundColor: "rgba(112,36,46,0.28)", borderColor: "rgba(218,105,122,0.5)" },
   noticeDeltaChipWarning: { backgroundColor: "rgba(115,83,22,0.28)", borderColor: "rgba(227,182,77,0.48)" },
   noticeDeltaText: { color: "#f7f2ea", fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
-  tabBarClassic: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#3c3c3c", backgroundColor: "#0b0b0b", maxHeight: 54 },
-  tabBarClassicContent: { paddingHorizontal: 8, paddingVertical: 8, gap: 8, alignItems: "center" },
-  tabButtonClassic: { minWidth: 76, paddingVertical: 9, paddingHorizontal: 12, borderWidth: 1, borderColor: "#2f2f2f", backgroundColor: "#0d0d0d", alignItems: "center", borderRadius: 999 },
-  tabButtonClassicActive: { backgroundColor: "#181818", borderColor: "#8e6c34" },
-  tabButtonClassicText: { color: "#b7b7b7", fontSize: 12, fontWeight: "700" },
+  tabBarShell: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#3c2f1f", backgroundColor: "#060606" },
+  tabBarClassic: { flex: 1, backgroundColor: "#060606", maxHeight: 66 },
+  tabBarClassicContent: { paddingHorizontal: 8, paddingVertical: 10, gap: 10, alignItems: "center" },
+  tabButtonClassic: { minWidth: 110, height: 52, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", borderRadius: 999, borderWidth: 1, borderColor: "#5d4418", backgroundColor: "#0b0b0b" },
+  tabButtonClassicActive: { borderColor: "#c7902e", backgroundColor: "#14120d" },
+  tabButtonHub: { marginLeft: 8 },
+  tabButtonClassicInner: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tabButtonClassicIcon: { color: "#c7902e", fontSize: 16, fontWeight: "900" },
+  tabButtonClassicIconActive: { color: "#f0c24d" },
+  tabButtonClassicText: { color: "#d7d7d7", fontSize: 12, fontWeight: "800", textTransform: "uppercase" },
   tabButtonClassicTextActive: { color: "#f0c24d" },
   mainBoard: { flexDirection: "row", alignItems: "flex-start" },
   mainBoardCompact: { flexDirection: "column" },
@@ -5138,7 +5560,12 @@ const styles = StyleSheet.create({
   sectionTitle: { color: "#d3d3d3", fontSize: 20, fontWeight: "700", marginBottom: 4 },
   sectionSubtitle: { color: "#8c8c8c", fontSize: 12, lineHeight: 18 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  actionTile: { width: "48%", minHeight: 106, padding: 14, borderRadius: 18, backgroundColor: "#141414", borderWidth: 1, borderColor: "#303030", justifyContent: "space-between" },
+  quickActionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  quickActionCard: { width: "31%", minWidth: 92, flexGrow: 1, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 16, backgroundColor: "#121315", borderWidth: 1, borderColor: "#2d2f36", alignItems: "center", gap: 8 },
+  quickActionIconWrap: { width: 42, height: 42, borderRadius: 12, backgroundColor: "#1c1d22", borderWidth: 1, borderColor: "#3a3c44", alignItems: "center", justifyContent: "center" },
+  quickActionIconText: { color: "#f0c24d", fontSize: 11, fontWeight: "900", letterSpacing: 0.7 },
+  quickActionTitle: { color: "#f4efe8", fontSize: 12, fontWeight: "800", textAlign: "center" },
+  actionTile: { flexBasis: 220, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 106, padding: 14, borderRadius: 18, backgroundColor: "#141414", borderWidth: 1, borderColor: "#303030", justifyContent: "space-between" },
   actionTileDanger: { backgroundColor: "#24110f", borderColor: "#6a2b20" },
   tileDisabled: { opacity: 0.45 },
   actionTileHeader: { gap: 10, marginBottom: 8 },
@@ -5147,7 +5574,7 @@ const styles = StyleSheet.create({
   statLine: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#1b1b1d", gap: 12 },
   statLineLabelWrap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
   statLineLabel: { color: "#a69e93", fontSize: 13, flex: 1 },
-  statLineValue: { color: "#f4efe8", fontSize: 13, fontWeight: "700", maxWidth: "54%", textAlign: "right" },
+  statLineValue: { color: "#f4efe8", fontSize: 13, fontWeight: "700", maxWidth: "58%", flexShrink: 1, textAlign: "right" },
   progressBar: { height: 8, borderRadius: 999, backgroundColor: "#1e1e20", overflow: "hidden", marginTop: 6 },
   progressFill: { height: "100%", backgroundColor: "#c49539" },
   dotRow: { flexDirection: "row", gap: 6, marginTop: 8 },
@@ -5158,7 +5585,7 @@ const styles = StyleSheet.create({
   listCard: { padding: 12, borderRadius: 18, backgroundColor: "#111214", borderWidth: 1, borderColor: "#2b2b31", marginBottom: 10 },
   districtCard: { padding: 10, borderRadius: 16, backgroundColor: "#17181c", borderWidth: 1, borderColor: "#2f3138", marginTop: 10 },
   listCardLocked: { opacity: 0.55 },
-  listCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12 },
+  listCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 12 },
   entityHead: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
   miniBadge: { width: 28, height: 28, borderRadius: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", backgroundColor: "#0d0f12" },
   miniBadgeLarge: { width: 34, height: 34, borderRadius: 11 },
@@ -5177,14 +5604,14 @@ const styles = StyleSheet.create({
   entityCode: { color: "#f4efe8", fontSize: 9, fontWeight: "800", letterSpacing: 0.8 },
   listCardTitle: { color: "#f3eee7", fontSize: 15, fontWeight: "800", marginBottom: 4 },
   listCardMeta: { color: "#999082", fontSize: 12, lineHeight: 18 },
-  listCardReward: { color: "#d6a04f", fontSize: 13, fontWeight: "800", maxWidth: 110, textAlign: "right" },
-  oddsRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
-  oddsBlock: { flex: 1, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "#27282d", backgroundColor: "#101114" },
+  listCardReward: { color: "#d6a04f", fontSize: 13, fontWeight: "800", maxWidth: "100%", flexShrink: 1, textAlign: "right" },
+  oddsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
+  oddsBlock: { flex: 1, minWidth: 132, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "#27282d", backgroundColor: "#101114" },
   oddsLabel: { color: "#948a7d", fontSize: 11, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.8 },
   oddsValue: { color: "#f4d37e", fontSize: 18, fontWeight: "800" },
   inlineButton: { alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 2, backgroundColor: "#201712", borderWidth: 1, borderColor: "#5b3529" },
   inlineButtonText: { color: "#f6efe6", fontWeight: "700", fontSize: 13 },
-  inlineRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  inlineRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 },
   costLabel: { color: "#c2b8a9", fontWeight: "700", flexShrink: 1 },
   marketRow: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#1f2024" },
   marketInfo: { marginBottom: 8 },
@@ -5205,10 +5632,26 @@ const styles = StyleSheet.create({
   sidebarNumberSmall: { color: "#ffffff", fontSize: 20, fontWeight: "800", lineHeight: 22, marginBottom: 8 },
   mobileTopSectionRail: { borderBottomWidth: 1, borderBottomColor: "#24262c", backgroundColor: "#090a0d", paddingVertical: 8, paddingHorizontal: 8 },
   mobileTopSectionRailContent: { gap: 8, paddingRight: 4 },
-  mobileTopSectionChip: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 999, backgroundColor: "#121317", borderWidth: 1, borderColor: "#2d2f36" },
-  mobileTopSectionChipActive: { backgroundColor: "#1a1510", borderColor: "#a77732" },
-  mobileTopSectionText: { color: "#d1d4da", fontSize: 11, fontWeight: "700" },
+  mobileTopSectionChip: { minHeight: 42, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: "#5d4418", backgroundColor: "#101114", alignItems: "center", justifyContent: "center" },
+  mobileTopSectionChipActive: { borderColor: "#c7902e", backgroundColor: "#17140d" },
+  mobileTopSectionInner: { flexDirection: "row", alignItems: "center", gap: 8 },
+  mobileTopSectionIcon: { color: "#c7902e", fontSize: 14, fontWeight: "900" },
+  mobileTopSectionIconActive: { color: "#f0c24d" },
+  mobileTopSectionText: { color: "#d7d7d7", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
   mobileTopSectionTextActive: { color: "#f0c24d" },
+  mobileHudRail: { borderBottomWidth: 1, borderBottomColor: "#1f2126", backgroundColor: "#0b0c10", paddingVertical: 8 },
+  mobileHudRailContent: { gap: 8, paddingHorizontal: 8, paddingRight: 14 },
+  mobileHudCard: { minWidth: 100, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 16, borderWidth: 1, backgroundColor: "#121317", borderColor: "#2a2c33" },
+  mobileHudCardCash: { backgroundColor: "#14120d", borderColor: "#6f5527" },
+  mobileHudCardEnergy: { backgroundColor: "#10151a", borderColor: "#32516f" },
+  mobileHudCardHp: { backgroundColor: "#14110f", borderColor: "#6f4032" },
+  mobileHudCardHeat: { backgroundColor: "#18110f", borderColor: "#875034" },
+  mobileHudCardRespect: { backgroundColor: "#13110d", borderColor: "#81662e" },
+  mobileHudCardLabel: { color: "#8e9299", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.9, marginBottom: 4 },
+  mobileHudCardValue: { color: "#f4efe8", fontSize: 15, fontWeight: "800" },
+  mobileHudMissionCard: { minWidth: 180, maxWidth: 220, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, borderWidth: 1, borderColor: "#604327", backgroundColor: "#16110d", justifyContent: "center" },
+  mobileHudMissionLabel: { color: "#aa8952", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
+  mobileHudMissionTitle: { color: "#fff1dd", fontSize: 13, fontWeight: "800" },
   mobileBottomDock: { marginTop: 10, gap: 8 },
   mobileHudToggle: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, backgroundColor: "#101114", borderWidth: 1, borderColor: "#292c33", gap: 4 },
   mobileHudToggleActive: { borderColor: "#7d5f2d", backgroundColor: "#14120e" },
@@ -5220,7 +5663,7 @@ const styles = StyleSheet.create({
   mobileTaskTitle: { color: "#fff1dd", fontSize: 18, fontWeight: "900", marginBottom: 6 },
   mobileTaskText: { color: "#d5c4ab", fontSize: 12, lineHeight: 17 },
   mobileStatusGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  mobileStatusCard: { width: "48%", minHeight: 74, padding: 12, borderRadius: 16, backgroundColor: "#101114", borderWidth: 1, borderColor: "#292c33" },
+  mobileStatusCard: { flexBasis: 160, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 74, padding: 12, borderRadius: 16, backgroundColor: "#101114", borderWidth: 1, borderColor: "#292c33" },
   mobileStatusLabel: { color: "#8d9199", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
   mobileStatusValue: { color: "#f5efe6", fontSize: 15, fontWeight: "800" },
   tag: { paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "#1f271f", borderRadius: 999, alignSelf: "flex-start" },
@@ -5240,37 +5683,34 @@ const styles = StyleSheet.create({
   historyChipBlack: { backgroundColor: "#121315", borderColor: "#4f5258" },
   historyChipGreen: { backgroundColor: "#17381f", borderColor: "#3e7b4a" },
   historyChipText: { color: "#f0ede7", fontWeight: "700" },
-  chatComposer: { flexDirection: "row", gap: 10, marginBottom: 12, alignItems: "center" },
-  chatInput: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: "#2f3034", backgroundColor: "#111214", color: "#f1f1f1", paddingHorizontal: 12, paddingVertical: 10 },
+  chatComposer: { flexDirection: "row", gap: 10, marginBottom: 12, alignItems: "center", flexWrap: "wrap" },
+  chatInput: { flex: 1, minWidth: 180, minHeight: 46, borderWidth: 1, borderColor: "#2f3034", backgroundColor: "#111214", color: "#f1f1f1", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14 },
   chatBubble: { padding: 12, backgroundColor: "#111111", borderWidth: 1, borderColor: "#26282b", marginBottom: 8 },
   chatAuthor: { color: "#f0c24d", fontWeight: "800", marginBottom: 4 },
   chatTime: { color: "#999999", fontWeight: "400" },
   chatText: { color: "#dbd5ca", lineHeight: 18 },
   prisonChatWrap: { marginTop: 14 },
-  lockedPanel: { marginTop: 12, padding: 14, borderWidth: 1, borderColor: "#2c2e31", backgroundColor: "#121314" },
+  lockedPanel: { marginTop: 12, padding: 14, borderWidth: 1, borderColor: "#2c2e31", backgroundColor: "#121314", borderRadius: 18 },
   lockedPanelText: { color: "#a7a097", lineHeight: 18 },
-  heroBanner: { padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#3c2c1d", backgroundColor: "#1a130d" },
-  sceneArtwork: { minHeight: 150, marginBottom: 12, borderWidth: 1, borderColor: "#34271f", overflow: "hidden", justifyContent: "flex-end", borderRadius: 18 },
+  heroBanner: { padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#3c2c1d", backgroundColor: "#1a130d", borderRadius: 18 },
+  sceneArtwork: { minHeight: 138, marginBottom: 12, borderWidth: 1, borderColor: "#34271f", overflow: "hidden", justifyContent: "flex-end", borderRadius: 18 },
   sceneArtworkBackdrop: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0 },
   sceneArtworkImage: { opacity: 0.92 },
   sceneArtworkTint: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0 },
-  sceneGlow: { position: "absolute", width: 180, height: 180, borderRadius: 999, backgroundColor: "rgba(255,190,120,0.08)", top: -30, right: -30 },
-  sceneBars: { position: "absolute", left: 16, right: 16, bottom: 0, flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  sceneBar: { flex: 1, backgroundColor: "rgba(255,255,255,0.08)", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.2)" },
-  sceneCopy: { padding: 16, gap: 5 },
+  sceneCopy: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12, gap: 3 },
   sceneEyebrow: { color: "#f0c24d", fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.2 },
-  sceneTitle: { color: "#f4efe8", fontSize: 24, fontWeight: "900" },
-  sceneLine: { color: "#c7baaa", lineHeight: 18, maxWidth: "78%" },
+  sceneTitle: { color: "#f4efe8", fontSize: 20, fontWeight: "900" },
+  sceneLine: { color: "#c7baaa", lineHeight: 16, fontSize: 12, maxWidth: "68%" },
   heroBannerTitle: { color: "#f4d37e", fontSize: 20, fontWeight: "900", marginBottom: 6 },
   heroBannerText: { color: "#d8cab5", lineHeight: 18 },
   mobileOverviewGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
-  mobileOverviewCard: { width: "48%", minHeight: 74, padding: 12, borderRadius: 16, backgroundColor: "#15161a", borderWidth: 1, borderColor: "#2d3037" },
+  mobileOverviewCard: { flexBasis: 160, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 74, padding: 12, borderRadius: 16, backgroundColor: "#15161a", borderWidth: 1, borderColor: "#2d3037" },
   mobileOverviewLabel: { color: "#8e929a", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
   mobileOverviewValue: { color: "#f4efe8", fontSize: 16, fontWeight: "800" },
   mobileOverviewValueSmall: { color: "#f4efe8", fontSize: 13, fontWeight: "800", lineHeight: 18 },
   playerProfilePanel: { gap: 12 },
   playerProfileMain: { flexDirection: "row", gap: 12, alignItems: "stretch", flexWrap: "wrap" },
-  playerProfileHero: { width: 280, minHeight: 220, borderWidth: 1, borderColor: "#5a4123", padding: 16, justifyContent: "space-between" },
+  playerProfileHero: { flexBasis: 280, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 220, borderWidth: 1, borderColor: "#5a4123", padding: 16, justifyContent: "space-between" },
   playerProfileMeta: { gap: 5, marginTop: 14 },
   playerProfileName: { color: "#fff7ea", fontSize: 30, fontWeight: "900" },
   playerProfileGang: { color: "#f2c35a", fontSize: 15, fontWeight: "700" },
@@ -5294,7 +5734,7 @@ const styles = StyleSheet.create({
   avatarChoiceSigil: { color: "#f4efe8", fontSize: 22, fontWeight: "900", letterSpacing: 1.4 },
   avatarChoiceText: { color: "#dfd7cc", fontSize: 12, fontWeight: "700" },
   betInput: { minWidth: 92, minHeight: 42, borderWidth: 1, borderColor: "#5b3529", backgroundColor: "#120f0d", color: "#f4efe8", paddingHorizontal: 12, paddingVertical: 8, textAlign: "center" },
-  betPanel: { width: "48%", padding: 12, borderWidth: 1, borderColor: "#2d2d31", backgroundColor: "#101114" },
+  betPanel: { flexBasis: 160, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, padding: 12, borderWidth: 1, borderColor: "#2d2d31", backgroundColor: "#101114" },
   betPanelLabel: { color: "#a89d8f", fontSize: 12, marginBottom: 8, textTransform: "uppercase" },
   rouletteWheel: { width: 168, height: 168, borderRadius: 999, alignItems: "center", justifyContent: "center", marginBottom: 12 },
   rouletteRingOuter: { position: "absolute", width: 168, height: 168, borderRadius: 999, borderWidth: 16, borderTopColor: "#8c2424", borderRightColor: "#111111", borderBottomColor: "#8c2424", borderLeftColor: "#174c20" },
@@ -5315,4 +5755,6 @@ const styles = StyleSheet.create({
   taskMeta: { gap: 6, alignItems: "flex-end" },
   flexOne: { flex: 1 },
 });
+
+
 

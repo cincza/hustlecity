@@ -39,6 +39,20 @@ export function CityScreen({
   helpers,
   actions,
 }) {
+  const quickStartCards = [
+    { id: "quick-heist", title: "Napad", subtitle: "Najwyzszy odblokowany prog.", visual: systemVisuals.heist, onPress: actions.quickHeist, danger: true },
+    { id: "bank", title: "Bank", subtitle: `Saldo ${formatMoney(game.player.bank || 0)}.`, visual: systemVisuals.bank, onPress: () => actions.openSection("city", "bank") },
+    { id: "casino", title: "Kasyno", subtitle: "Blackjack i ruletka na szybko.", visual: systemVisuals.casino, onPress: () => actions.openSection("profile", "casino") },
+    { id: "market", title: "Rynek", subtitle: "Kup, sprzedaj, rusz towar.", visual: systemVisuals.market, onPress: () => actions.openSection("market", "street") },
+  ];
+
+  const empireCards = [
+    { id: "club", title: "Klub", subtitle: game.club?.owned ? "Noc, stash i rozliczenia." : "Przejmij albo odwiedz lokal.", visual: systemVisuals.club, onPress: () => actions.openSection("empire", "club") },
+    { id: "cashflow", title: "Biznes", subtitle: `${formatMoney(totalBusinessIncome)}/min z zaplecza.`, visual: systemVisuals.factory, onPress: () => actions.openSection("empire", "businesses") },
+    { id: "street", title: "Ulica", subtitle: `${formatMoney(totalEscortIncome)}/min i przypal.`, visual: systemVisuals.street, onPress: () => actions.openSection("empire", "club") },
+    { id: "tasks", title: "Misje", subtitle: "Nagrody i szybki progress.", visual: systemVisuals.respect, onPress: () => actions.openSection("city", "tasks") },
+  ];
+
   const renderCollectionsPanel = (
     title = "Rozliczenia",
     subtitle = "Koperty, limity i odbior."
@@ -104,40 +118,26 @@ export function CityScreen({
         />
         <SectionCard title="Tablica glowna" subtitle="Najwazniejsze rzeczy od razu.">
           <View style={styles.grid}>
-            <ActionTile
-              title="Szybki napad"
-              subtitle="Wchodzisz od razu na najwyzszy odblokowany prog."
-              visual={systemVisuals.heist}
-              onPress={actions.quickHeist}
-              danger
-            />
-            <ActionTile title="Fightclub" subtitle="Sparing podbija sile, zrecznosc i szacun." visual={systemVisuals.pvp} onPress={actions.fightClubRound} />
-            <ActionTile title="Odbierz haracz" subtitle={gangTributeRemaining > 0 ? `Kolejna koperta za ${formatCooldown(gangTributeRemaining)}.` : "Regularna wyplata z terenu i ochrony."} visual={systemVisuals.gang} onPress={actions.collectGangTribute} disabled={!game.gang.joined || gangTributeRemaining > 0} />
-            <ActionTile title="Odpal noc w klubie" subtitle={clubNightRemaining > 0 ? `Klub pracuje. Wroc za ${formatCooldown(clubNightRemaining)}.` : "Sprzedaj towar wrzucony do klubu."} visual={systemVisuals.club} onPress={actions.runClubNight} disabled={!game.club.owned || clubNightRemaining > 0} />
-            <ActionTile title="Zgarnij biznesy" subtitle={Math.floor(game.collections?.businessCash || 0) > 0 ? formatMoney(game.collections.businessCash) : "Skrytka biznesow jest pusta."} visual={systemVisuals.cash} onPress={actions.collectBusinessIncome} disabled={Math.floor(game.collections?.businessCash || 0) <= 0} />
-            <ActionTile title="Zgarnij ulice" subtitle={Math.floor(game.collections?.escortCash || 0) > 0 ? formatMoney(game.collections.escortCash) : "Dziewczyny jeszcze nie rozliczyly nocy."} visual={systemVisuals.street} onPress={actions.collectEscortIncome} disabled={Math.floor(game.collections?.escortCash || 0) <= 0} />
-          </View>
-          <View style={styles.mobileOverviewGrid}>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Lokale / min</Text>
-              <Text style={styles.mobileOverviewValue}>{formatMoney(totalBusinessIncome)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Ulica / min</Text>
-              <Text style={styles.mobileOverviewValue}>{formatMoney(totalEscortIncome)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Biznesy do odbioru</Text>
-              <Text style={styles.mobileOverviewValue}>{formatMoney(game.collections?.businessCash || 0)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Ulica do odbioru</Text>
-              <Text style={styles.mobileOverviewValue}>{formatMoney(game.collections?.escortCash || 0)}</Text>
-            </View>
+            {quickStartCards.map((card) => (
+              <ActionTile key={card.id} title={card.title} subtitle={card.subtitle} visual={card.visual} onPress={card.onPress} danger={card.danger} />
+            ))}
           </View>
         </SectionCard>
 
-        <SectionCard title="Status miasta" subtitle="Timery, progi i capy.">
+        <SectionCard title="Imperium i odbiory" subtitle="Cashflow, noc i szybkie wejscia.">
+          <View style={styles.grid}>
+            {empireCards.map((card) => (
+              <ActionTile key={card.id} title={card.title} subtitle={card.subtitle} visual={card.visual} onPress={card.onPress} />
+            ))}
+            <ActionTile title="Fightclub" subtitle="Sparing podbija sile, zrecznosc i szacun." visual={systemVisuals.pvp} onPress={actions.fightClubRound} />
+            <ActionTile title="Haracz" subtitle={gangTributeRemaining > 0 ? `Kolejna koperta za ${formatCooldown(gangTributeRemaining)}.` : "Regularna wyplata z terenu i ochrony."} visual={systemVisuals.gang} onPress={actions.collectGangTribute} disabled={!game.gang.joined || gangTributeRemaining > 0} />
+            <ActionTile title="Noc w klubie" subtitle={clubNightRemaining > 0 ? `Wroc za ${formatCooldown(clubNightRemaining)}.` : "Sprzedaj towar wrzucony do klubu."} visual={systemVisuals.club} onPress={actions.runClubNight} disabled={!game.club.owned || clubNightRemaining > 0} />
+            <ActionTile title="Odbierz biznes" subtitle={Math.floor(game.collections?.businessCash || 0) > 0 ? formatMoney(game.collections.businessCash) : "Skrytka pusta."} visual={systemVisuals.cash} onPress={actions.collectBusinessIncome} disabled={Math.floor(game.collections?.businessCash || 0) <= 0} />
+            <ActionTile title="Odbierz ulice" subtitle={Math.floor(game.collections?.escortCash || 0) > 0 ? formatMoney(game.collections.escortCash) : "Rozliczenie puste."} visual={systemVisuals.street} onPress={actions.collectEscortIncome} disabled={Math.floor(game.collections?.escortCash || 0) <= 0} />
+          </View>
+        </SectionCard>
+
+        <SectionCard title="Puls miasta" subtitle="Najwazniejsze liczby bez sciany tekstu.">
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Energia</Text>
@@ -154,6 +154,14 @@ export function CityScreen({
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Szansa panienki</Text>
               <Text style={styles.mobileOverviewValue}>{`${Math.round(escortFindChance * 100)}%`}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Biznes / min</Text>
+              <Text style={styles.mobileOverviewValue}>{formatMoney(totalBusinessIncome)}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Ulica / min</Text>
+              <Text style={styles.mobileOverviewValue}>{formatMoney(totalEscortIncome)}</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Cap biznesow</Text>
@@ -185,7 +193,7 @@ export function CityScreen({
               </View>
             </View>
             <View style={styles.inlineRow}>
-              <Text style={styles.costLabel}>{formatMoney(task.rewardCash)} i +{task.rewardRespect} szacunu</Text>
+              <Text style={styles.costLabel}>{formatMoney(task.rewardCash)} i +{task.rewardXp} XP</Text>
               <Pressable onPress={() => actions.claimTask(task)} style={[styles.inlineButton, (!task.completed || task.claimed) && styles.tileDisabled]}>
                 <Text style={styles.inlineButtonText}>{task.claimed ? "Odebrane" : "Odbierz"}</Text>
               </Pressable>
@@ -253,7 +261,7 @@ export function CityScreen({
                   <Text style={styles.listCardTitle}>{exercise.name}</Text>
                   <Text style={styles.listCardMeta}>{exercise.note} | koszt energii {exercise.costEnergy}</Text>
                 </View>
-                <Pressable onPress={() => actions.doGymExercise(exercise)} style={[styles.inlineButton, !helpers.hasGymPass(game.player) && styles.tileDisabled]}>
+                <Pressable onPress={() => actions.handleTrain(exercise)} style={[styles.inlineButton, !helpers.hasGymPass(game.player) && styles.tileDisabled]}>
                   <Text style={styles.inlineButtonText}>Cwicz</Text>
                 </Pressable>
               </View>
@@ -274,7 +282,7 @@ export function CityScreen({
                 <Text style={styles.listCardTitle}>{meal.name}</Text>
                 <Text style={styles.listCardMeta}>+{meal.energy} energii</Text>
               </View>
-              <Pressable onPress={() => actions.buyMeal(meal)} style={styles.inlineButton}>
+              <Pressable onPress={() => actions.handleEat(meal)} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Kup {formatMoney(meal.price)}</Text>
               </Pressable>
             </View>
@@ -289,7 +297,7 @@ export function CityScreen({
       <StatLine label="Obecne zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} visual={systemVisuals.defense} />
       <StatLine label="Heat" value={`${game.player.heat}%`} visual={systemVisuals.heat} />
       <View style={styles.grid}>
-        <ActionTile title="Lekarz zaplecza" subtitle="Koszt $220, +30 HP i lekki zjazd heat." visual={systemVisuals.defense} onPress={actions.heal} />
+        <ActionTile title="Lekarz zaplecza" subtitle="Koszt $220, +30 HP i lekki zjazd heat." visual={systemVisuals.defense} onPress={actions.handleHeal} />
         <ActionTile title="Kaucja" subtitle={helpers.inJail(game.player) ? `Wyjdz za ${formatMoney(400 + Math.ceil(jailRemaining / 1000) * 8)}` : "Niedostepne poza odsiadka."} visual={systemVisuals.bank} onPress={actions.bribeOutOfJail} disabled={!helpers.inJail(game.player)} />
       </View>
     </SectionCard>

@@ -26,11 +26,11 @@ export function ProfileScreen({
   // TODO: TO_MIGRATE_TO_SERVER profile and protection stats still reflect mixed local/server state prepared in App.js.
   if (section === "summary") {
     return (
-      <SectionCard title="Profil" subtitle="Przeglad calej postaci, progresu i wartosci bojowych.">
+      <SectionCard title="Profil" subtitle="Twarz, staty i progres.">
         <SceneArtwork
           eyebrow="Profil"
           title="Twoja twarz w Hustle City"
-          lines={["Tu zbiera sie caly progres postaci: avatar, szacun, bojowe staty i wartosc na ulicy.", "Wysoki poziom ma byc widoczny od razu po odpaleniu profilu."]}
+          lines={["Avatar, szacun i wartosc na ulicy."]}
           accent={["#3f2818", "#16100c", "#050505"]}
           source={sceneBackgrounds.profile}
         />
@@ -60,9 +60,25 @@ export function ProfileScreen({
             ))}
           </View>
         </View>
+        <View style={styles.mobileOverviewGrid}>
+          <View style={styles.mobileOverviewCard}>
+            <Text style={styles.mobileOverviewLabel}>Ranga</Text>
+            <Text style={styles.mobileOverviewValueSmall}>{getRankTitle(game.player.respect)}</Text>
+          </View>
+          <View style={styles.mobileOverviewCard}>
+            <Text style={styles.mobileOverviewLabel}>Szacunek</Text>
+            <Text style={styles.mobileOverviewValue}>{game.player.respect}</Text>
+          </View>
+          <View style={styles.mobileOverviewCard}>
+            <Text style={styles.mobileOverviewLabel}>Kasa</Text>
+            <Text style={styles.mobileOverviewValue}>{formatMoney(game.player.cash)}</Text>
+          </View>
+          <View style={styles.mobileOverviewCard}>
+            <Text style={styles.mobileOverviewLabel}>XP</Text>
+            <Text style={styles.mobileOverviewValueSmall}>{`${respectInfo.currentXp}/${respectInfo.requirement}`}</Text>
+          </View>
+        </View>
         <StatLine label="Ksywa" value={game.player.name} />
-        <StatLine label="Ranga" value={getRankTitle(game.player.respect)} />
-        <StatLine label="Poziom" value={`${respectInfo.level}`} />
         <StatLine label="Atak" value={`${effectivePlayer.attack}`} />
         <StatLine label="Obrona" value={`${effectivePlayer.defense}`} />
         <StatLine label="Zrecznosc" value={`${effectivePlayer.dexterity}`} />
@@ -70,7 +86,6 @@ export function ProfileScreen({
         <StatLine label="Zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} />
         <StatLine label="Laczny zarobek" value={formatMoney(game.stats.totalEarned)} />
         <StatLine label="Wygrane napady" value={`${game.stats.heistsWon}`} />
-        <StatLine label="Premium" value={`${game.player.premiumTokens}`} />
       </SectionCard>
     );
   }
@@ -80,15 +95,16 @@ export function ProfileScreen({
       <>
         <SceneArtwork
           eyebrow="Szacun"
-          title="Kazdy poziom wbija sie ciezej"
-          lines={["Masz pasek i kropki, a potem coraz wiekszy prog do kolejnego levelu.", "To ma dawac prawdziwe poczucie progresu, a nie szybki sprint do konca drabinki."]}
+          title="Kazdy prog szacunku wbija sie ciezej"
+          lines={["Rosniesz szacunek po szacunku."]}
           accent={["#412517", "#160f0c", "#050505"]}
           source={sceneBackgrounds.profile}
         />
-        <SectionCard title="Szacun" subtitle="Masz pasek i kropki, a kazdy kolejny poziom wbija sie coraz ciezej.">
+        <SectionCard title="Szacun" subtitle="Pasek progresu i kolejny prog.">
           <StatLine label="Aktualny szacun" value={`${game.player.respect}`} />
-          <StatLine label="Poziom" value={`${respectInfo.level}`} />
-          <StatLine label="Do nastepnego poziomu" value={`${respectInfo.nextGoal - game.player.respect}`} />
+          <StatLine label="XP" value={`${respectInfo.currentXp} / ${respectInfo.requirement}`} />
+          <StatLine label="Nastepny prog szacunku" value={`${respectInfo.nextLevel}`} />
+          <StatLine label="Brakuje XP" value={`${respectInfo.xpRemaining}`} />
           <ProgressBar progress={respectInfo.progress} />
           <ProgressDots progress={respectInfo.progress} />
         </SectionCard>
@@ -104,11 +120,11 @@ export function ProfileScreen({
         <SceneArtwork
           eyebrow="Ochrona"
           title="Staty maja robic robote"
-          lines={["Atak pomaga przebic trudnosc napadu, obrona ogranicza wpierdol i ryzyko celi, a zrecznosc robi najwiecej przy wejsciu i wyjsciu.", "Im wyzszy heat, tym trudniej utrzymac czysta robote."]}
+          lines={["Atak, obrona i heat decyduja o ryzyku."]}
           accent={["#38271a", "#15100c", "#050505"]}
           source={sceneBackgrounds.profile}
         />
-        <SectionCard title="Ochrona" subtitle="Na razie ochrone robia staty i gang, ale juz to realnie pracuje na wynik napadow.">
+        <SectionCard title="Ochrona" subtitle="Staty, gang i ryzyko.">
           <StatLine label="Obrona bazowa" value={`${game.player.defense}`} />
           <StatLine label="Zrecznosc bazowa" value={`${game.player.dexterity}`} />
           <StatLine label="Premia gangu" value={`+${Math.round(game.gang.members * 0.3)} do bezpieczenstwa akcji`} />

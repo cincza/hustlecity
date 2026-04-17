@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { getRespectInfo } from "../../shared/progression.js";
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -11,29 +12,6 @@ export function getRankTitle(respect) {
   if (respect >= 18) return "Rozgrywajacy";
   if (respect >= 10) return "Mlody wilk";
   return "Swiezak";
-}
-
-export function getRespectInfo(respect) {
-  let level = 1;
-  let remaining = respect;
-  let requirement = 12;
-  let currentStart = 0;
-
-  while (remaining >= requirement) {
-    remaining -= requirement;
-    currentStart += requirement;
-    level += 1;
-    requirement = Math.round(requirement * 1.25 + 4);
-  }
-
-  return {
-    level,
-    currentStart,
-    requirement,
-    progress: requirement > 0 ? remaining / requirement : 1,
-    currentValue: remaining,
-    nextGoal: currentStart + requirement,
-  };
 }
 
 export function getEffectivePlayer(player, activeBoosts) {
@@ -83,14 +61,14 @@ export function getEscortFindChance(state) {
 
 export function usePlayerState({ game, avatars }) {
   const safeGame = game || {
-    player: { respect: 0, attack: 0, defense: 0, dexterity: 0, charisma: 0, avatarId: null, name: "Gracz", gymPassTier: null, gymPassUntil: null, jailUntil: null },
+    player: { respect: 0, xp: 0, attack: 0, defense: 0, dexterity: 0, charisma: 0, avatarId: null, name: "Gracz", gymPassTier: null, gymPassUntil: null, jailUntil: null },
     activeBoosts: [],
     gang: { joined: false, name: null },
     club: { owned: false, popularity: 0 },
   };
   const safeAvatars = Array.isArray(avatars) && avatars.length ? avatars : [{ id: "fallback", sigil: "HC", colors: ["#444444", "#111111"], name: "Fallback" }];
 
-  const respectInfo = useMemo(() => getRespectInfo(safeGame.player.respect), [safeGame.player.respect]);
+  const respectInfo = useMemo(() => getRespectInfo(safeGame.player.respect, safeGame.player.xp), [safeGame.player.respect, safeGame.player.xp]);
   const effectivePlayer = useMemo(
     () => getEffectivePlayer(safeGame.player, safeGame.activeBoosts),
     [safeGame.player, safeGame.activeBoosts]

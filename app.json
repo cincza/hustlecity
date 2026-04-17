@@ -5,8 +5,18 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/app-icon.png",
+    "splash": {
+      "image": "./assets/branding/hustle-city-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090806"
+    },
     "android": {
-      "package": "com.hustlecity.mobile"
+      "package": "com.hustlecity.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#090806"
+      }
     },
     "assetBundlePatterns": [
       "**/*"
