@@ -312,6 +312,7 @@ export function CityScreen({
 
   if (section === "bank") {
     const maxDepositAmount = Math.max(0, Math.floor(Number(game.player.cash || 0)));
+    const maxWithdrawAmount = Math.max(0, Math.floor(Number(game.player.bank || 0)));
 
     return (
       <SectionCard title="Bank" subtitle={`Tryb: ${apiStatus === "online" ? "online" : "lokalny"}.`}>
@@ -332,14 +333,23 @@ export function CityScreen({
               placeholder="Np. 25000"
               placeholderTextColor="#6c6c6c"
               keyboardType="numeric"
-              style={[styles.chatInput, styles.flexOne]}
+              style={styles.chatInput}
             />
+          </View>
+          <View style={styles.inlineRow}>
             <Pressable
               onPress={() => setBankAmountDraft(String(maxDepositAmount))}
               style={[styles.inlineButton, maxDepositAmount <= 0 && styles.tileDisabled]}
               disabled={maxDepositAmount <= 0}
             >
               <Text style={styles.inlineButtonText}>Wplac wszystko</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setBankAmountDraft(String(maxWithdrawAmount))}
+              style={[styles.inlineButton, maxWithdrawAmount <= 0 && styles.tileDisabled]}
+              disabled={maxWithdrawAmount <= 0}
+            >
+              <Text style={styles.inlineButtonText}>Wyplac wszystko</Text>
             </Pressable>
           </View>
         </View>
