@@ -450,18 +450,39 @@ async function withPlayerActionLock(req, actionKey, handler) {
     throw new Error("Authenticated user id missing for action lock");
   }
 
-  const key = `${req.user.id}:mutation`;
-  if (state.actionLocks.has(key)) {
+  return withUserMutationLocks([req.user.id], actionKey, handler);
+}
+
+async function withUserMutationLocks(userIds, actionKey, handler) {
+  const keys = Array.from(
+    new Set(
+      (Array.isArray(userIds) ? userIds : [userIds])
+        .map((userId) => String(userId || "").trim())
+        .filter(Boolean)
+        .map((userId) => `${userId}:mutation`)
+    )
+  ).sort();
+
+  if (!keys.length) {
+    throw new Error("At least one user id is required for mutation lock");
+  }
+
+  const conflictingKey = keys.find((key) => state.actionLocks.has(key));
+  if (conflictingKey) {
     const error = new Error(`Another action is already in progress (${actionKey})`);
     error.statusCode = 409;
     throw error;
   }
 
-  state.actionLocks.set(key, true);
+  keys.forEach((key) => {
+    state.actionLocks.set(key, true);
+  });
   try {
     return await handler();
   } finally {
-    state.actionLocks.delete(key);
+    keys.forEach((key) => {
+      state.actionLocks.delete(key);
+    });
   }
 }
 
@@ -1014,6 +1035,153 @@ app.get("/social/players", auth, asyncHandler(async (req, res) => {
 
   res.json({
     players: filtered.slice(0, 40),
+  });
+}));
+
+app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "social-player-attack",
+      1800,
+      "Player attack rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const targetUserId = String(req.params?.id || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "Target player id is required" });
+    return;
+  }
+  if (targetUserId === req.user.id) {
+    res.status(400).json({ error: "You cannot attack yourself" });
+    return;
+  }
+
+  await withUserMutationLocks([req.user.id, targetUserId], "social-player-attack", async () => {
+    const [attackerRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!attackerRecord?.playerData) {
+      const error = new Error("Authenticated attacker not found");
+      error.statusCode = 401;
+      throw error;
+    }
+    if (!targetRecord?.playerData) {
+      const error = new Error("Target player not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const now = Date.now();
+    const attacker = attackerRecord.playerData;
+    const target = targetRecord.playerData;
+    const targetIsOnline = isUserOnline(targetRecord._id, now);
+
+    syncPlayerState(attacker, now);
+    syncPlayerState(target, now);
+    syncCasinoDay(attacker, now);
+    syncCasinoDay(target, now);
+
+    if (isPlayerJailed(attacker, now)) {
+      const error = new Error("Nie odpalisz ataku zza krat.");
+      error.statusCode = 409;
+      throw error;
+    }
+    if (Number(attacker.profile?.energy || 0) < 2) {
+      const error = new Error("Za malo energii na atak gracza.");
+      error.statusCode = 409;
+      throw error;
+    }
+    if (!targetIsOnline) {
+      const error = new Error("Ten gracz nie jest teraz online.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const attackerName =
+      attacker?.profile?.name || attackerRecord.username || "Gracz";
+    const targetName =
+      target?.profile?.name || targetRecord.username || "Gracz";
+
+    const attackerPower =
+      Number(attacker.profile?.attack || 0) * 1.1 +
+      Number(attacker.profile?.defense || 0) * 0.7 +
+      Number(attacker.profile?.dexterity || 0) * 1.3 +
+      Number(attacker.profile?.respect || 0) * 0.35;
+    const defenderPower =
+      Number(target.profile?.attack || 0) * 1.05 +
+      Number(target.profile?.defense || 0) * 0.8 +
+      Number(target.profile?.dexterity || 0) * 1.15 +
+      Number(target.profile?.respect || 0) * 0.32;
+    const successChance = clamp(
+      0.4 + (attackerPower - defenderPower) / 120 - Number(attacker.profile?.heat || 0) * 0.002,
+      0.08,
+      0.9
+    );
+
+    const attackSucceeded = Math.random() < successChance;
+    let steal = 0;
+    let damage = 0;
+    let message = "";
+
+    attacker.profile.energy = Math.max(0, Number(attacker.profile.energy || 0) - 2);
+
+    if (attackSucceeded) {
+      steal = Math.min(
+        Number(target.profile?.cash || 0),
+        Math.max(250, randomBetween(400, 2400))
+      );
+      attacker.profile.cash = Number(attacker.profile.cash || 0) + steal;
+      attacker.profile.heat = clamp(Number(attacker.profile.heat || 0) + 6, 0, 100);
+      target.profile.cash = Math.max(0, Number(target.profile.cash || 0) - steal);
+
+      message = `Udany atak na ${targetName}. Zgarniete ${formatMoney(steal)}.`;
+      pushLog(attacker, message);
+      pushLog(target, `${attackerName} zaatakowal Cie i zabral ${formatMoney(steal)}.`);
+    } else {
+      damage = randomBetween(8, 18);
+      attacker.profile.hp = clamp(Number(attacker.profile.hp || 0) - damage, 0, Number(attacker.profile.maxHp || 0));
+      attacker.profile.heat = clamp(Number(attacker.profile.heat || 0) + 3, 0, 100);
+
+      message = `Atak na ${targetName} nie wyszedl. Dostales po lapach.`;
+      pushLog(attacker, message);
+      pushLog(target, `${attackerName} probowal Cie zaatakowac, ale nie dowiozl akcji.`);
+    }
+
+    const [updatedAttackerRecord, updatedTargetRecord] = await Promise.all([
+      persistPlayerForUser(attackerRecord._id, attacker),
+      persistPlayerForUser(targetRecord._id, target),
+    ]);
+
+    req.userRecord = updatedAttackerRecord;
+    req.player = updatedAttackerRecord?.playerData || attacker;
+
+    logInfo("pvp", "player-attack", {
+      attackerId: attackerRecord._id,
+      targetUserId: targetRecord._id,
+      success: attackSucceeded,
+      chance: Number(successChance.toFixed(4)),
+      steal,
+      damage,
+    });
+
+    res.json({
+      user: publicPlayer(req.player, now),
+      target: buildDirectoryEntry(updatedTargetRecord || targetRecord, now),
+      result: {
+        success: attackSucceeded,
+        chance: Number(successChance.toFixed(4)),
+        steal,
+        damage,
+        message,
+      },
+    });
   });
 }));
 

@@ -180,6 +180,13 @@ export async function fetchSocialPlayers(token, query = "") {
   return request(`/social/players${suffix}`, { token });
 }
 
+export async function attackPlayerOnline(token, targetUserId) {
+  return request(`/social/players/${encodeURIComponent(targetUserId)}/attack`, {
+    method: "POST",
+    token,
+  });
+}
+
 export async function fetchRankingsOnline(token) {
   return request("/social/rankings", { token });
 }

@@ -23,6 +23,7 @@ import {
   buyProductOnline,
   buyGymPassOnline,
   buyMealOnline,
+  attackPlayerOnline,
   depositOnline,
   executeHeistOnline,
   fetchCasinoMeta,
@@ -3714,6 +3715,32 @@ function AppRuntime() {
   };
 
   const attackWorldPlayer = (player) => {
+    if (!player?.id) return pushLog("Nie ma celu do ataku.");
+
+    if (sessionToken && apiStatus === "online") {
+      attackPlayerOnline(sessionToken, player.id)
+        .then(async (result) => {
+          mergeServerUser(result.user);
+          try {
+            await refreshSocialState(sessionToken);
+          } catch (_error) {}
+          showExplicitNotice({
+            tone: result?.result?.success ? "success" : "warning",
+            title: result?.result?.success ? "ATAK UDANY" : "ATAK NIE WYSZEDL",
+            message:
+              result?.result?.message ||
+              (result?.result?.success
+                ? `Udany atak na ${player.name}.`
+                : `Atak na ${player.name} nie wyszedl.`),
+            deltas: null,
+          });
+        })
+        .catch((error) => {
+          pushLog(error.message || "Nie udalo sie zaatakowac gracza.");
+        });
+      return;
+    }
+
     if (!requireOfflineDemoAuthority("Ataki na graczy")) return;
     if (!canDoStreetAction("Nie odpalisz ataku zza krat.")) return;
     if (game.player.energy < 2) return pushLog("Za malo energii na atak gracza.");
@@ -4703,7 +4730,11 @@ function AppRuntime() {
               <Pressable onPress={() => sendQuickMessageToPlayer(selectedWorldPlayer)} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Wyslij wiadomosc</Text>
               </Pressable>
-              <Pressable onPress={() => attackWorldPlayer(selectedWorldPlayer)} style={styles.inlineButton}>
+              <Pressable
+                onPress={() => attackWorldPlayer(selectedWorldPlayer)}
+                disabled={!selectedWorldPlayer.online}
+                style={[styles.inlineButton, !selectedWorldPlayer.online && styles.tileDisabled]}
+              >
                 <Text style={styles.inlineButtonText}>Atakuj</Text>
               </Pressable>
               <Pressable onPress={() => addWorldPlayerFriend(selectedWorldPlayer)} style={styles.inlineButton}>
@@ -5026,6 +5057,7 @@ function AppRuntime() {
     actions: {
       openSection: setActiveSection,
       openQuickAction,
+      logout: handleLogout,
     },
   };
   const casinoScreenProps = {

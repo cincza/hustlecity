@@ -224,6 +224,20 @@ async function main() {
       throw new Error("Trening na silowni nie podniosl statystyki ataku.");
     }
 
+    const attackTarget = players.players.find((entry) => entry.name === noEmailLoginTwo);
+    if (!attackTarget?.id) {
+      throw new Error("Nie znaleziono celu do testu ataku gracza.");
+    }
+
+    const attackResult = await request(`/social/players/${attackTarget.id}/attack`, {
+      method: "POST",
+      token,
+    });
+
+    if (!attackResult?.result?.message) {
+      throw new Error("Atak na gracza nie zwrocil wyniku akcji.");
+    }
+
     const syncResult = await request("/sync/client-state", {
       method: "POST",
       token,
@@ -296,6 +310,7 @@ async function main() {
       chat: "ok",
       gym: "ok",
       avatar: "ok",
+      playerAttack: attackResult.result.success ? "ok-success" : "ok-failed",
       clientStateAuthority: "ok",
       persistenceAfterRestart: "ok",
       socialPlayers: players.players.length,

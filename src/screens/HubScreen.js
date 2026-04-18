@@ -56,6 +56,9 @@ export function HubScreen({
           <Pressable onPress={() => actions.openSection("profile", "messages")} style={styles.inlineButton}>
             <Text style={styles.inlineButtonText}>Wiadomosci</Text>
           </Pressable>
+          <Pressable onPress={actions.logout} style={styles.inlineButton}>
+            <Text style={styles.inlineButtonText}>Wyloguj</Text>
+          </Pressable>
         </View>
       </SectionCard>
 
