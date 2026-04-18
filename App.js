@@ -41,6 +41,7 @@ import {
   fetchMarket,
   fetchMessageListOnline,
   fetchMe,
+  fetchPrisonChatOnline,
   fetchRankingsOnline,
   fetchSocialPlayers,
   healOnline,
@@ -60,6 +61,7 @@ import {
   sendDirectMessageOnline,
   startBlackjackOnline,
   standBlackjackOnline,
+  sendPrisonChatMessageOnline,
   trainAtGymOnline,
   upgradeBusinessOnline,
   updateAvatarOnline,
@@ -706,6 +708,16 @@ const normalizeUiTimeLabel = (value) => {
   return nowTimeLabel();
 };
 
+const normalizeChatFeedEntries = (entries = []) =>
+  Array.isArray(entries)
+    ? entries.map((entry, index) => ({
+        id: entry?.id || `chat-sync-${index}`,
+        author: entry?.author || "System",
+        text: entry?.text || "",
+        time: normalizeUiTimeLabel(entry?.time),
+      }))
+    : [];
+
 const normalizeOnlineMessageEntry = (entry, index = 0) => ({
   id: entry?.id || `msg-sync-${index}`,
   from: entry?.from || "System",
@@ -714,12 +726,51 @@ const normalizeOnlineMessageEntry = (entry, index = 0) => ({
   time: normalizeUiTimeLabel(entry?.time),
 });
 
-const normalizeOnlineFriendEntry = (entry) => ({
-  id: entry?.id || `friend-${Math.random().toString(36).slice(2, 8)}`,
+const normalizeOnlinePlayerEntry = (entry, index = 0) => ({
+  id: entry?.id || `player-sync-${index}`,
   name: entry?.name || "Gracz",
+  avatarId:
+    typeof entry?.avatarId === "string" && entry.avatarId.trim()
+      ? entry.avatarId.trim()
+      : "ghost",
+  avatarCustomUri:
+    typeof entry?.avatarCustomUri === "string" && entry.avatarCustomUri.trim()
+      ? entry.avatarCustomUri.trim()
+      : null,
   gang: entry?.gang || "No gang",
   online: Boolean(entry?.online),
   respect: Number.isFinite(entry?.respect) ? entry.respect : 0,
+  cash: Number.isFinite(entry?.cash) ? entry.cash : 0,
+  attack: Number.isFinite(entry?.attack) ? entry.attack : 0,
+  defense: Number.isFinite(entry?.defense) ? entry.defense : 0,
+  dexterity: Number.isFinite(entry?.dexterity) ? entry.dexterity : 0,
+  charisma: Number.isFinite(entry?.charisma) ? entry.charisma : 0,
+  bounty: Number.isFinite(entry?.bounty) ? entry.bounty : 0,
+  heists: Number.isFinite(entry?.heists) ? entry.heists : 0,
+  casino: Number.isFinite(entry?.casino) ? entry.casino : 0,
+});
+
+const normalizeOnlineFriendEntry = (entry) => ({
+  id: entry?.id || `friend-${Math.random().toString(36).slice(2, 8)}`,
+  name: entry?.name || "Gracz",
+  avatarId:
+    typeof entry?.avatarId === "string" && entry.avatarId.trim()
+      ? entry.avatarId.trim()
+      : "ghost",
+  avatarCustomUri:
+    typeof entry?.avatarCustomUri === "string" && entry.avatarCustomUri.trim()
+      ? entry.avatarCustomUri.trim()
+      : null,
+  gang: entry?.gang || "No gang",
+  online: Boolean(entry?.online),
+  respect: Number.isFinite(entry?.respect) ? entry.respect : 0,
+});
+
+const normalizeRankingsSnapshot = (snapshot) => ({
+  byRespect: Array.isArray(snapshot?.byRespect) ? snapshot.byRespect.map(normalizeOnlinePlayerEntry) : [],
+  byCash: Array.isArray(snapshot?.byCash) ? snapshot.byCash.map(normalizeOnlinePlayerEntry) : [],
+  byHeists: Array.isArray(snapshot?.byHeists) ? snapshot.byHeists.map(normalizeOnlinePlayerEntry) : [],
+  byCasino: Array.isArray(snapshot?.byCasino) ? snapshot.byCasino.map(normalizeOnlinePlayerEntry) : [],
 });
 const formatMoney = (value) => {
   const amount = Number(value || 0);
@@ -1281,6 +1332,27 @@ function EntityBadge({ visual, large }) {
   );
 }
 
+function getPlayerAvatarVisual(playerEntry) {
+  const avatarCustomUri =
+    typeof playerEntry?.avatarCustomUri === "string" && playerEntry.avatarCustomUri.trim()
+      ? playerEntry.avatarCustomUri.trim()
+      : null;
+
+  if (avatarCustomUri) {
+    return {
+      code: "AV",
+      colors: ["#3d3f45", "#101114"],
+      image: { uri: avatarCustomUri },
+    };
+  }
+
+  const avatar = getAvatarById(playerEntry?.avatarId, AVATAR_OPTIONS);
+  return {
+    ...avatar,
+    code: avatar?.sigil || avatar?.code || "AV",
+  };
+}
+
 function getExplicitNoticeTone(message) {
   if (/zlapany|cela|wiezieni|wtopa|spalony|nie wyszedl|przegral|nalot|przedawk/i.test(message)) {
     return "failure";
@@ -1724,13 +1796,14 @@ function AppRuntime() {
       ...prev,
       online: {
         ...prev.online,
-        roster: Array.isArray(playersSnapshot?.players) ? playersSnapshot.players : prev.online.roster,
-        rankings: rankingsSnapshot || prev.online.rankings,
+        roster: Array.isArray(playersSnapshot?.players)
+          ? playersSnapshot.players.map(normalizeOnlinePlayerEntry)
+          : prev.online.roster,
+        rankings: rankingsSnapshot
+          ? normalizeRankingsSnapshot(rankingsSnapshot)
+          : prev.online.rankings,
         cityChat: Array.isArray(chatSnapshot?.messages)
-          ? chatSnapshot.messages.map((entry) => ({
-              ...entry,
-              time: normalizeUiTimeLabel(entry.time),
-            }))
+          ? normalizeChatFeedEntries(chatSnapshot.messages)
           : prev.online.cityChat,
         friends: Array.isArray(friendsSnapshot?.friends)
           ? friendsSnapshot.friends.map(normalizeOnlineFriendEntry)
@@ -1739,6 +1812,17 @@ function AppRuntime() {
           ? messagesSnapshot.messages.map(normalizeOnlineMessageEntry)
           : prev.online.messages,
       },
+    }));
+  };
+
+  const refreshPrisonChatState = async (token = sessionToken) => {
+    if (!token) return;
+    const prisonSnapshot = await fetchPrisonChatOnline(token);
+    setGame((prev) => ({
+      ...prev,
+      prisonChat: Array.isArray(prisonSnapshot?.messages)
+        ? normalizeChatFeedEntries(prisonSnapshot.messages)
+        : prev.prisonChat,
     }));
   };
 
@@ -1781,6 +1865,14 @@ function AppRuntime() {
       try {
         await refreshSocialState(token);
       } catch (_error) {
+      }
+      if (inJail(me.user.profile || {})) {
+        try {
+          await refreshPrisonChatState(token);
+        } catch (_error) {
+        }
+      } else {
+        setGame((prev) => (prev.prisonChat.length ? { ...prev, prisonChat: [] } : prev));
       }
       try {
         await refreshHeistsState(token);
@@ -1881,9 +1973,24 @@ function AppRuntime() {
       refreshMarketState(sessionToken).catch(() => {});
       refreshCasinoState(sessionToken).catch(() => {});
       refreshSocialState(sessionToken).catch(() => {});
+      if (inJail(game.player)) {
+        refreshPrisonChatState(sessionToken).catch(() => {});
+      }
     }, 45000);
     return () => clearInterval(timer);
-  }, [sessionToken, apiStatus]);
+  }, [sessionToken, apiStatus, game.player.jailUntil]);
+
+  useEffect(() => {
+    if (!sessionToken || apiStatus !== "online") return;
+    if (tab !== "heists" || activeSectionId !== "prison") return;
+    if (!inJail(game.player)) return;
+    refreshPrisonChatState(sessionToken).catch(() => {});
+  }, [sessionToken, apiStatus, tab, activeSectionId, game.player.jailUntil]);
+
+  useEffect(() => {
+    if (inJail(game.player)) return;
+    setGame((prev) => (prev.prisonChat.length ? { ...prev, prisonChat: [] } : prev));
+  }, [game.player.jailUntil]);
 
   useEffect(() => {
     const isOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
@@ -2932,7 +3039,7 @@ function AppRuntime() {
             id: `msg-club-scout-${Date.now()}`,
             from: venue.ownerLabel || "Miasto",
             subject: `Scout: ${venue.name}`,
-            preview: `Dyskretny tip z sali. Wpada ${formatMoney(cashTip)} i czystszy obraz sytuacji.`,
+            preview: `Dyskretny tip z sali. Wpada ${formatMoney(cashTip)}.`,
             time: nowTimeLabel(),
           });
         }
@@ -2946,7 +3053,7 @@ function AppRuntime() {
           leadGain: 0,
           logMessage:
             cashTip > 0
-              ? `${venue.name} rzuca maly tip. Wpada ${formatMoney(cashTip)} bez pompowania ekonomii.`
+              ? `${venue.name} rzuca maly tip. Wpada ${formatMoney(cashTip)}.`
               : `${venue.name} daje czysty odczyt sali, ale dzis bez koperty.`,
           ownerDelta: {
             trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
@@ -3025,8 +3132,8 @@ function AppRuntime() {
           leadTargetName: leadTarget.name,
           escort: unlockedEscort,
           logMessage: unlockedEscort
-            ? `${venue.name}: lead meter dobity i wpada ${leadTarget.name}.`
-            : `${venue.name}: kontakt ruszyl do przodu o ${progressGain} pkt.`,
+            ? `${venue.name}: kontakt domkniety. Wpada ${leadTarget.name}.`
+            : `${venue.name}: kontakt ruszyl o ${progressGain} pkt.`,
           ownerDelta: {
             trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
             pressureGain: Number((2.2 * profile.pressureScale).toFixed(3)),
@@ -3965,13 +4072,32 @@ function AppRuntime() {
     }));
   };
 
-  const sendPrisonMessage = () => {
+  const sendPrisonMessage = async () => {
+    const text = prisonMessage.trim();
+    if (!text) return;
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await sendPrisonChatMessageOnline(sessionToken, text);
+        setGame((prev) => ({
+          ...prev,
+          prisonChat: Array.isArray(result?.messages)
+            ? normalizeChatFeedEntries(result.messages)
+            : prev.prisonChat,
+        }));
+        setPrisonMessage("");
+        return;
+      } catch (error) {
+        pushLog(error.message || "Nie wyszlo wyslac wiadomosci z celi.");
+        return;
+      }
+    }
+
     if (!requireOfflineDemoAuthority("Chat wiezienny")) return;
     if (!inJail(game.player)) return;
-    if (!prisonMessage.trim()) return;
     setGame((prev) => ({
       ...prev,
-      prisonChat: [{ id: `pr-${Date.now()}`, author: prev.player.name, text: prisonMessage.trim(), time: nowTimeLabel() }, ...prev.prisonChat].slice(0, 18),
+      prisonChat: [{ id: `pr-${Date.now()}`, author: prev.player.name, text, time: nowTimeLabel() }, ...prev.prisonChat].slice(0, 18),
     }));
     setPrisonMessage("");
   };
@@ -5507,6 +5633,8 @@ function AppRuntime() {
     const selfEntry = {
       id: "self",
       name: game.player.name,
+      avatarId: game.player.avatarId,
+      avatarCustomUri: game.player.avatarCustomUri,
       gang: game.gang.name || "No gang",
       respect: game.player.respect,
       cash: game.player.cash + (game.player.bank || 0),
@@ -5536,7 +5664,7 @@ function AppRuntime() {
           <View style={styles.playerProfilePanel}>
             <View style={styles.playerProfileMain}>
               <LinearGradient colors={selectedWorldPlayer.online ? ["#57411a", "#1a1209"] : ["#363636", "#111111"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.playerProfileHero}>
-                <EntityBadge visual={selectedWorldPlayer.gang !== "No gang" ? getGangVisual(selectedWorldPlayer.gang) : selectedWorldPlayer.online ? BUSINESS_VISUALS.club : FACTORY_VISUALS.smokeworks} large />
+                <EntityBadge visual={getPlayerAvatarVisual(selectedWorldPlayer)} large />
                 <View style={styles.playerProfileMeta}>
                   <Text style={styles.playerProfileName}>{selectedWorldPlayer.name}</Text>
                   <Pressable onPress={() => openGangProfile(selectedWorldPlayer.gang)} disabled={selectedWorldPlayer.gang === "No gang"}>
@@ -5595,7 +5723,7 @@ function AppRuntime() {
           <Pressable key={player.id} style={styles.listCard} onPress={() => openWorldPlayerProfile(player.id)}>
             <View style={styles.listCardHeader}>
               <View style={styles.entityHead}>
-                <EntityBadge visual={player.gang !== "No gang" ? getGangVisual(player.gang) : player.online ? BUSINESS_VISUALS.tower : FACTORY_VISUALS.smokeworks} />
+                <EntityBadge visual={getPlayerAvatarVisual(player)} />
                 <View style={styles.flexOne}>
                   <Text style={styles.listCardTitle}>{player.name}</Text>
                   <Text style={styles.listCardMeta}>{player.gang} | Szacun {player.respect} | Kasa {formatMoney(player.cash)}</Text>
@@ -5745,7 +5873,7 @@ function AppRuntime() {
           <View key={`${title}-${entry.id}`} style={styles.listCard}>
             <View style={styles.inlineRow}>
               <View style={styles.entityHead}>
-                <EntityBadge visual={entry.id === "self" ? BUSINESS_VISUALS.tower : FACTORY_VISUALS.designerlab} />
+                <EntityBadge visual={getPlayerAvatarVisual(entry)} />
                 <View>
                   <Text style={styles.listCardTitle}>#{index + 1} {entry.name}</Text>
                   <Text style={styles.listCardMeta}>{entry.gang}</Text>

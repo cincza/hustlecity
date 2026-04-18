@@ -295,6 +295,18 @@ export async function sendGlobalChatMessageOnline(token, text) {
   });
 }
 
+export async function fetchPrisonChatOnline(token) {
+  return request("/chat/prison", { token });
+}
+
+export async function sendPrisonChatMessageOnline(token, text) {
+  return request("/chat/prison", {
+    method: "POST",
+    token,
+    body: { text },
+  });
+}
+
 export async function playFightClubRoundOnline(token) {
   return request("/fightclub/round", {
     method: "POST",

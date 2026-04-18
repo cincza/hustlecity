@@ -271,7 +271,7 @@ export const CLUB_NIGHT_PLANS = [
   {
     id: "showtime",
     name: "Showtime",
-    summary: "Wiekszy ruch, lepsze tipy, ale klub robi sie glosniejszy.",
+    summary: "Wiekszy ruch i grubsza noc.",
     scoutTipMultiplier: 1.18,
     huntMultiplier: 0.92,
     layLowMultiplier: 0.88,
@@ -282,7 +282,7 @@ export const CLUB_NIGHT_PLANS = [
   {
     id: "guestlist",
     name: "Guest List",
-    summary: "Kontakty, leady i czystszy balans pod utility.",
+    summary: "Mocny wieczor pod kontakty.",
     scoutTipMultiplier: 1,
     huntMultiplier: 1.22,
     layLowMultiplier: 1,
@@ -293,7 +293,7 @@ export const CLUB_NIGHT_PLANS = [
   {
     id: "lowlights",
     name: "Low Lights",
-    summary: "Mniej szumu, mniej presji i mocniejsze bezpieczne okno.",
+    summary: "Ciszej, spokojniej i mniej presji.",
     scoutTipMultiplier: 0.92,
     huntMultiplier: 0.96,
     layLowMultiplier: 1.32,
@@ -307,21 +307,21 @@ export const CLUB_VISITOR_ACTIONS = [
   {
     id: "scout",
     name: "Scout",
-    summary: "Maly tip i lekki wzrost ruchu bez gonienia RNG.",
+    summary: "Szybki rekonesans sali.",
     costCash: 0,
     baseTraffic: 1.05,
   },
   {
     id: "hunt",
     name: "Hunt Contacts",
-    summary: "Placisz za wejscie i pompujesz lead meter do escort.",
+    summary: "Pchasz kontakt do przodu.",
     costCash: CLUB_ESCORT_SEARCH_COST,
     baseTraffic: 1.35,
   },
   {
     id: "laylow",
     name: "Lay Low",
-    summary: "Troche ciszej, troche bezpieczniej, bez grubej nagrody.",
+    summary: "Schodzisz z oczu i lapiesz oddech.",
     costCash: 0,
     baseTraffic: 0.72,
   },

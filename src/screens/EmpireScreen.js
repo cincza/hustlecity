@@ -522,12 +522,12 @@ export function EmpireScreen({
       <SceneArtwork
         eyebrow="Klub"
         title="Lokal, ruch i nocne okazje"
-        lines={["Klub ma dawac utility, leady i cichy ruch zamiast pustego RNG.", "Wlasciciel ustawia ton nocy, a odwiedzajacy maja tylko trzy czytelne ruchy."]}
+        lines={["Klub to ruch, kontakty i nocne okazje.", "Wlasciciel ustawia plan nocy, a odwiedzajacy maja trzy proste ruchy."]}
         accent={["#432417", "#170f0c", "#050505"]}
         source={sceneBackgrounds.clubWide}
       />
       {!currentClubVenue ? (
-        <SectionCard title="Rynek klubow" subtitle="Wchodzisz po utility albo przejmujesz lokal, jesli masz na to szacun i hajs.">
+        <SectionCard title="Rynek klubow" subtitle="Wpadasz po kontakty albo przejmujesz lokal, jesli masz na to szacun i hajs.">
           {safeGame.clubListings.map((listing) => {
             const isOwnedByPlayer = safeGame.club.owned && safeGame.club.sourceId === listing.id;
             const listingProfile = helpers.getClubVenueProfile(safeGame, listing);
@@ -561,7 +561,7 @@ export function EmpireScreen({
                   Plan nocy: {listingPlan?.name || "Guest List"} | Ruch {Math.round(listing.traffic || 0)} | Presja: {listingPressureLabel}
                 </Text>
                 <Text style={styles.listCardMeta}>
-                  Tipy do {formatMoney(listingProfile.scoutTipValue)} | Lead +{listingProfile.huntProgressValue} | Lay Low: -{listingProfile.layLowHeat} heat
+                  Scout do {formatMoney(listingProfile.scoutTipValue)} | Hunt +{listingProfile.huntProgressValue} | Lay Low: -{listingProfile.layLowHeat} heat
                 </Text>
                 <View style={styles.marketButtons}>
                   <Pressable onPress={() => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
@@ -595,7 +595,7 @@ export function EmpireScreen({
 
       <SectionCard
         title={currentClubVenue ? `Stan lokalu: ${currentClubVenue.name}` : "Stan klubu"}
-        subtitle={currentClubVenue ? "Jeden status card, zero szumu. Widzisz stan, plan nocy i to, co lokal daje teraz." : "Wejdz do lokalu, zeby odpalic trzy akcje klubowe."}
+        subtitle={currentClubVenue ? "Widzisz stan lokalu, plan nocy i to, co dzieje sie teraz." : "Wejdz do lokalu, zeby odpalic trzy akcje klubowe."}
       >
         <View style={styles.heroBanner}>
           <View style={styles.listCardHeader}>
@@ -606,7 +606,7 @@ export function EmpireScreen({
                 <Text style={styles.heroBannerText}>
                   {currentClubVenue
                     ? `${insideOwnClub ? "Twoj lokal" : `Wlasciciel: ${currentClubVenue.ownerLabel}`}. Plan nocy: ${activeClubPlan?.name || "Guest List"}.`
-                    : "Wybierz lokal z listy wyzej, zeby wejsc po utility, leady i cichy ruch."}
+                    : "Wybierz lokal z listy wyzej, zeby wejsc do srodka."}
                 </Text>
               </View>
             </View>
@@ -672,7 +672,7 @@ export function EmpireScreen({
           subtitle={
             clubActionCooldownRemaining > 0
               ? `Kolejny ruch za ${formatCooldown(clubActionCooldownRemaining)}.`
-              : "Trzy akcje. Jedna daje tip, jedna pompuje lead, jedna czysci heat."
+              : "Masz trzy szybkie ruchy."
           }
         >
           <View style={styles.grid}>
@@ -682,12 +682,12 @@ export function EmpireScreen({
                 (action.id === "hunt" && !activeLeadEscort);
               const subtitle =
                 action.id === "scout"
-                  ? `Tip do ${formatMoney(currentClubProfile.scoutTipValue)}. Maly utility, z capem i diminishing.`
+                  ? `Tip do ${formatMoney(currentClubProfile.scoutTipValue)}. Krotki rekonesans sali.`
                   : action.id === "hunt"
                     ? activeLeadEscort
-                      ? `${activeLeadEscort.name}: +${currentClubProfile.huntProgressValue} lead za ${formatMoney(action.costCash)}.`
+                      ? `${activeLeadEscort.name}: +${currentClubProfile.huntProgressValue} postepu za ${formatMoney(action.costCash)}.`
                       : "Na tym progu nie ma jeszcze kontaktu do namierzenia."
-                    : `Heat -${currentClubProfile.layLowHeat} | HP +${currentClubProfile.layLowHp}. Bez grubej nagrody.`;
+                    : `Heat -${currentClubProfile.layLowHeat} | HP +${currentClubProfile.layLowHp}. Chwila oddechu.`;
 
               return (
                 <ActionTile
@@ -714,14 +714,14 @@ export function EmpireScreen({
         title={currentClubVenue ? "Okazje i wynik" : "Po co tu wchodzic"}
         subtitle={
           currentClubVenue
-            ? "Tu widzisz lead meter, ostatni rezultat i lekki owner toolkit."
-            : "Klub daje glownie utility, leady i ruch pod umiarkowany nocny dochod."
+            ? "Tu widzisz postep, ostatni rezultat i ruchy wlasciciela."
+            : "Klub daje kontakty, ruch i nocne okazje."
         }
       >
         {!currentClubVenue ? (
           <View style={styles.lockedPanel}>
             <Text style={styles.lockedPanelText}>
-              Wejscie do lokalu odblokowuje trzy szybkie akcje. Scout daje maly tip, Hunt Contacts pompuje lead meter, a Lay Low zbija heat i daje chwile oddechu.
+              Po wejsciu do lokalu odpalasz trzy szybkie akcje. Scout szuka tipa, Hunt Contacts pcha kontakt do przodu, a Lay Low zrzuca heat i daje oddech.
             </Text>
           </View>
         ) : (
@@ -775,11 +775,11 @@ export function EmpireScreen({
               </View>
               {insideOwnClub ? (
                 <Text style={styles.listCardMeta}>
-                  Noc skaluje sie z ruchem graczy i traffic meterem. Self visit liczy sie slabiej, a presja policji rosnie subtelnie.
+                  Noc skaluje sie z ruchem i tym, co dzieje sie w lokalu.
                 </Text>
               ) : (
                 <Text style={styles.listCardMeta}>
-                  W tym lokalu glowna wartosc to utility i kontakty, nie darmowa gotowka z klikacza.
+                  W tym lokalu wpadasz glownie po kontakty i okazje.
                 </Text>
               )}
             </View>
@@ -788,7 +788,7 @@ export function EmpireScreen({
       </SectionCard>
 
       {insideOwnClub ? (
-        <SectionCard title="Stash klubu" subtitle="Szybkie dosypanie towaru przed kolejna noc. Bez rozbudowanej tablicy i bez zbednych klikow.">
+        <SectionCard title="Stash klubu" subtitle="Szybkie dosypanie towaru przed kolejna noc.">
           {drugs.map((drug) => (
             <View key={drug.id} style={styles.listCard}>
               <View style={styles.inlineRow}>

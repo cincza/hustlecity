@@ -31,14 +31,17 @@ import {
 } from "./config/economy.js";
 import {
   addGlobalChatMessage,
+  addPrisonChatMessage,
   clearAllUsers,
   clearGlobalChatMessages,
+  clearPrisonChatMessages,
   createAvailableUsername,
   createUserRecord,
   deleteUserByLogin,
   findUserById,
   findUserByLogin,
   getGlobalChatMessages,
+  getPrisonChatMessages,
   initUserStore,
   listUsers,
   saveUserPlayerData,
@@ -500,6 +503,14 @@ function buildDirectoryEntry(userRecord, now = Date.now()) {
   return {
     id: userRecord._id,
     name: profile.name || userRecord.username,
+    avatarId:
+      typeof profile.avatarId === "string" && profile.avatarId.trim()
+        ? profile.avatarId.trim()
+        : "ghost",
+    avatarCustomUri:
+      typeof profile.avatarCustomUri === "string" && profile.avatarCustomUri.trim()
+        ? profile.avatarCustomUri.trim()
+        : null,
     gang: userRecord?.playerData?.gang?.name || "No gang",
     respect: Number(profile.respect || 0),
     cash: Number(profile.cash || 0) + Number(profile.bank || 0),
@@ -609,6 +620,17 @@ async function buildFriendEntries(player, now = Date.now()) {
     return {
       id: friend.id,
       name: live?.name || friend.name || "Gracz",
+      avatarId:
+        (typeof live?.avatarId === "string" && live.avatarId.trim()) ||
+        (typeof friend.avatarId === "string" && friend.avatarId.trim()) ||
+        "ghost",
+      avatarCustomUri:
+        (typeof live?.avatarCustomUri === "string" && live.avatarCustomUri.trim()
+          ? live.avatarCustomUri.trim()
+          : null) ||
+        (typeof friend.avatarCustomUri === "string" && friend.avatarCustomUri.trim()
+          ? friend.avatarCustomUri.trim()
+          : null),
       gang: live?.gang || friend.gang || "No gang",
       online: typeof live?.online === "boolean" ? live.online : Boolean(friend.online),
       respect: Number.isFinite(live?.respect) ? live.respect : Number(friend.respect || 0),
@@ -1061,9 +1083,10 @@ app.post("/reset-game", asyncHandler(async (req, res) => {
     return;
   }
 
-  const [usersCleared, globalChatCleared] = await Promise.all([
+  const [usersCleared, globalChatCleared, prisonChatCleared] = await Promise.all([
     clearAllUsers(),
     clearGlobalChatMessages(),
+    clearPrisonChatMessages(),
   ]);
 
   state.activeUsers.clear();
@@ -1072,7 +1095,7 @@ app.post("/reset-game", asyncHandler(async (req, res) => {
   state.market = createMarketState();
 
   console.log(
-    `[reset-game] cleared runtime data :: users=${usersCleared}, globalChat=${globalChatCleared}`
+    `[reset-game] cleared runtime data :: users=${usersCleared}, globalChat=${globalChatCleared}, prisonChat=${prisonChatCleared}`
   );
 
   sendOk(res, {
@@ -1080,6 +1103,7 @@ app.post("/reset-game", asyncHandler(async (req, res) => {
     testingOnly: true,
     usersCleared,
     globalChatCleared,
+    prisonChatCleared,
     gangsCleared: true,
     rankingsCleared: true,
     marketReset: true,
@@ -1683,6 +1707,73 @@ app.post("/chat/global", auth, asyncHandler(async (req, res) => {
 
   const { globalChat } = await buildSocialSnapshot();
   res.json({ messages: globalChat });
+}));
+
+function buildPrisonChatView(entries = []) {
+  return entries.map((entry) => ({
+    id: entry._id,
+    author: entry.author,
+    text: entry.text,
+    time: new Date(entry.createdAt).toISOString(),
+  }));
+}
+
+app.get("/chat/prison", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  if (!isPlayerJailed(req.player, now)) {
+    res.status(423).json({ error: "Chat celi widza tylko osadzeni." });
+    return;
+  }
+
+  const messages = buildPrisonChatView(await getPrisonChatMessages(15));
+  res.json({ messages });
+}));
+
+app.post("/chat/prison", auth, asyncHandler(async (req, res) => {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "chat-prison",
+      1200,
+      "Prison chat rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  if (!isPlayerJailed(req.player, now)) {
+    res.status(423).json({ error: "Chat celi widza tylko osadzeni." });
+    return;
+  }
+
+  const text = String(req.body?.text || "").trim();
+  if (!text) {
+    res.status(400).json({ error: "Message is required" });
+    return;
+  }
+  if (text.length > 280) {
+    res.status(400).json({ error: "Message too long" });
+    return;
+  }
+
+  const author = req.player?.profile?.name || req.user?.username || "Gracz";
+  await addPrisonChatMessage({
+    userId: req.user.id,
+    author,
+    text,
+  });
+  logInfo("chat", "prison-message", {
+    userId: req.user.id,
+    author,
+    textLength: text.length,
+  });
+
+  const messages = buildPrisonChatView(await getPrisonChatMessages(15));
+  res.json({ messages });
 }));
 
 app.post("/sync/client-state", auth, asyncHandler(async (req, res) => {

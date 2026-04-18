@@ -519,7 +519,7 @@ export function performClubActionForPlayer(
       appendPlayerMessage(player, {
         from: targetVenue.ownerLabel || "Miasto",
         subject: `Scout: ${targetVenue.name}`,
-        preview: `Sala puszcza dyskretny tip. Wpada $${cashTip} i czystszy obraz sytuacji.`,
+        preview: `Sala puszcza dyskretny tip. Wpada $${cashTip}.`,
         time: createTimeLabel(now),
       });
     }
@@ -539,7 +539,7 @@ export function performClubActionForPlayer(
       },
       logMessage:
         cashTip > 0
-          ? `${targetVenue.name} rzuca maly tip. Wpada $${cashTip} bez rozwalania ekonomii.`
+          ? `${targetVenue.name} rzuca maly tip. Wpada $${cashTip}.`
           : `${targetVenue.name} daje czysty odczyt sali, ale dzis bez koperty.`,
     };
   } else if (action.id === "hunt") {
@@ -616,8 +616,8 @@ export function performClubActionForPlayer(
         pressureGain: Number((2.2 * profile.pressureScale).toFixed(3)),
       },
       logMessage: unlockedEscort
-        ? `${targetVenue.name}: lead meter dobity i wpada ${unlockedEscort.name}.`
-        : `${targetVenue.name}: kontakt ruszyl do przodu o ${progressGain} pkt.`,
+        ? `${targetVenue.name}: kontakt domkniety. Wpada ${unlockedEscort.name}.`
+        : `${targetVenue.name}: kontakt ruszyl o ${progressGain} pkt.`,
     };
   } else {
     const heatReduced = Math.min(

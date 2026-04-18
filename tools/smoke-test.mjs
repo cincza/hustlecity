@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -107,6 +108,38 @@ async function stopServer(child) {
     child.kill();
     setTimeout(() => resolve(), 5000);
   });
+}
+
+async function forceUsersIntoJail(dataDir, logins, durationMs = 15 * 60 * 1000) {
+  const usersDbPath = path.join(dataDir, "users.db");
+  const safeLogins = new Set(
+    (Array.isArray(logins) ? logins : [logins])
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!safeLogins.size) {
+    throw new Error("Brak loginow do ustawienia jail state w smoke tescie.");
+  }
+
+  const now = Date.now();
+  const content = await readFile(usersDbPath, "utf8");
+  const nextLines = content
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const doc = JSON.parse(line);
+      const usernameLower = String(doc?.usernameLower || "").trim().toLowerCase();
+      if (!safeLogins.has(usernameLower)) {
+        return line;
+      }
+
+      doc.playerData = doc.playerData || {};
+      doc.playerData.profile = doc.playerData.profile || {};
+      doc.playerData.profile.jailUntil = now + durationMs;
+      return JSON.stringify(doc);
+    });
+
+  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
 }
 
 async function main() {
@@ -355,6 +388,11 @@ async function main() {
       throw new Error("Gracz nie pojawia sie w katalogu social.");
     }
 
+    const socialEntry = players.players.find((entry) => entry.name === login);
+    if (socialEntry?.avatarId !== "boss") {
+      throw new Error("Katalog social nie zwraca avatarId gracza.");
+    }
+
     const rankingEntries = [
       ...(rankings.byRespect || []),
       ...(rankings.byCash || []),
@@ -363,6 +401,11 @@ async function main() {
     ];
     if (!rankingEntries.some((entry) => entry.name === login)) {
       throw new Error("Gracz nie pojawia sie w rankingach.");
+    }
+
+    const rankedPlayer = rankingEntries.find((entry) => entry.name === login);
+    if (rankedPlayer?.avatarId !== "boss") {
+      throw new Error("Rankingi nie zwracaja avatarId gracza.");
     }
 
     if (!Array.isArray(chat.messages) || !chat.messages.some((entry) => entry.text === chatText)) {
@@ -489,6 +532,65 @@ async function main() {
       throw new Error("Prywatna wiadomosc nie zapisala wpisanej tresci.");
     }
 
+    await stopServer(server);
+    await forceUsersIntoJail(dataDir, [login, noEmailLoginTwo]);
+    server = startServer(dataDir);
+    await waitForHealth();
+
+    const jailedLogin = await request("/auth/login", {
+      method: "POST",
+      body: { login, password },
+    });
+    await delay(AUTH_LOGIN_DELAY_MS);
+    const jailedOtherLogin = await request("/auth/login", {
+      method: "POST",
+      body: { login: noEmailLoginTwo, password },
+    });
+    await delay(AUTH_LOGIN_DELAY_MS);
+    const freeUserLogin = await request("/auth/login", {
+      method: "POST",
+      body: { login: noEmailLoginOne, password },
+    });
+
+    const prisonMessageText = `cela-${unique}`;
+    const prisonFeedBefore = await request("/chat/prison", { token: jailedLogin.token });
+    if (!Array.isArray(prisonFeedBefore.messages)) {
+      throw new Error("Chat wiezienia nie zwrocil listy wiadomosci.");
+    }
+
+    const prisonPost = await request("/chat/prison", {
+      method: "POST",
+      token: jailedLogin.token,
+      body: { text: prisonMessageText },
+    });
+
+    if (!Array.isArray(prisonPost?.messages) || !prisonPost.messages.some((entry) => entry.text === prisonMessageText)) {
+      throw new Error("Wysylka wiadomosci do chatu wiezienia nie zapisala wpisu.");
+    }
+
+    const prisonOtherFeed = await request("/chat/prison", { token: jailedOtherLogin.token });
+    if (!Array.isArray(prisonOtherFeed.messages) || !prisonOtherFeed.messages.some((entry) => entry.text === prisonMessageText)) {
+      throw new Error("Drugi osadzony nie widzi wpisu z chatu wiezienia.");
+    }
+
+    await expectRequestFailure(
+      "/chat/prison",
+      {
+        token: freeUserLogin.token,
+      },
+      /osadzeni|cela/i
+    );
+
+    await expectRequestFailure(
+      "/chat/prison",
+      {
+        method: "POST",
+        token: freeUserLogin.token,
+        body: { text: "wolny gracz" },
+      },
+      /osadzeni|cela/i
+    );
+
     const preSyncMe = await request("/me", { token });
 
     const syncResult = await request("/sync/client-state", {
@@ -534,6 +636,7 @@ async function main() {
 
     const persistedMe = await request("/me", { token: relogin.token });
     const persistedChat = await request("/chat/global", { token: relogin.token });
+    const persistedPrisonChat = await request("/chat/prison", { token: relogin.token });
 
     if (persistedMe.user.profile.attack !== preSyncMe.user.profile.attack) {
       throw new Error("Atak po restarcie backendu nie zostal zachowany.");
@@ -563,6 +666,10 @@ async function main() {
       throw new Error("Chat nie przetrwal restartu backendu.");
     }
 
+    if (!persistedPrisonChat.messages.some((entry) => entry.text === prisonMessageText)) {
+      throw new Error("Chat wiezienia nie przetrwal restartu backendu.");
+    }
+
     const summary = {
       register: "ok",
       registerWithoutEmail: "ok",
@@ -581,6 +688,7 @@ async function main() {
       directMessages: "ok",
       bounty: bountyResult.result.increment,
       clubAction: escortSearchResult.result.outcome,
+      prisonChat: "ok",
       clientStateAuthority: "ok",
       persistenceAfterRestart: "ok",
       socialPlayers: players.players.length,

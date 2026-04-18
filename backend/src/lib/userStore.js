@@ -13,9 +13,11 @@ const dataDir = configuredDataDir
   : path.resolve(__dirname, "../../data");
 const userDbPath = path.join(dataDir, "users.db");
 const globalChatDbPath = path.join(dataDir, "global-chat.db");
+const prisonChatDbPath = path.join(dataDir, "prison-chat.db");
 
 let usersDb;
 let globalChatDb;
+let prisonChatDb;
 let userStoreInitLogged = false;
 const VERBOSE_USER_STORE_LOGS = process.env.VERBOSE_USER_STORE_LOGS === "1";
 
@@ -59,6 +61,16 @@ async function ensureGlobalChatDbFile() {
   } catch (_error) {
     await fs.writeFile(globalChatDbPath, "", "utf8");
     logUserStore(`created global chat database file at ${globalChatDbPath}`);
+  }
+}
+
+async function ensurePrisonChatDbFile() {
+  await fs.mkdir(dataDir, { recursive: true });
+  try {
+    await fs.access(prisonChatDbPath);
+  } catch (_error) {
+    await fs.writeFile(prisonChatDbPath, "", "utf8");
+    logUserStore(`created prison chat database file at ${prisonChatDbPath}`);
   }
 }
 
@@ -142,13 +154,24 @@ async function getGlobalChatDb() {
   return globalChatDb;
 }
 
+async function getPrisonChatDb() {
+  if (prisonChatDb) return prisonChatDb;
+  await ensurePrisonChatDbFile();
+  prisonChatDb = new Datastore({ filename: prisonChatDbPath });
+  await prisonChatDb.loadDatabaseAsync();
+  await prisonChatDb.ensureIndexAsync({ fieldName: "createdAt" });
+  return prisonChatDb;
+}
+
 export async function initUserStore() {
   await getDb();
   await getGlobalChatDb();
+  await getPrisonChatDb();
   logInfo("persistence", "store-initialized", {
     dataDir,
     userDbPath,
     globalChatDbPath,
+    prisonChatDbPath,
   });
 }
 
@@ -304,6 +327,32 @@ export async function clearGlobalChatMessages() {
 
 export async function addGlobalChatMessage({ userId, author, text }) {
   const db = await getGlobalChatDb();
+  const now = Date.now();
+  return db.insertAsync({
+    _id: crypto.randomUUID(),
+    userId,
+    author,
+    text,
+    createdAt: now,
+  });
+}
+
+export async function getPrisonChatMessages(limit = 15) {
+  const db = await getPrisonChatDb();
+  const safeLimit = Math.max(1, Math.min(30, Number(limit) || 15));
+  const entries = await db.findAsync({}).sort({ createdAt: -1 }).limit(safeLimit);
+  return entries;
+}
+
+export async function clearPrisonChatMessages() {
+  const db = await getPrisonChatDb();
+  const removed = await db.removeAsync({}, { multi: true });
+  logUserStore(`cleared prison chat -> ${removed}`);
+  return removed;
+}
+
+export async function addPrisonChatMessage({ userId, author, text }) {
+  const db = await getPrisonChatDb();
   const now = Date.now();
   return db.insertAsync({
     _id: crypto.randomUUID(),
