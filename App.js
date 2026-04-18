@@ -1396,7 +1396,11 @@ function EntityBadge({ visual, large }) {
       <View style={styles.entityBadgeGlow} />
       {safeVisual.image ? (
         <>
-          <Image source={safeVisual.image} style={styles.entityImage} resizeMode="cover" />
+          <Image
+            source={safeVisual.image}
+            style={[styles.entityImage, safeVisual.imageStyle]}
+            resizeMode={safeVisual.imageResizeMode || "cover"}
+          />
           <LinearGradient colors={["rgba(0,0,0,0.04)", "rgba(0,0,0,0.22)", "rgba(0,0,0,0.76)"]} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.entityImageTint} />
         </>
       ) : (
@@ -1426,6 +1430,8 @@ function getPlayerAvatarVisual(playerEntry) {
       code: "AV",
       colors: ["#3d3f45", "#101114"],
       image: { uri: avatarCustomUri },
+      imageResizeMode: "contain",
+      imageStyle: styles.entityAvatarImage,
     };
   }
 
@@ -1433,6 +1439,8 @@ function getPlayerAvatarVisual(playerEntry) {
   return {
     ...avatar,
     code: avatar?.sigil || avatar?.code || "AV",
+    imageResizeMode: "contain",
+    imageStyle: styles.entityAvatarImage,
   };
 }
 
@@ -7304,6 +7312,7 @@ const styles = StyleSheet.create({
   entityBadgeLarge: { width: 74, height: 74, borderRadius: 20 },
   entityBadgeGlow: { position: "absolute", width: "130%", height: "58%", top: -10, left: -8, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.08)" },
   entityImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
+  entityAvatarImage: { top: 4, left: 4, right: 4, bottom: 4, width: undefined, height: undefined },
   entityImageTint: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   entityEmojiWrap: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.18)" },
   entityEmoji: { fontSize: 24 },
