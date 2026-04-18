@@ -311,6 +311,8 @@ export function CityScreen({
   }
 
   if (section === "bank") {
+    const maxDepositAmount = Math.max(0, Math.floor(Number(game.player.cash || 0)));
+
     return (
       <SectionCard title="Bank" subtitle={`Tryb: ${apiStatus === "online" ? "online" : "lokalny"}.`}>
         <StatLine label="Gotowka przy sobie" value={formatMoney(game.player.cash)} visual={systemVisuals.cash} />
@@ -323,14 +325,23 @@ export function CityScreen({
               <Text style={styles.listCardMeta}>Wpisz kwote i rusz hajs.</Text>
             </View>
           </View>
-          <TextInput
-            value={bankAmountDraft}
-            onChangeText={(text) => setBankAmountDraft(text.replace(/[^\d]/g, ""))}
-            placeholder="Np. 25000"
-            placeholderTextColor="#6c6c6c"
-            keyboardType="numeric"
-            style={styles.chatInput}
-          />
+          <View style={styles.inlineRow}>
+            <TextInput
+              value={bankAmountDraft}
+              onChangeText={(text) => setBankAmountDraft(text.replace(/[^\d]/g, ""))}
+              placeholder="Np. 25000"
+              placeholderTextColor="#6c6c6c"
+              keyboardType="numeric"
+              style={[styles.chatInput, styles.flexOne]}
+            />
+            <Pressable
+              onPress={() => setBankAmountDraft(String(maxDepositAmount))}
+              style={[styles.inlineButton, maxDepositAmount <= 0 && styles.tileDisabled]}
+              disabled={maxDepositAmount <= 0}
+            >
+              <Text style={styles.inlineButtonText}>Wplac wszystko</Text>
+            </Pressable>
+          </View>
         </View>
         <View style={styles.grid}>
           <ActionTile title="Wplac" subtitle={`Do banku pojdzie ${bankAmountDraft || 0}.`} visual={systemVisuals.bank} onPress={actions.depositCash} />
