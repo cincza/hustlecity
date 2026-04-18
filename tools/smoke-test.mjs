@@ -253,6 +253,28 @@ async function main() {
       body: { drugId: "smokes" },
     });
 
+    const consumeResult = await request("/dealer/consume", {
+      method: "POST",
+      token,
+      body: { drugId: "smokes" },
+    });
+
+    if (typeof consumeResult?.result?.overdose !== "boolean") {
+      throw new Error("Zarzucenie towaru nie zwrocilo wyniku na backendzie.");
+    }
+    if (
+      !consumeResult?.result?.overdose &&
+      !Array.isArray(consumeResult?.user?.activeBoosts)
+    ) {
+      throw new Error("Boost po zarzuceniu nie zostal zwrocony z backendu.");
+    }
+
+    await request("/dealer/buy", {
+      method: "POST",
+      token,
+      body: { drugId: "smokes" },
+    });
+
     await request("/dealer/sell", {
       method: "POST",
       token,

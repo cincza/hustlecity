@@ -263,6 +263,14 @@ export async function sellDrugToDealerOnline(token, drugId) {
   });
 }
 
+export async function consumeDrugOnline(token, drugId) {
+  return request("/dealer/consume", {
+    method: "POST",
+    token,
+    body: { drugId },
+  });
+}
+
 export async function searchEscortInClubOnline(token, venueId) {
   return request("/clubs/search-escort", {
     method: "POST",

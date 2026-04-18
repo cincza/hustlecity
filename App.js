@@ -25,6 +25,7 @@ import {
   buyProductOnline,
   buyGymPassOnline,
   buyMealOnline,
+  consumeDrugOnline,
   attackPlayerOnline,
   depositOnline,
   executeHeistOnline,
@@ -1553,6 +1554,16 @@ function AppRuntime() {
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
       inventory: serverUser.inventory || prev.inventory,
+      activeBoosts: Array.isArray(serverUser?.activeBoosts)
+        ? serverUser.activeBoosts
+            .filter((entry) => entry && typeof entry === "object")
+            .map((entry, index) => ({
+              id: entry?.id || `boost-sync-${index}`,
+              name: entry?.name || "Boost",
+              effect: entry?.effect && typeof entry.effect === "object" ? { ...entry.effect } : {},
+              expiresAt: Number.isFinite(entry?.expiresAt) ? entry.expiresAt : Date.now(),
+            }))
+        : prev.activeBoosts,
       drugInventory:
         serverUser?.drugInventory && typeof serverUser.drugInventory === "object"
           ? { ...prev.drugInventory, ...serverUser.drugInventory }
@@ -2920,8 +2931,26 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - timed boosts, cooldowns, global caps and overdose odds affect heist balance and cannot stay client-authoritative
   const consumeDrug = (drug) => {
     if (!canDoStreetAction()) return;
-    if (!requireOfflineDemoAuthority("Boosty z towaru")) return;
     if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz na stanie: ${drug.name}.`);
+
+    if (sessionToken && apiStatus === "online") {
+      consumeDrugOnline(sessionToken, drug.id)
+        .then((result) => {
+          mergeServerUser(result.user);
+          showExplicitNotice({
+            tone: result?.result?.overdose ? "failure" : "success",
+            title: result?.result?.overdose ? "PRZEDAWKOWANIE" : "BOOST AKTYWNY",
+            message: result?.result?.logMessage || `Weszlo ${drug.name}.`,
+            deltas: null,
+          });
+        })
+        .catch((error) => {
+          pushLog(error.message || `Nie udalo sie zarzucic ${drug.name}.`);
+        });
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Boosty z towaru")) return;
 
     if (Math.random() < drug.overdoseRisk) {
       setGame((prev) => ({

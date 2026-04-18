@@ -212,6 +212,55 @@ export function sellDrugToDealerForPlayer(player, drugId) {
   };
 }
 
+export function consumeDrugForPlayer(player, drugId, now = Date.now()) {
+  ensurePlayerSocialState(player);
+  const drug = findDrugById(drugId);
+  if (!drug) {
+    fail("Drug not found", 404);
+  }
+  if (Number(player.profile?.jailUntil || 0) > now) {
+    fail("Z celi nie zarzucisz towaru.");
+  }
+  if (Number(player.drugInventory?.[drug.id] || 0) <= 0) {
+    fail(`Nie masz na stanie: ${drug.name}.`);
+  }
+
+  player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - 1);
+
+  if (Math.random() < Number(drug.overdoseRisk || 0)) {
+    const damage = randomBetween(28, 55);
+    player.profile.hp = clampSocialValue(
+      Number(player.profile?.hp || 0) - damage,
+      1,
+      Number(player.profile?.maxHp || 0)
+    );
+    player.profile.heat = clampSocialValue(Number(player.profile?.heat || 0) + 8, 0, 100);
+
+    return {
+      drug,
+      overdose: true,
+      damage,
+      logMessage: `Przedawkowanie po ${drug.name}. Ledwo stoisz na nogach.`,
+    };
+  }
+
+  if (!Array.isArray(player.activeBoosts)) player.activeBoosts = [];
+  player.activeBoosts.push({
+    id: `${drug.id}-${now}-${Math.floor(Math.random() * 1000)}`,
+    name: drug.name,
+    effect: { ...(drug.effect || {}) },
+    expiresAt: now + Number(drug.durationSeconds || 0) * 1000,
+  });
+
+  return {
+    drug,
+    overdose: false,
+    durationSeconds: Number(drug.durationSeconds || 0),
+    effect: { ...(drug.effect || {}) },
+    logMessage: `Weszlo ${drug.name}. Staty podbite na ${Math.round(Number(drug.durationSeconds || 0) / 60)} min.`,
+  };
+}
+
 export function addFriendForPlayer(player, targetEntry, now = Date.now()) {
   ensurePlayerSocialState(player);
   if (!targetEntry?.id) {

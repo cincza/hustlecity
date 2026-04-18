@@ -59,6 +59,7 @@ import {
   addFriendForPlayer,
   appendPlayerMessage,
   buyDrugFromDealerForPlayer,
+  consumeDrugForPlayer,
   fightClubRoundForPlayer,
   placeBountyOnPlayer,
   searchEscortInClubForPlayer,
@@ -261,6 +262,7 @@ function createInitialPlayerData(username = "gracz") {
       casinoWins: 0,
     },
     inventory: Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0])),
+    activeBoosts: [],
     drugInventory: createDrugCounterMap(),
     dealerInventory: createDealerInventory(),
     cooldowns: {
@@ -356,6 +358,19 @@ function ensurePlayerExtendedState(player) {
     for (const item of MARKET_PRODUCTS) {
       player.inventory[item.id] = Math.max(0, Math.floor(Number(player.inventory[item.id] || 0)));
     }
+  }
+  if (!Array.isArray(player.activeBoosts)) {
+    player.activeBoosts = [];
+  } else {
+    player.activeBoosts = player.activeBoosts
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => ({
+        id: typeof entry.id === "string" ? entry.id : `boost-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: typeof entry.name === "string" ? entry.name : "Boost",
+        effect: entry.effect && typeof entry.effect === "object" && !Array.isArray(entry.effect) ? { ...entry.effect } : {},
+        expiresAt: Math.max(0, Math.floor(Number(entry.expiresAt || 0))),
+      }))
+      .filter((entry) => entry.expiresAt > 0);
   }
   player.drugInventory = normalizeDrugInventory(player.drugInventory);
   player.dealerInventory = normalizeDealerInventory(player.dealerInventory);
@@ -661,6 +676,7 @@ function syncPlayerEnergy(player, now = Date.now()) {
 function syncPlayerState(player, now = Date.now()) {
   ensurePlayerExtendedState(player);
   syncPlayerEnergy(player, now);
+  player.activeBoosts = player.activeBoosts.filter((entry) => Number(entry?.expiresAt || 0) > now);
   player.profile.level = getLevelFromRespect(player.profile.respect);
   player.profile.xp = Math.max(0, Math.floor(Number(player.profile.xp) || 0));
   player.profile.xp = Math.min(player.profile.xp, getXpRequirementForRespect(player.profile.respect));
@@ -719,6 +735,7 @@ function publicPlayer(player, now = Date.now()) {
     profile: player.profile,
     stats: player.stats,
     inventory: player.inventory,
+    activeBoosts: player.activeBoosts,
     drugInventory: player.drugInventory,
     dealerInventory: player.dealerInventory,
     escortsOwned: player.escortsOwned,
@@ -1774,6 +1791,23 @@ app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
     userId: req.user.id,
     drugId,
     payout: result?.payout || 0,
+  });
+
+  res.json({
+    user: publicPlayer(req.player),
+    result,
+  });
+}));
+
+app.post("/dealer/consume", auth, asyncHandler(async (req, res) => {
+  const drugId = String(req.body?.drugId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "dealer-consume", async () => {
+    await commitPlayerMutation(req, "dealer-consume", async (player) => {
+      result = consumeDrugForPlayer(player, drugId, Date.now());
+      pushLog(player, result.logMessage);
+    });
   });
 
   res.json({
