@@ -27,6 +27,9 @@ export function CityScreen({
   escortCollectionCap,
   businessCapEta,
   escortCapEta,
+  districtSummaries,
+  focusDistrictSummary,
+  hottestDistrictSummary,
   escortFindChance,
   gangTributeRemaining,
   clubNightRemaining,
@@ -137,6 +140,34 @@ export function CityScreen({
           </View>
         </SectionCard>
 
+        <SectionCard title="Dzielnice" subtitle="Trzy fronty miasta. Widzisz, gdzie cisniesz i gdzie robi sie goraco.">
+          {Array.isArray(districtSummaries)
+            ? districtSummaries.map((district) => (
+                <View key={district.id} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{district.name}</Text>
+                      <Text style={styles.listCardMeta}>
+                        {district.controlLabel} | Presja: {district.pressureLabel} | {district.bonusLabel}
+                      </Text>
+                    </View>
+                    {game.gang?.joined ? (
+                      <Pressable
+                        onPress={() => actions.setGangFocus(district.id)}
+                        style={[styles.inlineButton, game.gang.focusDistrictId === district.id && styles.tileDisabled]}
+                      >
+                        <Text style={styles.inlineButtonText}>
+                          {game.gang.focusDistrictId === district.id ? "Fokus" : "Pchnij"}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <Text style={styles.listCardMeta}>{district.note}</Text>
+                </View>
+              ))
+            : null}
+        </SectionCard>
+
         <SectionCard title="Puls miasta" subtitle="Najwazniejsze liczby bez sciany tekstu.">
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
@@ -170,6 +201,14 @@ export function CityScreen({
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Cap ulicy</Text>
               <Text style={styles.mobileOverviewValueSmall}>{formatLongDuration(escortCapEta)}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Fokus</Text>
+              <Text style={styles.mobileOverviewValueSmall}>{focusDistrictSummary?.shortName || "-"}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Najgorzej</Text>
+              <Text style={styles.mobileOverviewValueSmall}>{hottestDistrictSummary?.shortName || "-"}</Text>
             </View>
           </View>
         </SectionCard>

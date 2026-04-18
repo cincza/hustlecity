@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { HEIST_TIERS, getNextHeistTier, groupHeistsByTier } from "../game/config/heistTiers";
 import { HeistCard, HeistTabs } from "../components/GameShellUI";
 
@@ -14,8 +14,16 @@ export function HeistsScreen({
   StatLine,
   Tag,
   formatMoney,
+  districtSummaries,
+  availableOperations,
+  activeOperation,
+  activeOperationStage,
+  activeOperationChoices,
   getSoloHeistOdds,
   onExecuteHeist,
+  onStartOperation,
+  onAdvanceOperation,
+  onExecuteOperation,
   sceneBackgrounds,
 }) {
   const grouped = useMemo(() => groupHeistsByTier(heists), [heists]);
@@ -23,6 +31,20 @@ export function HeistsScreen({
   const [selectedTier, setSelectedTier] = useState(unlockedTierIds[unlockedTierIds.length - 1] || HEIST_TIERS[0].id);
   const nextTier = getNextHeistTier(game.player.respect);
   const activeHeists = grouped[selectedTier] || [];
+  const activeOperationTitle = useMemo(
+    () =>
+      activeOperation
+        ? (availableOperations.find((operation) => operation.id === activeOperation.operationId)?.name || activeOperation.operationId)
+        : null,
+    [activeOperation, availableOperations]
+  );
+  const districtLabelById = useMemo(
+    () =>
+      Object.fromEntries(
+        (Array.isArray(districtSummaries) ? districtSummaries : []).map((district) => [district.id, district.name])
+      ),
+    [districtSummaries]
+  );
   const tierTabs = HEIST_TIERS.map((tier) => ({
     id: tier.id,
     label: tier.shortLabel,
@@ -43,6 +65,54 @@ export function HeistsScreen({
         <StatLine label="Aktualny szacunek" value={`${game.player.respect}`} />
         <StatLine label="Odblokowany tier" value={HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).slice(-1)[0]?.title || HEIST_TIERS[0].title} />
         <StatLine label="Nastepny prog" value={nextTier ? `${nextTier.title} przy Szacunku ${nextTier.unlockRespect}` : "Masz wszystkie progi"} />
+      </SectionCard>
+
+      <SectionCard title="Operacje" subtitle="Grubsza robota ponad szybkim heistem. Jedna aktywna planowka naraz.">
+        {activeOperation ? (
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>{activeOperationTitle}</Text>
+            <Text style={styles.listCardMeta}>
+              Dzielnica: {districtLabelById[activeOperation.districtId] || activeOperation.districtId} | Etap: {activeOperationStage || "final"}
+            </Text>
+            {activeOperationStage ? (
+              <View style={styles.listActionsRow}>
+                {activeOperationChoices.map((choice) => (
+                  <Pressable key={choice.id} onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
+                    <Text style={styles.inlineButtonText}>{choice.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <Pressable onPress={onExecuteOperation} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Odpal final</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <>
+            {!availableOperations.length ? <Text style={styles.emptyText}>Najpierw dobij do wyzszych progow szacunu.</Text> : null}
+            {(availableOperations || []).map((operation) => (
+              <View key={operation.id} style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{operation.name}</Text>
+                    <Text style={styles.listCardMeta}>
+                      {districtLabelById[operation.districtId] || operation.districtId} | Start od {operation.respect} RES
+                    </Text>
+                  </View>
+                  <Tag text={formatMoney(operation.baseReward[0])} />
+                </View>
+                <Text style={styles.listCardMeta}>{operation.summary}</Text>
+                <View style={styles.inlineRow}>
+                  <Text style={styles.costLabel}>Przygotowanie {formatMoney(operation.prepCost)} | Energia {operation.energyCost}</Text>
+                  <Pressable onPress={() => onStartOperation(operation.id)} style={styles.inlineButton}>
+                    <Text style={styles.inlineButtonText}>Zacznij</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
       </SectionCard>
 
       <SectionCard title="Progi" subtitle="Ulica, sklepy, firmy i high risk w jednym czystym przejsciu.">

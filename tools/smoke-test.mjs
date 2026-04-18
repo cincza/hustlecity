@@ -280,15 +280,50 @@ async function main() {
       /gang|serwerowo/i
     );
 
-    await expectRequestFailure(
-      "/tasks/claim",
-      {
-        method: "POST",
-        token,
-        body: { taskId: "club" },
-      },
-      /klub/i
-    );
+    const initialDistricts = await request("/districts", { token });
+    if (!Array.isArray(initialDistricts?.districts) || initialDistricts.districts.length !== 3) {
+      throw new Error("Backend nie zwrocil trzech dzielnic MVP.");
+    }
+
+    const createdGang = await request("/gang/create", {
+      method: "POST",
+      token,
+      body: { gangName: "Smoke Syndicate" },
+    });
+
+    if (!createdGang?.user?.gang?.joined || createdGang.user.gang.name !== "Smoke Syndicate") {
+      throw new Error("Tworzenie gangu nie zapisalo nowego stanu backendowego.");
+    }
+
+    const focusedGang = await request("/gang/focus", {
+      method: "POST",
+      token,
+      body: { districtId: "neon" },
+    });
+
+    if (focusedGang?.user?.gang?.focusDistrictId !== "neon") {
+      throw new Error("Gang focus nie przelaczyl sie na Neon.");
+    }
+
+    const gangTribute = await request("/gang/tribute", {
+      method: "POST",
+      token,
+      body: { amount: 12000 },
+    });
+
+    if (Number(gangTribute?.user?.gang?.vault || 0) < 16000) {
+      throw new Error("Wrzutka do skarbca nie podniosla vaultu gangu.");
+    }
+
+    const investedGangProject = await request("/gang/projects/invest", {
+      method: "POST",
+      token,
+      body: { projectId: "district-push" },
+    });
+
+    if (Number(investedGangProject?.user?.gang?.projects?.["district-push"] || 0) < 1) {
+      throw new Error("Projekt gangu nie wskoczyl na pierwszy poziom.");
+    }
 
     const boughtBusiness = await request("/businesses/buy", {
       method: "POST",
@@ -518,6 +553,106 @@ async function main() {
       throw new Error("Akcji klubowej nie rozliczono na backendzie.");
     }
 
+    const claimedClub = await request("/clubs/claim", {
+      method: "POST",
+      token,
+      body: { venueId: "club-2" },
+    });
+
+    if (!claimedClub?.user?.club?.owned || claimedClub.user.club.sourceId !== "club-2") {
+      throw new Error("Przejecie klubu nie zapisalo ownership na backendzie.");
+    }
+
+    const claimedClubTask = await request("/tasks/claim", {
+      method: "POST",
+      token,
+      body: { taskId: "club" },
+    });
+
+    if (!claimedClubTask?.result?.rewardCash) {
+      throw new Error("Task klubu nie zwrocil nagrody po przejeciu lokalu.");
+    }
+
+    const clubPlan = await request("/clubs/plan", {
+      method: "POST",
+      token,
+      body: { planId: "guestlist" },
+    });
+
+    if (clubPlan?.user?.club?.nightPlanId !== "guestlist") {
+      throw new Error("Plan nocy nie zapisal sie po stronie backendu.");
+    }
+
+    const fortifiedClub = await request("/clubs/fortify", {
+      method: "POST",
+      token,
+    });
+
+    if (Number(fortifiedClub?.user?.club?.securityLevel || 0) < 1) {
+      throw new Error("Fortyfikacja klubu nie podniosla security level.");
+    }
+
+    const clubNight = await request("/clubs/night", {
+      method: "POST",
+      token,
+    });
+
+    if (!Number.isFinite(clubNight?.result?.payout) || clubNight.result.payout <= 0) {
+      throw new Error("Run night klubu nie zwrocil dodatniego payoutu.");
+    }
+
+    const districtsAfterClub = await request("/districts", { token });
+    const neonDistrict = districtsAfterClub?.districts?.find((entry) => entry.id === "neon");
+    if (!neonDistrict || Number(neonDistrict.influence || 0) <= 0) {
+      throw new Error("Klub i fokus gangu nie zostawily sladu influence w Neon.");
+    }
+
+    const operationsSnapshot = await request("/operations", { token });
+    if (!Array.isArray(operationsSnapshot?.catalog) || operationsSnapshot.catalog.length < 3) {
+      throw new Error("Katalog operacji nie zwrocil listy MVP.");
+    }
+
+    const startedOperation = await request("/operations/start", {
+      method: "POST",
+      token,
+      body: { operationId: "vip-lift" },
+    });
+
+    if (startedOperation?.user?.operations?.active?.operationId !== "vip-lift") {
+      throw new Error("Start operacji nie zapisuje aktywnego planu.");
+    }
+
+    const operationChoices = [
+      "inside-tip",
+      "quiet-entry",
+      "burner-kit",
+      "tight-crew",
+      "burner-sedan",
+    ];
+
+    for (const choiceId of operationChoices) {
+      const step = await request("/operations/advance", {
+        method: "POST",
+        token,
+        body: { choiceId },
+      });
+      if (!step?.user?.operations?.active && choiceId !== operationChoices[operationChoices.length - 1]) {
+        throw new Error(`Operacja zgubila aktywny stan po ruchu ${choiceId}.`);
+      }
+    }
+
+    const executedOperation = await request("/operations/execute", {
+      method: "POST",
+      token,
+    });
+
+    if (executedOperation?.user?.operations?.active !== null) {
+      throw new Error("Operacja nie wyczyscila aktywnego planu po execute.");
+    }
+    if (!Array.isArray(executedOperation?.user?.operations?.history) || !executedOperation.user.operations.history.length) {
+      throw new Error("Operacja nie zapisala sie do historii backendowej.");
+    }
+
     const friendsSnapshot = await request("/social/friends", { token });
     const messagesSnapshot = await request("/social/messages", { token });
 
@@ -650,6 +785,30 @@ async function main() {
       throw new Error("Avatar gracza nie przetrwal restartu backendu.");
     }
 
+    if (!persistedMe.user.gang?.joined || persistedMe.user.gang?.focusDistrictId !== "neon") {
+      throw new Error("Gang MVP nie przetrwal restartu backendu.");
+    }
+
+    if (Number(persistedMe.user.gang?.projects?.["district-push"] || 0) < 1) {
+      throw new Error("Projekt gangu nie przetrwal restartu backendu.");
+    }
+
+    if (!persistedMe.user.club?.owned || persistedMe.user.club?.sourceId !== "club-2") {
+      throw new Error("Ownership klubu nie przetrwal restartu backendu.");
+    }
+
+    if (!Array.isArray(persistedMe.user.tasksClaimed) || !persistedMe.user.tasksClaimed.includes("club")) {
+      throw new Error("Claim taska klubu nie przetrwal restartu backendu.");
+    }
+
+    if (!persistedMe.user.city?.districts?.neon) {
+      throw new Error("Stan dzielnic nie przetrwal restartu backendu.");
+    }
+
+    if (!Array.isArray(persistedMe.user.operations?.history) || !persistedMe.user.operations.history.length) {
+      throw new Error("Historia operacji nie przetrwala restartu backendu.");
+    }
+
     if (!persistedMe.user.online?.friends?.some((entry) => entry.id === attackTarget.id)) {
       throw new Error("Znajomi nie przetrwali restartu backendu.");
     }
@@ -688,6 +847,12 @@ async function main() {
       directMessages: "ok",
       bounty: bountyResult.result.increment,
       clubAction: escortSearchResult.result.outcome,
+      gang: "ok",
+      districts: districtsAfterClub.districts.length,
+      gangProject: investedGangProject.result.level,
+      clubOwnership: claimedClub.user.club.sourceId,
+      clubNight: clubNight.result.payout,
+      operation: executedOperation.result.success ? "ok-success" : "ok-failed",
       prisonChat: "ok",
       clientStateAuthority: "ok",
       persistenceAfterRestart: "ok",

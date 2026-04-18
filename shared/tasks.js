@@ -38,8 +38,7 @@ export const TASK_DEFINITIONS = [
     description: "Przejmij lub otworz swoj klub.",
     rewardCash: 3000,
     rewardXp: 12,
-    onlineSupported: false,
-    onlineDisabledReason: "Ta misja czeka na serwerowe przejecia i zakladanie klubow.",
+    onlineSupported: true,
   },
 ];
 

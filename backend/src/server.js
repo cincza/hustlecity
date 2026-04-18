@@ -82,6 +82,36 @@ import {
   syncBusinessCollections,
   upgradeBusinessForPlayer,
 } from "./services/empireActionService.js";
+import {
+  applyGangGoalRewardToPlayer,
+  claimClubVenueForPlayer,
+  applyHeistDistrictOutcome,
+  applyClubActionDistrictOutcome,
+  applyOperationDistrictOutcome,
+  ensurePlayerCityState,
+  fortifyClubForPlayer,
+  resolveClubDistrictId,
+  runClubNightForPlayer,
+  setClubNightPlanForPlayer,
+  syncCityStateForPlayer,
+} from "./services/districtService.js";
+import {
+  claimGangWeeklyGoalForPlayer,
+  contributeGangVaultForPlayer,
+  createGangForPlayer,
+  ensurePlayerGangState,
+  investGangProjectForPlayer,
+  joinGangForPlayer,
+  leaveGangForPlayer,
+  setGangFocusForPlayer,
+  syncGangDerivedState,
+} from "./services/gangProjectService.js";
+import {
+  advanceOperationForPlayer,
+  ensurePlayerOperationState,
+  executeOperationForPlayer,
+  startOperationForPlayer,
+} from "./services/operationService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import {
@@ -105,6 +135,9 @@ import {
   normalizeClubState,
 } from "../../shared/socialGameplay.js";
 import { createBusinessCollections, createSupplyCounterMap } from "../../shared/empire.js";
+import { createCityState, getDistrictSummaries } from "../../shared/districts.js";
+import { createGangState } from "../../shared/gangProjects.js";
+import { createOperationsState, getOperationById, OPERATION_CATALOG } from "../../shared/operations.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -311,7 +344,10 @@ function createInitialPlayerData(username = "gracz") {
     },
     online: createOnlineSocialState(),
     escortsOwned: [],
+    gang: createGangState(),
     club: createClubState(),
+    city: createCityState(),
+    operations: createOperationsState(),
     businessesOwned: [],
     businessUpgrades: {},
     factoriesOwned: {},
@@ -413,6 +449,12 @@ function ensurePlayerExtendedState(player) {
       .filter((entry) => entry.count > 0);
   }
   player.club = normalizeClubState(player.club);
+  ensurePlayerGangState(player);
+  ensurePlayerCityState(player);
+  ensurePlayerOperationState(player);
+  if (player.club?.owned && !player.club.districtId) {
+    player.club.districtId = resolveClubDistrictId(player, player.club.sourceId);
+  }
   ensurePlayerEmpireState(player);
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile.bounty || 0)));
 }
@@ -557,6 +599,7 @@ function buildClubVenueFromPlayer(player) {
     id: club.sourceId,
     name: club.name,
     ownerLabel,
+    districtId: club.districtId || resolveClubDistrictId({ club }),
     respect: Math.max(0, Math.floor(Number(player?.profile?.respect || 0))),
     takeoverCost: ECONOMY_RULES.empire.clubTakeoverCost,
     popularity: club.popularity,
@@ -565,6 +608,9 @@ function buildClubVenueFromPlayer(player) {
     policePressure: Number(club.policePressure || 0),
     traffic: Number(club.traffic || 0),
     nightPlanId: club.nightPlanId,
+    securityLevel: Number(club.securityLevel || 0),
+    defenseReadiness: Number(club.defenseReadiness || 0),
+    threatLevel: Number(club.threatLevel || 0),
     note: club.note || "Prywatny lokal gracza. Ruch i presja licza sie z wizyt.",
   };
 }
@@ -605,6 +651,9 @@ function resolveClubVenueSnapshot(venueId, { ownerRecord = null, fallbackPlayer 
     nightPlanId: getClubNightPlan().id,
     traffic: 0,
     policePressure: Math.max(0, Number(staticVenue.policeBase || 0) * 3),
+    securityLevel: 0,
+    defenseReadiness: 44,
+    threatLevel: 0,
   };
 }
 
@@ -762,6 +811,8 @@ function syncPlayerState(player, now = Date.now()) {
   syncPlayerEnergy(player, now);
   syncClubState(player, now);
   syncBusinessCollections(player, now);
+  syncCityStateForPlayer(player, now);
+  syncGangDerivedState(player, now);
   player.activeBoosts = player.activeBoosts.filter((entry) => Number(entry?.expiresAt || 0) > now);
   player.profile.level = getLevelFromRespect(player.profile.respect);
   player.profile.xp = Math.max(0, Math.floor(Number(player.profile.xp) || 0));
@@ -825,6 +876,9 @@ function publicPlayer(player, now = Date.now()) {
     drugInventory: player.drugInventory,
     dealerInventory: player.dealerInventory,
     escortsOwned: player.escortsOwned,
+    gang: player.gang,
+    city: player.city,
+    operations: player.operations,
     businessesOwned: player.businessesOwned,
     businessUpgrades: player.businessUpgrades,
     factoriesOwned: player.factoriesOwned,
@@ -2210,8 +2264,10 @@ app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
 
     if (ownerRecord?.playerData) {
       applyClubVisitDeltaToOwnerClub(ownerRecord.playerData, venue.id, result.ownerDelta, now);
+      applyClubActionDistrictOutcome(ownerRecord.playerData, venue, result, now);
     } else if (ownerSelfVisit) {
       applyClubVisitDeltaToOwnerClub(actor, venue.id, result.ownerDelta, now);
+      applyClubActionDistrictOutcome(actor, venue, result, now);
     }
 
     const persistTasks = [persistPlayerForUser(actorRecord._id, actor)];
@@ -2282,8 +2338,10 @@ app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
 
     if (ownerRecord?.playerData) {
       applyClubVisitDeltaToOwnerClub(ownerRecord.playerData, venue.id, result.ownerDelta, now);
+      applyClubActionDistrictOutcome(ownerRecord.playerData, venue, result, now);
     } else if (ownerSelfVisit) {
       applyClubVisitDeltaToOwnerClub(actor, venue.id, result.ownerDelta, now);
+      applyClubActionDistrictOutcome(actor, venue, result, now);
     }
 
     const persistTasks = [persistPlayerForUser(actorRecord._id, actor)];
@@ -2306,6 +2364,230 @@ app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
     user: publicPlayer(req.player, now),
     result,
   });
+}));
+
+app.get("/districts", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  res.json({
+    city: req.player.city,
+    districts: getDistrictSummaries(req.player.city),
+  });
+}));
+
+app.post("/clubs/claim", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const venueId = String(req.body?.venueId || "").trim();
+  if (!venueId) {
+    res.status(400).json({ error: "Wybierz lokal do przejecia." });
+    return;
+  }
+  const existingOwner = await findClubOwnerRecordByVenueId(venueId);
+  if (existingOwner?._id && existingOwner._id !== req.user.id) {
+    res.status(409).json({ error: "Ten lokal jest juz wziety przez innego gracza." });
+    return;
+  }
+
+  let result = null;
+  await withPlayerActionLock(req, "clubs-claim", async () => {
+    await commitPlayerMutation(req, "clubs-claim", async (player) => {
+      result = claimClubVenueForPlayer(player, venueId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/clubs/plan", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const planId = String(req.body?.planId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "clubs-plan", async () => {
+    await commitPlayerMutation(req, "clubs-plan", async (player) => {
+      result = setClubNightPlanForPlayer(player, planId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/clubs/night", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "clubs-night", async () => {
+    await commitPlayerMutation(req, "clubs-night", async (player) => {
+      result = runClubNightForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/clubs/fortify", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "clubs-fortify", async () => {
+    await commitPlayerMutation(req, "clubs-fortify", async (player) => {
+      result = fortifyClubForPlayer(player, now);
+      pushLog(player, `${result.logMessage} Koszt ${result.cost}$.`);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/create", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const gangName = String(req.body?.gangName || req.body?.name || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "gang-create", async () => {
+    await commitPlayerMutation(req, "gang-create", async (player) => {
+      result = createGangForPlayer(player, gangName, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/join", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const invite = req.body?.invite || req.body || {};
+  let result = null;
+  await withPlayerActionLock(req, "gang-join", async () => {
+    await commitPlayerMutation(req, "gang-join", async (player) => {
+      result = joinGangForPlayer(player, invite, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/leave", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "gang-leave", async () => {
+    await commitPlayerMutation(req, "gang-leave", async (player) => {
+      result = leaveGangForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/tribute", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const amount = Number(req.body?.amount || 0);
+  let result = null;
+  await withPlayerActionLock(req, "gang-tribute", async () => {
+    await commitPlayerMutation(req, "gang-tribute", async (player) => {
+      result = contributeGangVaultForPlayer(player, amount, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/focus", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const districtId = String(req.body?.districtId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "gang-focus", async () => {
+    await commitPlayerMutation(req, "gang-focus", async (player) => {
+      result = setGangFocusForPlayer(player, districtId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/projects/invest", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const projectId = String(req.body?.projectId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "gang-project-invest", async () => {
+    await commitPlayerMutation(req, "gang-project-invest", async (player) => {
+      result = investGangProjectForPlayer(player, projectId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/gang/goals/claim", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "gang-goal-claim", async () => {
+    await commitPlayerMutation(req, "gang-goal-claim", async (player) => {
+      result = claimGangWeeklyGoalForPlayer(player, now);
+      applyGangGoalRewardToPlayer(player, result.rewards, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.get("/operations", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  res.json({
+    catalog: OPERATION_CATALOG,
+    active: req.player.operations?.active || null,
+    history: req.player.operations?.history || [],
+    districts: getDistrictSummaries(req.player.city),
+  });
+}));
+
+app.post("/operations/start", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const operationId = String(req.body?.operationId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "operations-start", async () => {
+    await commitPlayerMutation(req, "operations-start", async (player) => {
+      result = startOperationForPlayer(player, operationId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/operations/advance", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const choiceId = String(req.body?.choiceId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "operations-advance", async () => {
+    await commitPlayerMutation(req, "operations-advance", async (player) => {
+      result = advanceOperationForPlayer(player, choiceId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/operations/execute", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "operations-execute", async () => {
+    await commitPlayerMutation(req, "operations-execute", async (player) => {
+      result = executeOperationForPlayer(player, now);
+      applyOperationDistrictOutcome(player, result.districtId, { success: result.success, now });
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
 }));
 
 app.post("/club-pvp/preview", auth, (req, res) => {
@@ -3009,6 +3291,7 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
         currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnSuccess, 0, 100);
         currentPlayer.stats.heistsWon += 1;
         currentPlayer.stats.totalEarned += gain;
+        applyHeistDistrictOutcome(currentPlayer, heist, { success: true, now });
         pushLog(currentPlayer, `Napad udany: ${heist.name}. Wpada $${gain} i +${xpGain} XP.`);
         return null;
       });
@@ -3046,6 +3329,7 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
       currentPlayer.profile.cash = Math.max(0, currentPlayer.profile.cash - loss);
       currentPlayer.profile.hp = Math.max(1, currentPlayer.profile.hp - damage);
       currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnFailure, 0, 100);
+      applyHeistDistrictOutcome(currentPlayer, heist, { success: false, now });
       if (jailed) {
         currentPlayer.profile.jailUntil = Math.max(currentPlayer.profile.jailUntil || 0, now + jailSeconds * 1000);
         pushLog(

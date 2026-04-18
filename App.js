@@ -20,6 +20,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import {
   addFriendOnline,
+  advanceOperationOnline,
   bribeOutOfJailOnline,
   buyBusinessOnline,
   buyDrugFromDealerOnline,
@@ -28,11 +29,16 @@ import {
   buyProductOnline,
   buyGymPassOnline,
   buyMealOnline,
+  claimClubOnline,
+  claimGangGoalOnline,
   claimTaskOnline,
   collectBusinessIncomeOnline,
+  contributeGangOnline,
   consumeDrugOnline,
+  createGangOnline,
   attackPlayerOnline,
   depositOnline,
+  executeOperationPlanOnline,
   executeHeistOnline,
   fetchFriendListOnline,
   fetchCasinoMeta,
@@ -46,7 +52,11 @@ import {
   fetchSocialPlayers,
   healOnline,
   hitBlackjackOnline,
+  fortifyClubOnline,
   loginUser,
+  investGangProjectOnline,
+  joinGangOnline,
+  leaveGangOnline,
   placeBountyOnline,
   playHighRiskOnline,
   playFightClubRoundOnline,
@@ -55,10 +65,14 @@ import {
   previewClubPvpOnline,
   registerUser,
   produceDrugOnline,
+  runClubNightOnline,
   sellDrugToDealerOnline,
   sellProductOnline,
   sendGlobalChatMessageOnline,
   sendDirectMessageOnline,
+  setClubPlanOnline,
+  setGangFocusOnline,
+  startOperationOnline,
   startBlackjackOnline,
   standBlackjackOnline,
   sendPrisonChatMessageOnline,
@@ -106,7 +120,32 @@ import {
   normalizeSupplies,
 } from "./shared/empire.js";
 import { applyXpProgression } from "./shared/progression.js";
+import {
+  createCityState,
+  findDistrictById,
+  getDistrictModifierSummary,
+  getDistrictSummaries,
+  normalizeCityState,
+} from "./shared/districts.js";
+import {
+  createGangState,
+  getGangProjectCost,
+  getGangProjectEffects,
+  getGangProjectLevel,
+  getGangWeeklyProgress,
+  GANG_PROJECTS,
+  normalizeGangState,
+} from "./shared/gangProjects.js";
 import { GYM_EXERCISES, GYM_PASSES, RESTAURANT_ITEMS } from "./shared/playerActions.js";
+import {
+  createOperationsState,
+  getActiveOperationStage,
+  getOperationById,
+  getOperationChoicesForStage,
+  normalizeOperationsState,
+  OPERATION_CATALOG,
+  OPERATION_STAGE_ORDER,
+} from "./shared/operations.js";
 import { getTaskStates as getSharedTaskStates } from "./shared/tasks.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
@@ -534,28 +573,9 @@ const INITIAL = {
     jailUntil: null,
   },
   stats: { heistsDone: 0, heistsWon: 0, totalEarned: 0, gangHeistsWon: 0, casinoWins: 0, drugBatches: 0 },
-  gang: {
-    joined: false,
-    role: null,
-    name: null,
-    members: 0,
-    maxMembers: 30,
-    territory: 0,
-    influence: 0,
-    vault: 0,
-    inviteRespectMin: 15,
-    createCost: 250000,
-    chat: [],
-    lastTributeAt: 0,
-    gearScore: 62,
-    jailedCrew: 0,
-    crewLockdownUntil: 0,
-    membersList: [],
-    invites: [
-      { id: "inv-1", gangName: "Grey Saints", leader: "Mako", members: 9, territory: 2, inviteRespectMin: 15 },
-      { id: "inv-2", gangName: "Cold Avenue", leader: "Dice", members: 6, territory: 1, inviteRespectMin: 18 },
-    ],
-  },
+  gang: createGangState(),
+  city: createCityState(),
+  operations: createOperationsState(),
   businessesOwned: [],
   businessUpgrades: {},
   escortsOwned: [],
@@ -944,6 +964,9 @@ function createClubListings() {
     traffic: 0,
     policePressure: Math.max(0, (club.policeBase || 0) * 3),
     nightPlanId: club.nightPlanId || getClubNightPlan().id,
+    securityLevel: 0,
+    defenseReadiness: 44,
+    threatLevel: 0,
   }));
 }
 
@@ -1037,6 +1060,10 @@ function syncClubListing(listings, club, ownerLabel) {
           policePressure: club.policePressure,
           traffic: club.traffic,
           nightPlanId: club.nightPlanId,
+          districtId: club.districtId || listing.districtId || null,
+          securityLevel: club.securityLevel,
+          defenseReadiness: club.defenseReadiness,
+          threatLevel: club.threatLevel,
         }
       : listing
   );
@@ -1057,6 +1084,10 @@ function syncClubListing(listings, club, ownerLabel) {
       policePressure: club.policePressure,
       traffic: club.traffic,
       nightPlanId: club.nightPlanId,
+      districtId: club.districtId || null,
+      securityLevel: club.securityLevel,
+      defenseReadiness: club.defenseReadiness,
+      threatLevel: club.threatLevel,
       note: club.note || "Prywatny lokal postawiony na grubej kasie i ryzyku.",
     },
     ...updated,
@@ -1081,6 +1112,10 @@ function getCurrentClubVenue(game) {
       policePressure: game.club.policePressure,
       traffic: game.club.traffic,
       nightPlanId: game.club.nightPlanId,
+      districtId: game.club.districtId || null,
+      securityLevel: game.club.securityLevel,
+      defenseReadiness: game.club.defenseReadiness,
+      threatLevel: game.club.threatLevel,
       note: game.club.note,
     };
   }
@@ -1624,6 +1659,28 @@ function AppRuntime() {
   const gangTributeRemaining = Math.max(0, GANG_TRIBUTE_COOLDOWN_MS - (Date.now() - (game.gang.lastTributeAt || 0)));
   const clubNightRemaining = Math.max(0, CLUB_NIGHT_COOLDOWN_MS - (Date.now() - (game.club.lastRunAt || 0)));
   const crewLockdownRemaining = Math.max(0, (game.gang.crewLockdownUntil || 0) - Date.now());
+  const districtSummaries = useMemo(() => getDistrictSummaries(game.city), [game.city]);
+  const focusDistrictSummary = useMemo(
+    () => getDistrictModifierSummary(game.city, game.gang.focusDistrictId || game.city.focusDistrictId),
+    [game.city, game.gang.focusDistrictId]
+  );
+  const hottestDistrictSummary = useMemo(
+    () =>
+      [...districtSummaries].sort((left, right) => {
+        if (right.pressure !== left.pressure) return right.pressure - left.pressure;
+        return right.influence - left.influence;
+      })[0] || districtSummaries[0],
+    [districtSummaries]
+  );
+  const activeOperation = game.operations?.active || null;
+  const activeOperationStage = getActiveOperationStage(activeOperation);
+  const activeOperationChoices = activeOperationStage ? getOperationChoicesForStage(activeOperationStage) : [];
+  const availableOperations = useMemo(
+    () => OPERATION_CATALOG.filter((operation) => game.player.respect >= operation.respect),
+    [game.player.respect]
+  );
+  const gangGoalProgress = useMemo(() => getGangWeeklyProgress(game.gang), [game.gang]);
+  const gangProjectEffects = useMemo(() => getGangProjectEffects(game.gang), [game.gang]);
 
   const mergeServerUser = (serverUser, marketPayload) => {
     const safeProfile = serverUser?.profile;
@@ -1744,6 +1801,43 @@ function AppRuntime() {
                   : prev.club.guestState,
             })
           : prev.club,
+      clubListings:
+        serverUser?.club && typeof serverUser.club === "object"
+          ? syncClubListing(
+              prev.clubListings,
+              normalizeClubState({
+                ...prev.club,
+                ...serverUser.club,
+                stash:
+                  serverUser.club?.stash && typeof serverUser.club.stash === "object"
+                    ? { ...prev.club.stash, ...serverUser.club.stash }
+                    : prev.club.stash,
+                guestState:
+                  serverUser.club?.guestState && typeof serverUser.club.guestState === "object"
+                    ? {
+                        ...(prev.club.guestState || createClubGuestState()),
+                        ...serverUser.club.guestState,
+                      }
+                    : prev.club.guestState,
+              }),
+              serverUser.club?.ownerLabel || safeProfile.name || prev.player.name
+            )
+          : prev.clubListings,
+      gang:
+        serverUser?.gang && typeof serverUser.gang === "object"
+          ? normalizeGangState({
+              ...prev.gang,
+              ...serverUser.gang,
+            })
+          : prev.gang,
+      city:
+        serverUser?.city && typeof serverUser.city === "object"
+          ? normalizeCityState(serverUser.city)
+          : prev.city,
+      operations:
+        serverUser?.operations && typeof serverUser.operations === "object"
+          ? normalizeOperationsState(serverUser.operations)
+          : prev.operations,
       online: {
         ...prev.online,
         friends: nextFriends || prev.online.friends,
@@ -2939,11 +3033,27 @@ function AppRuntime() {
   };
 
   const setClubNightPlan = (planId) => {
-    if (!requireOfflineDemoAuthority("Plan nocy klubu")) return;
     if (!game.club.owned) return pushLog("Najpierw musisz miec swoj klub.");
     if (!insideOwnClub) return pushLog("Plan nocy ustawiasz tylko bedac fizycznie u siebie.");
     const nextPlan = getClubNightPlan(planId);
     if (game.club.nightPlanId === nextPlan.id) return;
+
+    if (sessionToken) {
+      setClubPlanOnline(sessionToken, nextPlan.id)
+        .then((result) => {
+          mergeServerUser(result.user);
+          showExplicitNotice({
+            tone: "success",
+            title: "PLAN NOCY",
+            message: result?.result?.logMessage || `${nextPlan.name}. ${nextPlan.summary}`,
+            deltas: null,
+          });
+        })
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Plan nocy klubu")) return;
 
     setGame((prev) => {
       const nextClub = syncClubRuntimeState({
@@ -3616,11 +3726,23 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - club takeover cost, ownership, player-driven traffic and upkeep need persistence and anti-abuse checks
-  const openClub = (listing) => {
+  const openClub = async (listing) => {
     if (!canDoStreetAction()) return;
-    if (!requireOfflineDemoAuthority("Przejecie klubu")) return;
     if (game.club.owned) return pushLog("Klub juz jest Twoj.");
     if (!listing) return pushLog("Wybierz lokal z listy klubow.");
+
+    if (sessionToken) {
+      try {
+        const result = await claimClubOnline(sessionToken, listing.id);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
+
+    if (!requireOfflineDemoAuthority("Przejecie klubu")) return;
     if (game.player.respect < listing.respect) return pushLog(`Na ten lokal potrzebujesz ${listing.respect} szacunu.`);
     if (game.player.cash < listing.takeoverCost) return pushLog(`Brakuje ${formatMoney(listing.takeoverCost)} na przejecie ${listing.name}.`);
 
@@ -3747,10 +3869,26 @@ function AppRuntime() {
   // TODO: TO_MIGRATE_TO_SERVER - club tick income, player-driven traffic, raid rolls and stash consumption are high-value economy actions
   const runClubNight = () => {
     if (!canDoStreetAction()) return;
-    if (!requireOfflineDemoAuthority("Noc klubu")) return;
     if (!game.club.owned) return pushLog("Bez klubu nie ma co odpalac nocy.");
     if (!insideOwnClub) return pushLog("Musisz siedziec we wlasnym klubie, zeby odpalic noc i pilnowac stolow.");
     if (clubNightRemaining > 0) return pushLog(`Klub juz pracuje. Wroc za ${formatCooldown(clubNightRemaining)}.`);
+
+    if (sessionToken) {
+      runClubNightOnline(sessionToken)
+        .then((result) => {
+          mergeServerUser(result.user);
+          showExplicitNotice({
+            tone: "success",
+            title: "NOC KLUBU",
+            message: result?.result?.logMessage || "Lokal domknal noc.",
+            deltas: null,
+          });
+        })
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Noc klubu")) return;
 
     const clubSnapshot = syncClubRuntimeState(game.club);
     const clubVenue = {
@@ -3919,6 +4057,43 @@ function AppRuntime() {
         : `${clubSnapshot.name} zamknal noc na ${formatMoney(netIncome)} przy ruchu ${Math.round(trafficLevel)}.`,
       deltas: null,
     });
+  };
+
+  const fortifyClub = async () => {
+    if (!canDoStreetAction()) return;
+    if (!game.club.owned) return pushLog("Najpierw musisz miec swoj lokal.");
+    if (!insideOwnClub) return pushLog("Zabezpieczenie lokalu ustawiasz tylko bedac u siebie.");
+
+    if (sessionToken) {
+      try {
+        const result = await fortifyClubOnline(sessionToken);
+        mergeServerUser(result.user);
+        showExplicitNotice({
+          tone: "success",
+          title: "OCHRONA",
+          message: result?.result?.logMessage || "Lokal jest mocniej domkniety.",
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Ochrona klubu")) return;
+    const cost = 850 + Math.max(0, Number(game.club.securityLevel || 0)) * 650;
+    if (game.player.cash < cost) return pushLog(`Brakuje ${formatMoney(cost)} na zabezpieczenie lokalu.`);
+    setGame((prev) => ({
+      ...prev,
+      player: { ...prev.player, cash: prev.player.cash - cost },
+      club: {
+        ...prev.club,
+        securityLevel: Math.min(3, Number(prev.club.securityLevel || 0) + 1),
+        defenseReadiness: Math.min(100, Number(prev.club.defenseReadiness || 44) + 16),
+        threatLevel: Math.max(0, Number(prev.club.threatLevel || 0) - 14),
+      },
+      log: ["Lokal dostaje szybsza ochrone i spokojniejszy front.", ...prev.log].slice(0, 16),
+    }));
   };
 
   const enterClubAsGuest = async (listing) => {
@@ -4109,11 +4284,19 @@ function AppRuntime() {
   };
 
   const depositGangCash = () => {
-    if (!requireOfflineDemoAuthority("Skarbiec gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     const amount = Number(bankAmountDraft || 0);
     if (!amount || amount <= 0) return pushLog("Wpisz kwote do zasilenia skarbca.");
     if (game.player.cash < amount) return pushLog(`Brakuje ${formatMoney(amount)} w gotowce.`);
+
+    if (sessionToken) {
+      contributeGangOnline(sessionToken, amount)
+        .then((result) => mergeServerUser(result.user))
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Skarbiec gangu")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -4125,6 +4308,111 @@ function AppRuntime() {
       },
       log: [`Wrzuciles do skarbca gangu ${formatMoney(amount)}.`, ...prev.log].slice(0, 16),
     }));
+  };
+
+  const setGangFocus = async (districtId) => {
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    const district = findDistrictById(districtId);
+
+    if (sessionToken) {
+      try {
+        const result = await setGangFocusOnline(sessionToken, district.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Fokus gangu")) return;
+    setGame((prev) => ({
+      ...prev,
+      gang: normalizeGangState({ ...prev.gang, focusDistrictId: district.id }),
+      log: [`Gang ustawia fokus na ${district.name}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const investGangProject = async (projectId) => {
+    const project = GANG_PROJECTS.find((entry) => entry.id === projectId);
+    if (!project) return;
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+
+    if (sessionToken) {
+      try {
+        const result = await investGangProjectOnline(sessionToken, project.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Projekt gangu")) return;
+    const cost = getGangProjectCost(game.gang, project.id);
+    if (!cost || game.gang.vault < cost) return pushLog(`Brakuje ${formatMoney(cost || 0)} w skarbcu.`);
+    const nextLevel = getGangProjectLevel(game.gang, project.id) + 1;
+    setGame((prev) => ({
+      ...prev,
+      gang: normalizeGangState({
+        ...prev.gang,
+        vault: prev.gang.vault - cost,
+        projects: {
+          ...(prev.gang.projects || {}),
+          [project.id]: nextLevel,
+        },
+      }),
+      log: [`Projekt ${project.name} wskakuje na poziom ${nextLevel}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const claimGangGoal = async () => {
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    if (sessionToken) {
+      try {
+        const result = await claimGangGoalOnline(sessionToken);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+    pushLog("Cel tygodnia w tej wersji odbierzesz w online.");
+  };
+
+  const startOperation = async (operationId) => {
+    if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
+    try {
+      const result = await startOperationOnline(sessionToken, operationId);
+      mergeServerUser(result.user);
+    } catch (error) {
+      pushLog(error.message);
+    }
+  };
+
+  const advanceOperation = async (choiceId) => {
+    if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
+    try {
+      const result = await advanceOperationOnline(sessionToken, choiceId);
+      mergeServerUser(result.user);
+    } catch (error) {
+      pushLog(error.message);
+    }
+  };
+
+  const executeOperationPlan = async () => {
+    if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
+    try {
+      const result = await executeOperationPlanOnline(sessionToken);
+      mergeServerUser(result.user);
+      showExplicitNotice({
+        tone: result?.result?.success ? "success" : "warning",
+        title: result?.result?.success ? "OPERACJA DOMKNIETA" : "OPERACJA SPALONA",
+        message: result?.result?.logMessage || "Operacja rozliczona.",
+        deltas: null,
+      });
+    } catch (error) {
+      pushLog(error.message);
+    }
   };
 
   const sendPrisonMessage = async () => {
@@ -4198,7 +4486,6 @@ function AppRuntime() {
   };
 
   const createGang = () => {
-    if (!requireOfflineDemoAuthority("Zakladanie gangu")) return;
     if (!canDoStreetAction("Gangu nie zakladasz z celi.")) return;
     if (game.gang.joined) return pushLog("Juz jestes w gangu.");
     if (game.player.cash < game.gang.createCost) return pushLog(`Zalozenie gangu kosztuje ${formatMoney(game.gang.createCost)}.`);
@@ -4206,6 +4493,15 @@ function AppRuntime() {
 
     const cleanName = gangDraftName.trim();
     if (cleanName.length < 3) return pushLog("Nazwa gangu jest za krotka.");
+
+    if (sessionToken) {
+      createGangOnline(sessionToken, cleanName)
+        .then((result) => mergeServerUser(result.user))
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Zakladanie gangu")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -4233,12 +4529,20 @@ function AppRuntime() {
   };
 
   const joinGang = (inviteId) => {
-    if (!requireOfflineDemoAuthority("Dolaczanie do gangu")) return;
     if (!canDoStreetAction("Do gangu dolaczasz dopiero po wyjsciu z celi.")) return;
     if (game.gang.joined) return pushLog("Najpierw opusc obecny gang.");
     const invite = game.gang.invites.find((entry) => entry.id === inviteId);
     if (!invite) return;
     if (game.player.respect < invite.inviteRespectMin) return pushLog(`Ten gang bierze od ${invite.inviteRespectMin} szacunu.`);
+
+    if (sessionToken) {
+      joinGangOnline(sessionToken, invite)
+        .then((result) => mergeServerUser(result.user))
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Dolaczanie do gangu")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -4269,8 +4573,16 @@ function AppRuntime() {
   };
 
   const leaveGang = () => {
-    if (!requireOfflineDemoAuthority("Opuszczanie gangu")) return;
     if (!game.gang.joined) return pushLog("Nie jestes w zadnym gangu.");
+
+    if (sessionToken) {
+      leaveGangOnline(sessionToken)
+        .then((result) => mergeServerUser(result.user))
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Opuszczanie gangu")) return;
     setGame((prev) => ({
       ...prev,
       gang: {
@@ -5690,12 +6002,63 @@ function AppRuntime() {
         </View>
       ) : (
         <>
-          <StatLine label="Udane napady gangu" value={`${game.stats.gangHeistsWon}`} />
-          <StatLine label="Kto odpala akcje" value="Boss / Vice Boss / Zaufany" />
-          <StatLine label="Podzial hajsu" value="Dzialka na wszystkich uczestnikow" />
-          <StatLine label="Konsekwencje wtopy" value="Ludzie i sprzet leca, czesc skladu siada" />
-          <StatLine label="Minimalny kolejny prog" value={GANG_HEISTS.find((entry) => entry.minMembers > game.gang.members)?.name ?? "Kazdy prog odblokowany liczebnie"} />
-          <StatLine label="Najblizsza blokada przez szacun" value={GANG_HEISTS.find((entry) => entry.respect > game.player.respect)?.name ?? "Szacun wystarcza na wszystko"} />
+          <StatLine label="Fokus gangu" value={focusDistrictSummary?.name || "-"} />
+          <StatLine label="Wplywy / kontrola" value={`${game.gang.influence} | ${game.gang.territory} dzielnice`} />
+          <StatLine
+            label="Cel tygodnia"
+            value={`${gangGoalProgress.goal?.title || "Brak"} ${gangGoalProgress.current}/${gangGoalProgress.target}`}
+          />
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>Przerzut fokusu</Text>
+            <Text style={styles.listCardMeta}>Jedna decyzja dla gangu. Tam idzie projekt, operacja i cisnienie tygodnia.</Text>
+            <View style={styles.listActionsRow}>
+              {districtSummaries.map((district) => (
+                <Pressable
+                  key={`focus-${district.id}`}
+                  onPress={() => setGangFocus(district.id)}
+                  style={[styles.inlineButton, game.gang.focusDistrictId === district.id && styles.tileDisabled]}
+                >
+                  <Text style={styles.inlineButtonText}>{district.shortName}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>Projekty</Text>
+            <Text style={styles.listCardMeta}>Malo opcji, ale kazda podpiera klub, dzielnice albo operacje.</Text>
+            {GANG_PROJECTS.map((project) => {
+              const level = getGangProjectLevel(game.gang, project.id);
+              const cost = getGangProjectCost(game.gang, project.id);
+              const locked = !cost;
+              return (
+                <View key={project.id} style={styles.listCard}>
+                  <View style={styles.inlineRow}>
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{project.name}</Text>
+                      <Text style={styles.listCardMeta}>{project.summary}</Text>
+                      <Text style={styles.listCardMeta}>Poziom {level}/{project.levels.length}</Text>
+                    </View>
+                    <Pressable onPress={() => investGangProject(project.id)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
+                      <Text style={styles.inlineButtonText}>{locked ? "Max" : formatMoney(cost)}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>Nagroda tygodnia</Text>
+            <Text style={styles.listCardMeta}>{gangGoalProgress.goal?.summary}</Text>
+            <Text style={styles.listCardMeta}>
+              Nagroda: {formatMoney(gangGoalProgress.goal?.rewards?.vaultCash || 0)} do skarbca i puls w fokusie.
+            </Text>
+            <Pressable
+              onPress={claimGangGoal}
+              style={[styles.inlineButton, (!gangGoalProgress.completed || gangGoalProgress.claimed) && styles.tileDisabled]}
+            >
+              <Text style={styles.inlineButtonText}>{gangGoalProgress.claimed ? "Odebrane" : "Odbierz"}</Text>
+            </Pressable>
+          </View>
         </>
       )}
     </SectionCard>
@@ -6078,6 +6441,9 @@ function AppRuntime() {
     escortCollectionCap,
     businessCapEta,
     escortCapEta,
+    districtSummaries,
+    focusDistrictSummary,
+    hottestDistrictSummary,
     escortFindChance,
     gangTributeRemaining,
     clubNightRemaining,
@@ -6101,6 +6467,7 @@ function AppRuntime() {
       fightClubRound,
       collectGangTribute,
       runClubNight,
+      setGangFocus,
       collectBusinessIncome,
       collectEscortIncome,
       claimTask,
@@ -6127,6 +6494,8 @@ function AppRuntime() {
     totalBusinessIncome,
     totalEscortIncome,
     onlinePlayerCount: game.online.roster.length,
+    focusDistrictSummary,
+    hottestDistrictSummary,
     nextHeistTierLabel: nextHeistTier ? `${nextHeistTier.title} przy ${nextHeistTier.unlockRespect} RES` : "Masz wszystkie tiery",
     actions: {
       openSection: setActiveSection,
@@ -6197,6 +6566,8 @@ function AppRuntime() {
     clubPolice,
     insideOwnClub,
     clubNightRemaining,
+    focusDistrictSummary,
+    districtSummaries,
     helpers: {
       getOwnedEscort,
       getEscortWorkingCount,
@@ -6226,6 +6597,7 @@ function AppRuntime() {
       openClub,
       foundClub,
       setClubNightPlan,
+      fortifyClub,
       promoteClub,
       runClubNight,
       runClubVisitorAction,
@@ -6276,8 +6648,16 @@ function AppRuntime() {
     SectionCard,
     StatLine,
     formatMoney,
+    districtSummaries,
+    availableOperations,
+    activeOperation,
+    activeOperationStage,
+    activeOperationChoices,
     getSoloHeistOdds,
     onExecuteHeist: executeHeist,
+    onStartOperation: startOperation,
+    onAdvanceOperation: advanceOperation,
+    onExecuteOperation: executeOperationPlan,
     sceneBackgrounds: SCENE_BACKGROUNDS,
   };
 

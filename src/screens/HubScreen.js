@@ -23,6 +23,8 @@ export function HubScreen({
   totalBusinessIncome,
   totalEscortIncome,
   onlinePlayerCount,
+  focusDistrictSummary,
+  hottestDistrictSummary,
   nextHeistTierLabel,
   actions,
 }) {
@@ -49,6 +51,8 @@ export function HubScreen({
         <StatLine label="Nastepny prog napadow" value={nextHeistTierLabel} visual={systemVisuals.heist} />
         <StatLine label="Biznes / min" value={formatMoney(totalBusinessIncome)} visual={systemVisuals.cash} />
         <StatLine label="Ulica / min" value={formatMoney(totalEscortIncome)} visual={systemVisuals.street} />
+        <StatLine label="Fokus miasta" value={focusDistrictSummary?.name || "-"} visual={systemVisuals.gang} />
+        <StatLine label="Najgorecej" value={`${hottestDistrictSummary?.name || "-"} | ${hottestDistrictSummary?.pressureLabel || "-"}`} visual={systemVisuals.heat} />
         <View style={styles.inlineRow}>
           <Pressable onPress={() => actions.openSection("profile", "tasks")} style={styles.inlineButton}>
             <Text style={styles.inlineButtonText}>Misje</Text>

@@ -43,6 +43,8 @@ export function EmpireScreen({
   clubPolice,
   insideOwnClub,
   clubNightRemaining,
+  focusDistrictSummary,
+  districtSummaries,
   helpers,
   actions,
 }) {
@@ -558,7 +560,7 @@ export function EmpireScreen({
                 </View>
                 <Text style={styles.listCardMeta}>{listing.note}</Text>
                 <Text style={styles.listCardMeta}>
-                  Plan nocy: {listingPlan?.name || "Guest List"} | Ruch {Math.round(listing.traffic || 0)} | Presja: {listingPressureLabel}
+                  {listing.districtId ? `Dzielnica: ${listing.districtId} | ` : ""}Plan nocy: {listingPlan?.name || "Guest List"} | Ruch {Math.round(listing.traffic || 0)} | Presja: {listingPressureLabel}
                 </Text>
                 <Text style={styles.listCardMeta}>
                   Scout do {formatMoney(listingProfile.scoutTipValue)} | Hunt +{listingProfile.huntProgressValue} | Lay Low: -{listingProfile.layLowHeat} heat
@@ -637,6 +639,16 @@ export function EmpireScreen({
                   </Text>
                   <Text style={styles.listCardMeta}>{activeLeadEscort ? activeLeadEscort.name : "Odblokuj wyzszy respekt"}</Text>
                 </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Dzielnica</Text>
+                  <Text style={styles.mobileOverviewValueSmall}>{currentClubVenue.districtId || focusDistrictSummary?.shortName || "-"}</Text>
+                  <Text style={styles.listCardMeta}>{currentClubVenue.districtId === focusDistrictSummary?.id ? "Fokus gangu" : "Teren lokalu"}</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Obrona</Text>
+                  <Text style={styles.mobileOverviewValue}>{Math.round((insideOwnClub ? safeGame.club.defenseReadiness : currentClubVenue.defenseReadiness) || 0)}</Text>
+                  <Text style={styles.listCardMeta}>Zagrozenie {Math.round((insideOwnClub ? safeGame.club.threatLevel : currentClubVenue.threatLevel) || 0)}</Text>
+                </View>
               </View>
               <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text>
               <Text style={styles.listCardMeta}>{activeClubPlan?.summary}</Text>
@@ -659,6 +671,13 @@ export function EmpireScreen({
               {insideOwnClub && safeGame.club.recentIncident?.text ? (
                 <View style={styles.lockedPanel}>
                   <Text style={styles.lockedPanelText}>{safeGame.club.recentIncident.text}</Text>
+                </View>
+              ) : null}
+              {insideOwnClub ? (
+                <View style={styles.listActionsRow}>
+                  <Pressable onPress={actions.fortifyClub} style={styles.inlineButton}>
+                    <Text style={styles.inlineButtonText}>Zabezpiecz lokal</Text>
+                  </Pressable>
                 </View>
               ) : null}
             </>

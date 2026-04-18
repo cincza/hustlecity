@@ -357,3 +357,110 @@ export async function performClubActionOnline(token, venueId, actionId) {
 export async function searchEscortInClubOnline(token, venueId) {
   return performClubActionOnline(token, venueId, "hunt");
 }
+
+export async function claimClubOnline(token, venueId) {
+  return request("/clubs/claim", {
+    method: "POST",
+    token,
+    body: { venueId },
+  });
+}
+
+export async function setClubPlanOnline(token, planId) {
+  return request("/clubs/plan", {
+    method: "POST",
+    token,
+    body: { planId },
+  });
+}
+
+export async function runClubNightOnline(token) {
+  return request("/clubs/night", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function fortifyClubOnline(token) {
+  return request("/clubs/fortify", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function createGangOnline(token, gangName) {
+  return request("/gang/create", {
+    method: "POST",
+    token,
+    body: { gangName },
+  });
+}
+
+export async function joinGangOnline(token, invite) {
+  return request("/gang/join", {
+    method: "POST",
+    token,
+    body: { invite },
+  });
+}
+
+export async function leaveGangOnline(token) {
+  return request("/gang/leave", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function contributeGangOnline(token, amount) {
+  return request("/gang/tribute", {
+    method: "POST",
+    token,
+    body: { amount },
+  });
+}
+
+export async function setGangFocusOnline(token, districtId) {
+  return request("/gang/focus", {
+    method: "POST",
+    token,
+    body: { districtId },
+  });
+}
+
+export async function investGangProjectOnline(token, projectId) {
+  return request("/gang/projects/invest", {
+    method: "POST",
+    token,
+    body: { projectId },
+  });
+}
+
+export async function claimGangGoalOnline(token) {
+  return request("/gang/goals/claim", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function startOperationOnline(token, operationId) {
+  return request("/operations/start", {
+    method: "POST",
+    token,
+    body: { operationId },
+  });
+}
+
+export async function advanceOperationOnline(token, choiceId) {
+  return request("/operations/advance", {
+    method: "POST",
+    token,
+    body: { choiceId },
+  });
+}
+
+export async function executeOperationPlanOnline(token) {
+  return request("/operations/execute", {
+    method: "POST",
+    token,
+  });
+}
