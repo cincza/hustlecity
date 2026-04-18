@@ -1,8 +1,10 @@
-import "dotenv/config";
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
+import dotenv from "dotenv";
 import {
   applyMarketBuy,
   applyMarketSell,
@@ -62,6 +64,18 @@ import {
   verifyAuthToken,
 } from "./middleware/auth.js";
 import { logError, logInfo, logWarn } from "./utils/logger.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const backendRootDir = path.resolve(__dirname, "..");
+const configuredEnvFile = String(process.env.BACKEND_ENV_FILE || "").trim();
+
+// Keep backend env resolution stable no matter whether we start from root or backend/.
+dotenv.config({
+  path: configuredEnvFile
+    ? path.resolve(configuredEnvFile)
+    : path.join(backendRootDir, ".env"),
+});
 
 const app = express();
 const port = process.env.PORT || 4000;

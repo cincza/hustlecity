@@ -503,6 +503,22 @@ const DEFAULT_SECTIONS = TAB_DEFINITIONS.reduce((acc, tab) => {
   return acc;
 }, {});
 
+const createInitialCasinoState = () => ({
+  slotBet: "200",
+  slotDisplay: ["MASK", "CASH", "CROWN"],
+  slotResult: null,
+  slotSpinning: false,
+  rouletteChoice: "red",
+  rouletteSpinning: false,
+  rouletteDisplay: "00",
+  rouletteResult: null,
+  rouletteHistory: [],
+  rouletteBet: "200",
+  blackjack: { stage: "idle", bet: "200", playerCards: [], dealerCards: [], message: "Rozdaj karty i sprawdz szczescie." },
+  backendMeta: null,
+  serverGame: null,
+});
+
 const INITIAL = {
   player: {
     name: "Vin Blaze",
@@ -1371,21 +1387,7 @@ function AppRuntime() {
   const lastExplicitNoticeAtRef = useRef(0);
   const didHydrateSessionRef = useRef(false);
   const [gangProfileView, setGangProfileView] = useState("actions");
-  const [casinoState, setCasinoState] = useState({
-    slotBet: "200",
-    slotDisplay: ["MASK", "CASH", "CROWN"],
-    slotResult: null,
-    slotSpinning: false,
-    rouletteChoice: "red",
-    rouletteSpinning: false,
-    rouletteDisplay: "00",
-    rouletteResult: null,
-    rouletteHistory: [],
-    rouletteBet: "200",
-    blackjack: { stage: "idle", bet: "200", playerCards: [], dealerCards: [], message: "Rozdaj karty i sprawdz szczescie." },
-    backendMeta: null,
-    serverGame: null,
-  });
+  const [casinoState, setCasinoState] = useState(createInitialCasinoState);
   const { width } = useWindowDimensions();
   const isCompact = width < 1080;
   const isPhone = width < 760;
@@ -1930,6 +1932,37 @@ function AppRuntime() {
   const openQuickAction = (action) => {
     setNotice(null);
     setQuickActionModal(action);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await clearStoredAuthToken();
+    } catch (_error) {}
+
+    didHydrateSessionRef.current = false;
+    didHydrateFeedbackRef.current = false;
+    previousGameRef.current = INITIAL;
+    lastExplicitNoticeAtRef.current = 0;
+
+    setSessionToken(null);
+    setApiStatus("offline");
+    setAuthBusy(false);
+    setAuthReady(true);
+    setAuthError("");
+    setStartupError("");
+    setGame(INITIAL);
+    setTab("heists");
+    setIsHubActive(true);
+    setSectionByTab({ ...DEFAULT_SECTIONS });
+    setGangMessage("");
+    setPrisonMessage("");
+    setCityMessage("");
+    setGangDraftName("Night Reign");
+    setBankAmountDraft("1000");
+    setNotice(null);
+    setQuickActionModal(null);
+    setGangProfileView("actions");
+    setCasinoState(createInitialCasinoState());
   };
 
   const setActiveSection = (tabId, sectionId) => {
@@ -5079,6 +5112,7 @@ function AppRuntime() {
     systemVisuals: SYSTEM_VISUALS,
     actions: {
       openSection: setActiveSection,
+      logout: handleLogout,
     },
   };
 

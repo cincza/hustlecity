@@ -1,24 +1,28 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      },
+    "base": {
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://hustle-city-api.onrender.com"
       }
     },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "channel": "preview"
+    },
     "production": {
+      "extends": "base",
       "android": {
         "buildType": "app-bundle"
       },
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://hustle-city-api.onrender.com"
-      }
+      "channel": "production"
     }
   }
 }

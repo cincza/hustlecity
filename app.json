@@ -21,13 +21,21 @@
     "assetBundlePatterns": [
       "**/*"
     ],
-    "extra": {
-      "eas": {
-        "projectId": "6612bf24-6d0b-47ef-b698-f0ff3ac13a0b"
-      }
-    },
     "plugins": [
       "expo-secure-store"
-    ]
+    ],
+    "owner": "czincza",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "ios": {},
+    "extra": {
+      "eas": {
+        "projectId": "2720e4db-c63c-41be-906b-80d38c74b4d3"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2720e4db-c63c-41be-906b-80d38c74b4d3"
+    }
   }
 }

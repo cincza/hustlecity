@@ -32,6 +32,17 @@ export function ProfileMenuScreen({
         { id: "citychat", title: "Chat miasta", subtitle: "Wszyscy online w jednym kanale.", visual: systemVisuals.market, onPress: () => actions.openSection("profile", "citychat") },
         { id: "rankings", title: "Rankingi", subtitle: "Top ekipy i top gracze.", visual: systemVisuals.market, onPress: () => actions.openSection("profile", "rankings") },
       ];
+  const logoutCard = isUtilities && typeof actions.logout === "function"
+    ? {
+        id: "logout",
+        title: "Wyloguj",
+        subtitle: "Zamknij sesje na tym urzadzeniu i wroc do logowania.",
+        visual: systemVisuals.defense,
+        onPress: actions.logout,
+        danger: true,
+      }
+    : null;
+  const visibleCards = logoutCard ? [...cards, logoutCard] : cards;
 
   return (
     <>
@@ -44,13 +55,14 @@ export function ProfileMenuScreen({
       />
       <SectionCard title={title} subtitle={subtitle}>
         <View style={styles.grid}>
-          {cards.map((card) => (
+          {visibleCards.map((card) => (
             <ActionTile
               key={card.id}
               title={card.title}
               subtitle={card.subtitle}
               visual={card.visual}
               onPress={card.onPress}
+              danger={card.danger}
             />
           ))}
         </View>
