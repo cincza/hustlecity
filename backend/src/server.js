@@ -1558,6 +1558,67 @@ app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (re
   });
 }));
 
+app.post("/admin/players/delete-account", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) {
+    return;
+  }
+
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "admin-player-delete-account",
+      400,
+      "Admin action rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const login = sanitizeAuthInput(req.body?.login);
+  if (!isValidUsername(login)) {
+    res.status(400).json({ error: "Valid login is required" });
+    return;
+  }
+  if (isAdminUsername(login)) {
+    res.status(400).json({ error: "Admin account cannot be deleted" });
+    return;
+  }
+
+  const targetRecord = await findUserByLogin(login);
+  if (!targetRecord?.playerData) {
+    res.status(404).json({ error: "Target player not found" });
+    return;
+  }
+
+  const actorRecord = await findUserById(req.user.id);
+  if (!actorRecord?.playerData || !isAdminUsername(actorRecord.username)) {
+    res.status(403).json({ error: "Admin only" });
+    return;
+  }
+
+  await withUserMutationLocks([targetRecord._id], `admin-delete-account:${targetRecord._id}`, async () => {
+    await deleteUserByLogin(login);
+  });
+  state.activeUsers.delete(targetRecord._id);
+
+  logInfo("admin", "delete-account", {
+    adminUserId: req.user.id,
+    targetUserId: targetRecord._id,
+    login,
+  });
+
+  res.json({
+    user: publicPlayer(actorRecord.playerData, Date.now()),
+    result: {
+      ok: true,
+      login,
+      deletedUserId: targetRecord._id,
+      message: `Usunieto konto ${login}.`,
+    },
+  });
+}));
+
 app.get("/social/players", auth, asyncHandler(async (req, res) => {
   if (
     !enforceRateLimit(
