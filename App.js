@@ -1315,6 +1315,28 @@ function inferFeedbackNotice(message, deltas = {}) {
   };
 }
 
+function buildGymExerciseNotice(exercise) {
+  const gains = exercise?.gains || {};
+  const gainParts = [];
+
+  if (Number(gains.attack || 0) > 0) gainParts.push(`Atak +${gains.attack}`);
+  if (Number(gains.defense || 0) > 0) gainParts.push(`Obrona +${gains.defense}`);
+  if (Number(gains.dexterity || 0) > 0) gainParts.push(`Zrecznosc +${gains.dexterity}`);
+  if (Number(gains.maxHp || 0) > 0) gainParts.push(`Zdrowie max +${gains.maxHp}`);
+  if (Number(gains.hp || 0) > 0) gainParts.push(`HP +${gains.hp}`);
+  if (Number(exercise?.costEnergy || 0) > 0) gainParts.push(`Energia -${exercise.costEnergy}`);
+
+  return {
+    tone: "success",
+    title: "TRENING ZALICZONY",
+    message: gainParts.length
+      ? `${exercise?.name || "Trening"}. Zysk: ${gainParts.join(" · ")}.`
+      : `${exercise?.name || "Trening"} zaliczony.`,
+    deltas: null,
+    allowWhileQuickAction: true,
+  };
+}
+
 function StartupFallbackScreen({ title, message, details }) {
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1919,13 +1941,30 @@ function AppRuntime() {
     const tone = /brakuje|nie masz|za ma(lo|ly)|zablokowane|potrzebujesz|najpierw|nie ma|tylko|brak/i.test(message)
       ? getExplicitNoticeTone(message)
       : "warning";
-    lastExplicitNoticeAtRef.current = Date.now();
-    setNotice({
-      id: Date.now(),
+
+    showExplicitNotice({
       tone,
       title: getExplicitNoticeTitle(message, tone),
       message,
       deltas: null,
+    });
+  };
+
+  const showExplicitNotice = ({
+    tone = "warning",
+    title = "UWAGA",
+    message = "",
+    deltas = null,
+    allowWhileQuickAction = false,
+  }) => {
+    lastExplicitNoticeAtRef.current = Date.now();
+    setNotice({
+      id: Date.now(),
+      tone,
+      title,
+      message,
+      deltas,
+      allowWhileQuickAction,
     });
   };
 
@@ -2107,6 +2146,7 @@ function AppRuntime() {
       try {
         const result = await trainAtGymOnline(sessionToken, exercise.id);
         mergeServerUser(result.user);
+        showExplicitNotice(buildGymExerciseNotice(exercise));
         return;
       } catch (error) {
         pushLog(error.message);
@@ -2129,6 +2169,7 @@ function AppRuntime() {
         log: [`Silownia zaliczona: ${exercise.name}. ${exercise.note}.`, ...prev.log].slice(0, 16),
       };
     });
+    showExplicitNotice(buildGymExerciseNotice(exercise));
   };
 
   const buyMeal = async (meal) => {
@@ -5448,7 +5489,7 @@ function AppRuntime() {
         {renderQuickActionContent()}
       </QuickActionModal>
       <ResultModal
-        visible={Boolean(notice && isPhone && !quickActionModal)}
+        visible={Boolean(notice && isPhone && (!quickActionModal || notice?.allowWhileQuickAction))}
         tone={notice?.tone === "failure" ? "failure" : notice?.tone === "success" ? "success" : "warning"}
         title={notice?.title || "INFO"}
         message={notice?.message || ""}
