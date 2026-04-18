@@ -55,6 +55,16 @@ import {
   trainPlayerAtGym,
   updatePlayerAvatar,
 } from "./services/playerActionService.js";
+import {
+  addFriendForPlayer,
+  appendPlayerMessage,
+  buyDrugFromDealerForPlayer,
+  fightClubRoundForPlayer,
+  placeBountyOnPlayer,
+  searchEscortInClubForPlayer,
+  sellDrugToDealerForPlayer,
+  sendQuickMessageBetweenPlayers,
+} from "./services/socialActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import {
@@ -64,6 +74,13 @@ import {
   verifyAuthToken,
 } from "./middleware/auth.js";
 import { logError, logInfo, logWarn } from "./utils/logger.js";
+import {
+  createDealerInventory,
+  createDrugCounterMap,
+  createOnlineSocialState,
+  normalizeDealerInventory,
+  normalizeDrugInventory,
+} from "../../shared/socialGameplay.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -144,6 +161,10 @@ app.use((req, _res, next) => {
 
 function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function formatMoney(value) {
+  return `$${Math.max(0, Math.floor(Number(value) || 0))}`;
 }
 
 function createDeck() {
@@ -228,6 +249,7 @@ function createInitialPlayerData(username = "gracz") {
       dexterity: 7,
       charisma: 6,
       stamina: 7,
+      bounty: 0,
       cash: ALPHA_TEST_STARTING_CASH,
       bank: ALPHA_TEST_STARTING_BANK,
     },
@@ -238,6 +260,8 @@ function createInitialPlayerData(username = "gracz") {
       casinoWins: 0,
     },
     inventory: Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0])),
+    drugInventory: createDrugCounterMap(),
+    dealerInventory: createDealerInventory(),
     cooldowns: {
       heists: {},
       casinoActionUntil: 0,
@@ -258,6 +282,21 @@ function createInitialPlayerData(username = "gracz") {
     ],
     flags: {
       alphaTestGrantApplied: false,
+    },
+    online: createOnlineSocialState(),
+    escortsOwned: [],
+    club: {
+      owned: false,
+      name: "Velvet Static",
+      sourceId: null,
+      visitId: null,
+      ownerLabel: null,
+      popularity: 0,
+      mood: 60,
+      policeBase: 0,
+      note: null,
+      lastRunAt: 0,
+      stash: createDrugCounterMap(),
     },
   };
 }
@@ -300,6 +339,76 @@ if (!existingAdmin) {
 
 function pushLog(player, message) {
   player.log = [message, ...player.log].slice(0, 16);
+}
+
+function ensurePlayerExtendedState(player) {
+  if (!player || typeof player !== "object") return;
+  if (!player.profile || typeof player.profile !== "object") {
+    player.profile = {};
+  }
+  if (!player.stats || typeof player.stats !== "object") {
+    player.stats = {};
+  }
+  if (!player.inventory || typeof player.inventory !== "object" || Array.isArray(player.inventory)) {
+    player.inventory = Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0]));
+  } else {
+    for (const item of MARKET_PRODUCTS) {
+      player.inventory[item.id] = Math.max(0, Math.floor(Number(player.inventory[item.id] || 0)));
+    }
+  }
+  player.drugInventory = normalizeDrugInventory(player.drugInventory);
+  player.dealerInventory = normalizeDealerInventory(player.dealerInventory);
+  if (!player.online || typeof player.online !== "object" || Array.isArray(player.online)) {
+    player.online = createOnlineSocialState();
+  } else {
+    if (!Array.isArray(player.online.friends)) player.online.friends = [];
+    if (!Array.isArray(player.online.messages)) player.online.messages = [];
+  }
+  if (!Array.isArray(player.escortsOwned)) {
+    player.escortsOwned = [];
+  } else {
+    player.escortsOwned = player.escortsOwned
+      .filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string")
+      .map((entry) => ({
+        id: entry.id,
+        count: Math.max(0, Math.floor(Number(entry.count || 0))),
+        working: Math.max(0, Math.floor(Number(entry.working || 0))),
+        routes: entry.routes && typeof entry.routes === "object" && !Array.isArray(entry.routes)
+          ? { ...entry.routes }
+          : {},
+      }))
+      .filter((entry) => entry.count > 0);
+  }
+  if (!player.club || typeof player.club !== "object" || Array.isArray(player.club)) {
+    player.club = {
+      owned: false,
+      name: "Velvet Static",
+      sourceId: null,
+      visitId: null,
+      ownerLabel: null,
+      popularity: 0,
+      mood: 60,
+      policeBase: 0,
+      note: null,
+      lastRunAt: 0,
+      stash: createDrugCounterMap(),
+    };
+  } else {
+    player.club = {
+      owned: Boolean(player.club.owned),
+      name: typeof player.club.name === "string" ? player.club.name : "Velvet Static",
+      sourceId: player.club.sourceId ?? null,
+      visitId: player.club.visitId ?? null,
+      ownerLabel: player.club.ownerLabel ?? null,
+      popularity: Math.max(0, Math.floor(Number(player.club.popularity || 0))),
+      mood: Math.max(0, Math.floor(Number(player.club.mood || 60))),
+      policeBase: Math.max(0, Math.floor(Number(player.club.policeBase || 0))),
+      note: player.club.note ?? null,
+      lastRunAt: Math.max(0, Math.floor(Number(player.club.lastRunAt || 0))),
+      stash: normalizeDrugInventory(player.club.stash),
+    };
+  }
+  player.profile.bounty = Math.max(0, Math.floor(Number(player.profile.bounty || 0)));
 }
 
 function ensureAlphaTestGrant(player, authUser = null) {
@@ -395,7 +504,10 @@ function buildDirectoryEntry(userRecord, now = Date.now()) {
     defense: Number(profile.defense || 0),
     dexterity: Number(profile.dexterity || 0),
     charisma: Number(profile.charisma || 0),
-    bounty: Math.max(0, Math.round(Number(profile.heat || 0) * 140)),
+    bounty: Math.max(
+      0,
+      Number(profile.bounty || 0) || Math.round(Number(profile.heat || 0) * 140)
+    ),
     online: isUserOnline(userRecord._id, now),
     heists: Number(stats.heistsWon || 0),
     casino: Number(stats.casinoWins || 0),
@@ -417,6 +529,25 @@ async function buildSocialSnapshot(now = Date.now()) {
     time: new Date(entry.createdAt).toISOString(),
   }));
   return { roster, globalChat };
+}
+
+async function buildFriendEntries(player, now = Date.now()) {
+  ensurePlayerExtendedState(player);
+  if (!player.online.friends.length) {
+    return [];
+  }
+  const users = await listUsers();
+  const directoryById = new Map(users.map((entry) => [entry._id, buildDirectoryEntry(entry, now)]));
+  return player.online.friends.map((friend) => {
+    const live = directoryById.get(friend.id);
+    return {
+      id: friend.id,
+      name: live?.name || friend.name || "Gracz",
+      gang: live?.gang || friend.gang || "No gang",
+      online: typeof live?.online === "boolean" ? live.online : Boolean(friend.online),
+      respect: Number.isFinite(live?.respect) ? live.respect : Number(friend.respect || 0),
+    };
+  });
 }
 
 async function persistPlayerForUser(userId, playerData) {
@@ -527,6 +658,7 @@ function syncPlayerEnergy(player, now = Date.now()) {
 }
 
 function syncPlayerState(player, now = Date.now()) {
+  ensurePlayerExtendedState(player);
   syncPlayerEnergy(player, now);
   player.profile.level = getLevelFromRespect(player.profile.respect);
   player.profile.xp = Math.max(0, Math.floor(Number(player.profile.xp) || 0));
@@ -586,6 +718,14 @@ function publicPlayer(player, now = Date.now()) {
     profile: player.profile,
     stats: player.stats,
     inventory: player.inventory,
+    drugInventory: player.drugInventory,
+    dealerInventory: player.dealerInventory,
+    escortsOwned: player.escortsOwned,
+    club: player.club,
+    online: {
+      friends: player.online?.friends || [],
+      messages: player.online?.messages || [],
+    },
     cooldowns: player.cooldowns,
     casino: player.casino
       ? {
@@ -988,6 +1128,7 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
 app.get("/me", auth, asyncHandler(async (req, res) => {
   refreshMarket();
   ensureAlphaTestGrant(req.player, req.user);
+  req.player.online.friends = await buildFriendEntries(req.player);
   await persistPlayerForUser(req.user.id, req.player);
   const marketView = getMarketPublicView(state.market, getActiveUserCount());
   res.json({
@@ -1185,6 +1326,206 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
   });
 }));
 
+app.get("/social/friends", auth, asyncHandler(async (req, res) => {
+  const friends = await buildFriendEntries(req.player);
+  res.json({ friends });
+}));
+
+app.post("/social/friends/:id", auth, asyncHandler(async (req, res) => {
+  const targetUserId = String(req.params?.id || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "Target player id is required" });
+    return;
+  }
+  if (targetUserId === req.user.id) {
+    res.status(400).json({ error: "Nie dodasz siebie do znajomych." });
+    return;
+  }
+
+  await withUserMutationLocks([req.user.id, targetUserId], "social-friend-add", async () => {
+    const [actorRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const now = Date.now();
+    const actor = actorRecord.playerData;
+    const target = targetRecord.playerData;
+    syncPlayerState(actor, now);
+    syncPlayerState(target, now);
+    syncCasinoDay(actor, now);
+    syncCasinoDay(target, now);
+
+    const targetEntry = buildDirectoryEntry(targetRecord, now);
+    const actorName = actor.profile?.name || actorRecord.username || "Gracz";
+    const result = addFriendForPlayer(actor, targetEntry, now);
+    appendPlayerMessage(target, {
+      from: actorName,
+      subject: "Nowe zaproszenie do znajomych",
+      preview: `${actorName} chce dodac Cie do znajomych.`,
+      time: new Date(now).toISOString(),
+    });
+    pushLog(actor, result.logMessage);
+    pushLog(target, `${actorName} wysyla Ci zaproszenie do znajomych.`);
+
+    const [updatedActorRecord, updatedTargetRecord] = await Promise.all([
+      persistPlayerForUser(actorRecord._id, actor),
+      persistPlayerForUser(targetRecord._id, target),
+    ]);
+
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+
+    logInfo("social", "friend-add", {
+      userId: actorRecord._id,
+      targetUserId: targetRecord._id,
+    });
+
+    res.json({
+      user: publicPlayer(req.player, now),
+      target: buildDirectoryEntry(updatedTargetRecord || targetRecord, now),
+      result: {
+        message: result.logMessage,
+      },
+    });
+  });
+}));
+
+app.get("/social/messages", auth, asyncHandler(async (req, res) => {
+  ensurePlayerExtendedState(req.player);
+  res.json({
+    messages: req.player.online.messages || [],
+  });
+}));
+
+app.post("/social/messages/:id", auth, asyncHandler(async (req, res) => {
+  const targetUserId = String(req.params?.id || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "Target player id is required" });
+    return;
+  }
+  if (targetUserId === req.user.id) {
+    res.status(400).json({ error: "Nie wysylasz prywatnej wiadomosci do siebie." });
+    return;
+  }
+
+  await withUserMutationLocks([req.user.id, targetUserId], "social-message-send", async () => {
+    const [actorRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const now = Date.now();
+    const actor = actorRecord.playerData;
+    const target = targetRecord.playerData;
+    syncPlayerState(actor, now);
+    syncPlayerState(target, now);
+    syncCasinoDay(actor, now);
+    syncCasinoDay(target, now);
+
+    const actorName = actor.profile?.name || actorRecord.username || "Gracz";
+    const targetName = target.profile?.name || targetRecord.username || "Gracz";
+    const result = sendQuickMessageBetweenPlayers(actor, target, actorName, targetName, now);
+    pushLog(actor, result.logMessage);
+    pushLog(target, `${actorName} zostawia Ci szybka wiadomosc.`);
+
+    const [updatedActorRecord, updatedTargetRecord] = await Promise.all([
+      persistPlayerForUser(actorRecord._id, actor),
+      persistPlayerForUser(targetRecord._id, target),
+    ]);
+
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+
+    logInfo("social", "direct-message", {
+      userId: actorRecord._id,
+      targetUserId: targetRecord._id,
+    });
+
+    res.json({
+      user: publicPlayer(req.player, now),
+      target: buildDirectoryEntry(updatedTargetRecord || targetRecord, now),
+      result: {
+        message: result.logMessage,
+        preview: result.preview,
+      },
+    });
+  });
+}));
+
+app.post("/social/players/:id/bounty", auth, asyncHandler(async (req, res) => {
+  const targetUserId = String(req.params?.id || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "Target player id is required" });
+    return;
+  }
+  if (targetUserId === req.user.id) {
+    res.status(400).json({ error: "Nie wystawisz bounty na siebie." });
+    return;
+  }
+
+  await withUserMutationLocks([req.user.id, targetUserId], "social-bounty-place", async () => {
+    const [actorRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const now = Date.now();
+    const actor = actorRecord.playerData;
+    const target = targetRecord.playerData;
+    syncPlayerState(actor, now);
+    syncPlayerState(target, now);
+    syncCasinoDay(actor, now);
+    syncCasinoDay(target, now);
+
+    const targetName = target.profile?.name || targetRecord.username || "Gracz";
+    const result = placeBountyOnPlayer(actor, target, targetName, now);
+    pushLog(actor, result.logMessage);
+    pushLog(target, `Na Twoja glowe wjezdza dodatkowe bounty: ${formatMoney(result.increment)}.`);
+
+    const [updatedActorRecord, updatedTargetRecord] = await Promise.all([
+      persistPlayerForUser(actorRecord._id, actor),
+      persistPlayerForUser(targetRecord._id, target),
+    ]);
+
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+
+    logInfo("social", "bounty-place", {
+      userId: actorRecord._id,
+      targetUserId: targetRecord._id,
+      increment: result.increment,
+    });
+
+    res.json({
+      user: publicPlayer(req.player, now),
+      target: buildDirectoryEntry(updatedTargetRecord || targetRecord, now),
+      result: {
+        message: result.logMessage,
+        increment: result.increment,
+      },
+    });
+  });
+}));
+
 app.get("/social/rankings", auth, asyncHandler(async (_req, res) => {
   const { roster } = await buildSocialSnapshot();
   res.json({
@@ -1350,6 +1691,102 @@ app.post("/player/jail/bribe", auth, asyncHandler(async (req, res) => {
   });
 
   res.json({ user: publicPlayer(req.player, now) });
+}));
+
+app.post("/fightclub/round", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+
+  await withPlayerActionLock(req, "fightclub-round", async () => {
+    await commitPlayerMutation(req, "fightclub-round", async (player) => {
+      result = fightClubRoundForPlayer(player);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("fightclub", "round", {
+    userId: req.user.id,
+    success: Boolean(result?.success),
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
+  const drugId = String(req.body?.drugId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "dealer-buy", async () => {
+    await commitPlayerMutation(req, "dealer-buy", async (player) => {
+      result = buyDrugFromDealerForPlayer(player, drugId);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("dealer", "buy", {
+    userId: req.user.id,
+    drugId,
+    price: result?.price || 0,
+  });
+
+  res.json({
+    user: publicPlayer(req.player),
+    result,
+  });
+}));
+
+app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
+  const drugId = String(req.body?.drugId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "dealer-sell", async () => {
+    await commitPlayerMutation(req, "dealer-sell", async (player) => {
+      result = sellDrugToDealerForPlayer(player, drugId);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("dealer", "sell", {
+    userId: req.user.id,
+    drugId,
+    payout: result?.payout || 0,
+  });
+
+  res.json({
+    user: publicPlayer(req.player),
+    result,
+  });
+}));
+
+app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const venueId = String(req.body?.venueId || req.player?.club?.visitId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "clubs-search-escort", async () => {
+    await commitPlayerMutation(req, "clubs-search-escort", async (player) => {
+      result = searchEscortInClubForPlayer(player, venueId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("clubs", "search-escort", {
+    userId: req.user.id,
+    venueId,
+    outcome: result?.outcome || "unknown",
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
 }));
 
 app.post("/club-pvp/preview", auth, (req, res) => {

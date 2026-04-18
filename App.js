@@ -19,29 +19,38 @@ import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import {
+  addFriendOnline,
   bribeOutOfJailOnline,
+  buyDrugFromDealerOnline,
   buyProductOnline,
   buyGymPassOnline,
   buyMealOnline,
   attackPlayerOnline,
   depositOnline,
   executeHeistOnline,
+  fetchFriendListOnline,
   fetchCasinoMeta,
   fetchGlobalChatOnline,
   fetchHeistsOnline,
   fetchMarket,
+  fetchMessageListOnline,
   fetchMe,
   fetchRankingsOnline,
   fetchSocialPlayers,
   healOnline,
   hitBlackjackOnline,
   loginUser,
+  placeBountyOnline,
   playHighRiskOnline,
+  playFightClubRoundOnline,
   playSlotOnline,
   previewClubPvpOnline,
   registerUser,
+  searchEscortInClubOnline,
+  sellDrugToDealerOnline,
   sellProductOnline,
   sendGlobalChatMessageOnline,
+  sendQuickMessageOnline,
   startBlackjackOnline,
   standBlackjackOnline,
   trainAtGymOnline,
@@ -76,9 +85,18 @@ import { getNextHeistTier } from "./src/game/config/heistTiers";
 import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradePreview, getBusinessUpgradeState } from "./src/game/selectors/businessSelectors";
 import { applyXpProgression } from "./shared/progression.js";
 import { GYM_EXERCISES, GYM_PASSES, RESTAURANT_ITEMS } from "./shared/playerActions.js";
+import {
+  CLUB_ESCORT_SEARCH_COST,
+  CLUB_MARKET,
+  DEALER_START_STOCK,
+  DRUGS,
+  ESCORTS,
+  FIGHT_CLUB_ENERGY_COST,
+  PLAYER_BOUNTY_COST,
+  PLAYER_BOUNTY_INCREMENT,
+} from "./shared/socialGameplay.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
-const CLUB_ESCORT_SEARCH_COST = 450;
 const AVATAR_ART = {
   ghost: require("./assets/avatars/avatar-ghost-face.png"),
   razor: require("./assets/avatars/avatar-razor-face.png"),
@@ -159,12 +177,6 @@ const REFERRAL_MILESTONES = [
   { id: "ref-10", verified: 10, rewardCash: 180000, rewardXp: 22 },
 ];
 
-const CLUB_MARKET = [
-  { id: "club-1", name: "Chrome Mirage", ownerLabel: "Miasto", respect: 20, takeoverCost: CLUB_TAKEOVER_COST, popularity: 24, mood: 64, policeBase: 8, note: "Duzy lokal w centrum. Bezpieczniejszy, ale marza nizsza." },
-  { id: "club-2", name: "Velvet Ash", ownerLabel: "Grey Saints", respect: 28, takeoverCost: 1950000, popularity: 34, mood: 70, policeBase: 11, note: "Znany punkt na nocnej mapie miasta. Wyzszy ruch i wyzsza uwaga glin." },
-  { id: "club-3", name: "Saint Static", ownerLabel: "Cold Avenue", respect: 36, takeoverCost: 3250000, popularity: 46, mood: 73, policeBase: 14, note: "Gruby lokal pod VIP i mocniejszy towar. Wielkie pieniadze, wielka presja." },
-];
-
 const HEISTS = HEIST_DEFINITIONS;
 
 const GANG_HEISTS = [
@@ -175,12 +187,6 @@ const GANG_HEISTS = [
   { id: "mint", name: "Miejska mennica", respect: 58, minMembers: 18, reward: [120000, 170000], risk: 0.68, energy: 7 },
 ];
 
-const ESCORTS = [
-  { id: "corner", name: "Uliczna panienka", cost: 14000, respect: 6, cashPerMinute: 70, sellPrice: 8500, note: "Tani start pod ulice. Slaby zarobek, ale szybki obrot." },
-  { id: "velvet", name: "Klubowa panienka", cost: 42000, respect: 14, cashPerMinute: 210, sellPrice: 26000, note: "Lepsza klientela i mocniejsza dzialka z nocy." },
-  { id: "vip", name: "VIP escort", cost: 98000, respect: 24, cashPerMinute: 540, sellPrice: 61000, note: "Droga zabawka pod gruba klientele i powazniejsze stawki." },
-];
-
 const STREET_DISTRICTS = [
   { id: "oldtown", name: "Stare Miasto", respect: 0, incomeMultiplier: 0.82, policeRisk: 0.03, beatRisk: 0.04, escapeRisk: 0.015, note: "Najbezpieczniejsza ulica. Mniej hajsu, mniej przypalu." },
   { id: "neon", name: "Neon Avenue", respect: 8, incomeMultiplier: 1, policeRisk: 0.05, beatRisk: 0.06, escapeRisk: 0.025, note: "Srodek miasta. Dobry balans zarobku i przypalu." },
@@ -189,24 +195,6 @@ const STREET_DISTRICTS = [
 ];
 
 const PRODUCTS = MARKET_PRODUCTS;
-
-const DRUGS = [
-  { id: "smokes", name: "Fajki", factoryId: "smokeworks", streetPrice: 65, unlockRespect: 0, batchSize: 4, supplies: { tobacco: 2, packaging: 1 }, effect: { defense: 1, charisma: 1 }, durationSeconds: 540, overdoseRisk: 0.01 },
-  { id: "spirit", name: "Spirytus", factoryId: "distillery", streetPrice: 95, unlockRespect: 2, batchSize: 3, supplies: { grain: 2, glass: 1 }, effect: { attack: 1, charisma: 1 }, durationSeconds: 360, overdoseRisk: 0.04 },
-  { id: "gbl", name: "GBL", factoryId: "wetlab", streetPrice: 180, unlockRespect: 8, batchSize: 2, supplies: { chemicals: 2, solvent: 1, glass: 1 }, effect: { dexterity: 2, charisma: 1 }, durationSeconds: 420, overdoseRisk: 0.07 },
-  { id: "salvia", name: "Salvia", factoryId: "greenhouse", streetPrice: 150, unlockRespect: 10, batchSize: 3, supplies: { herbs: 2, packaging: 1 }, effect: { charisma: 2, defense: 1 }, durationSeconds: 480, overdoseRisk: 0.06 },
-  { id: "shrooms", name: "Grzybki", factoryId: "greenhouse", streetPrice: 210, unlockRespect: 12, batchSize: 2, supplies: { spores: 2, herbs: 1, packaging: 1 }, effect: { charisma: 2, dexterity: 1 }, durationSeconds: 540, overdoseRisk: 0.08 },
-  { id: "hash", name: "Hasz", factoryId: "greenhouse", streetPrice: 260, unlockRespect: 15, batchSize: 2, supplies: { resin: 2, herbs: 1, packaging: 1 }, effect: { defense: 2, charisma: 1 }, durationSeconds: 600, overdoseRisk: 0.07 },
-  { id: "weed", name: "Marihuana", factoryId: "greenhouse", streetPrice: 320, unlockRespect: 18, batchSize: 2, supplies: { herbs: 3, packaging: 1 }, effect: { defense: 2, dexterity: 1 }, durationSeconds: 600, overdoseRisk: 0.05 },
-  { id: "amphetamine", name: "Amfetamina", factoryId: "powderlab", streetPrice: 480, unlockRespect: 22, batchSize: 2, supplies: { chemicals: 2, pills: 1, packaging: 1 }, effect: { attack: 2, dexterity: 3 }, durationSeconds: 360, overdoseRisk: 0.11 },
-  { id: "opium", name: "Opium", factoryId: "poppyworks", streetPrice: 620, unlockRespect: 26, batchSize: 2, supplies: { poppy: 2, glass: 1, packaging: 1 }, effect: { defense: 3, charisma: 1 }, durationSeconds: 420, overdoseRisk: 0.15 },
-  { id: "rohypnol", name: "Rohypnol", factoryId: "powderlab", streetPrice: 760, unlockRespect: 30, batchSize: 2, supplies: { pharma: 2, pills: 1, packaging: 1 }, effect: { defense: 3, dexterity: 1 }, durationSeconds: 420, overdoseRisk: 0.17 },
-  { id: "cocaine", name: "Kokaina", factoryId: "cartelrefinery", streetPrice: 980, unlockRespect: 34, batchSize: 2, supplies: { coca: 2, solvent: 1, packaging: 1 }, effect: { charisma: 3, dexterity: 4 }, durationSeconds: 300, overdoseRisk: 0.2 },
-  { id: "heroin", name: "Heroina", factoryId: "poppyworks", streetPrice: 1320, unlockRespect: 40, batchSize: 1, supplies: { poppy: 3, chemicals: 1, glass: 1 }, effect: { attack: 4, defense: 2 }, durationSeconds: 300, overdoseRisk: 0.26 },
-  { id: "lsd", name: "LSD", factoryId: "acidlab", streetPrice: 1580, unlockRespect: 46, batchSize: 1, supplies: { acid: 2, chemicals: 1, glass: 1 }, effect: { charisma: 5, dexterity: 3 }, durationSeconds: 300, overdoseRisk: 0.24 },
-  { id: "ecstasy", name: "Extasy", factoryId: "designerlab", streetPrice: 1860, unlockRespect: 50, batchSize: 1, supplies: { pharma: 2, chemicals: 1, pills: 1, packaging: 1 }, effect: { charisma: 4, defense: 2 }, durationSeconds: 300, overdoseRisk: 0.19 },
-  { id: "mescaline", name: "Meskalina", factoryId: "designerlab", streetPrice: 2280, unlockRespect: 56, batchSize: 1, supplies: { cactus: 2, chemicals: 1, glass: 1 }, effect: { charisma: 4, dexterity: 2 }, durationSeconds: 300, overdoseRisk: 0.22 },
-];
 
 const SUPPLIERS = [
   { id: "tobacco", name: "Tyton i filtry", unit: "karton", price: 70 },
@@ -240,11 +228,6 @@ const FACTORIES = [
 
 const MARKET = PRODUCTS.reduce((acc, item, index) => {
   acc[item.id] = Math.round(item.basePrice * (1 + ((index % 3) - 1) * 0.08));
-  return acc;
-}, {});
-
-const DEALER_START_STOCK = DRUGS.reduce((acc, drug, index) => {
-  acc[drug.id] = Math.max(20, 90 - index * 4);
   return acc;
 }, {});
 
@@ -700,6 +683,32 @@ const normalizeHeistDefinition = (heist) => {
     heatOnFailure: Number.isFinite(heist.heatOnFailure) ? heist.heatOnFailure : 8,
   };
 };
+
+const normalizeUiTimeLabel = (value) => {
+  if (typeof value === "string" && value.includes("T")) {
+    return new Date(value).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  return nowTimeLabel();
+};
+
+const normalizeOnlineMessageEntry = (entry, index = 0) => ({
+  id: entry?.id || `msg-sync-${index}`,
+  from: entry?.from || "System",
+  subject: entry?.subject || "Powiadomienie",
+  preview: entry?.preview || "",
+  time: normalizeUiTimeLabel(entry?.time),
+});
+
+const normalizeOnlineFriendEntry = (entry) => ({
+  id: entry?.id || `friend-${Math.random().toString(36).slice(2, 8)}`,
+  name: entry?.name || "Gracz",
+  gang: entry?.gang || "No gang",
+  online: Boolean(entry?.online),
+  respect: Number.isFinite(entry?.respect) ? entry.respect : 0,
+});
 const formatMoney = (value) => {
   const amount = Number(value || 0);
   const sign = amount < 0 ? "-" : "";
@@ -1476,6 +1485,12 @@ function AppRuntime() {
     if (!safeProfile) {
       throw new Error("Backend zwrocil niepelny profil gracza.");
     }
+    const nextFriends = Array.isArray(serverUser?.online?.friends)
+      ? serverUser.online.friends.map(normalizeOnlineFriendEntry)
+      : null;
+    const nextMessages = Array.isArray(serverUser?.online?.messages)
+      ? serverUser.online.messages.map(normalizeOnlineMessageEntry)
+      : null;
 
     setGame((prev) => ({
       ...prev,
@@ -1514,6 +1529,38 @@ function AppRuntime() {
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
       inventory: serverUser.inventory || prev.inventory,
+      drugInventory:
+        serverUser?.drugInventory && typeof serverUser.drugInventory === "object"
+          ? { ...prev.drugInventory, ...serverUser.drugInventory }
+          : prev.drugInventory,
+      dealerInventory:
+        serverUser?.dealerInventory && typeof serverUser.dealerInventory === "object"
+          ? { ...prev.dealerInventory, ...serverUser.dealerInventory }
+          : prev.dealerInventory,
+      escortsOwned: Array.isArray(serverUser?.escortsOwned)
+        ? serverUser.escortsOwned.map((entry) => ({
+            id: entry?.id,
+            count: Number.isFinite(entry?.count) ? entry.count : 0,
+            working: Number.isFinite(entry?.working) ? entry.working : 0,
+            routes: entry?.routes && typeof entry.routes === "object" ? { ...entry.routes } : {},
+          }))
+        : prev.escortsOwned,
+      club:
+        serverUser?.club && typeof serverUser.club === "object"
+          ? {
+              ...prev.club,
+              ...serverUser.club,
+              stash:
+                serverUser.club?.stash && typeof serverUser.club.stash === "object"
+                  ? { ...prev.club.stash, ...serverUser.club.stash }
+                  : prev.club.stash,
+            }
+          : prev.club,
+      online: {
+        ...prev.online,
+        friends: nextFriends || prev.online.friends,
+        messages: nextMessages || prev.online.messages,
+      },
       log: Array.isArray(serverUser?.log) && serverUser.log.length ? serverUser.log : prev.log,
       ...normalizeMarketPayload(marketPayload, prev.market, prev.marketState, prev.marketMeta),
       }));
@@ -1560,15 +1607,19 @@ function AppRuntime() {
 
   const refreshSocialState = async (token = sessionToken) => {
     if (!token) return;
-    const [playersResult, rankingsResult, chatResult] = await Promise.allSettled([
+    const [playersResult, rankingsResult, chatResult, friendsResult, messagesResult] = await Promise.allSettled([
       fetchSocialPlayers(token),
       fetchRankingsOnline(token),
       fetchGlobalChatOnline(token),
+      fetchFriendListOnline(token),
+      fetchMessageListOnline(token),
     ]);
 
     const playersSnapshot = playersResult.status === "fulfilled" ? playersResult.value : null;
     const rankingsSnapshot = rankingsResult.status === "fulfilled" ? rankingsResult.value : null;
     const chatSnapshot = chatResult.status === "fulfilled" ? chatResult.value : null;
+    const friendsSnapshot = friendsResult.status === "fulfilled" ? friendsResult.value : null;
+    const messagesSnapshot = messagesResult.status === "fulfilled" ? messagesResult.value : null;
 
     setGame((prev) => ({
       ...prev,
@@ -1579,12 +1630,15 @@ function AppRuntime() {
         cityChat: Array.isArray(chatSnapshot?.messages)
           ? chatSnapshot.messages.map((entry) => ({
               ...entry,
-              time:
-                typeof entry.time === "string" && entry.time.includes("T")
-                  ? new Date(entry.time).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
-                  : entry.time,
+              time: normalizeUiTimeLabel(entry.time),
             }))
           : prev.online.cityChat,
+        friends: Array.isArray(friendsSnapshot?.friends)
+          ? friendsSnapshot.friends.map(normalizeOnlineFriendEntry)
+          : prev.online.friends,
+        messages: Array.isArray(messagesSnapshot?.messages)
+          ? messagesSnapshot.messages.map(normalizeOnlineMessageEntry)
+          : prev.online.messages,
       },
     }));
   };
@@ -2217,10 +2271,27 @@ function AppRuntime() {
     );
   };
 
-  const fightClubRound = () => {
-    if (!requireOfflineDemoAuthority("Fightclub")) return;
+  const fightClubRound = async () => {
     if (!canDoStreetAction("Fightclub nie dziala zza krat.")) return;
-    if (game.player.energy < 3) return pushLog("Za malo energii na sparing.");
+    if (game.player.energy < FIGHT_CLUB_ENERGY_COST) return pushLog("Za malo energii na sparing.");
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await playFightClubRoundOnline(sessionToken);
+        mergeServerUser(result.user);
+        showExplicitNotice({
+          tone: result?.result?.success ? "success" : "warning",
+          title: result?.result?.success ? "FIGHTCLUB WYGRANY" : "FIGHTCLUB PRZEGRANY",
+          message: result?.result?.logMessage || "Sparing rozliczony przez backend.",
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Fightclub")) return;
 
     const score = effectivePlayer.attack * 0.4 + effectivePlayer.defense * 0.25 + effectivePlayer.dexterity * 0.35 + Math.random() * 10;
     if (score >= 16) {
@@ -2229,7 +2300,7 @@ function AppRuntime() {
         player: applyProgressionToPlayer(
           {
             ...prev.player,
-            energy: prev.player.energy - 3,
+            energy: prev.player.energy - FIGHT_CLUB_ENERGY_COST,
             attack: prev.player.attack + 1,
             dexterity: prev.player.dexterity + 1,
           },
@@ -2244,7 +2315,7 @@ function AppRuntime() {
       ...prev,
       player: {
         ...prev.player,
-        energy: prev.player.energy - 3,
+        energy: prev.player.energy - FIGHT_CLUB_ENERGY_COST,
         hp: clamp(prev.player.hp - 10, 0, prev.player.maxHp),
       },
       log: ["Fightclub przegrany. Obite rylo, ale nauka zostaje.", ...prev.log].slice(0, 16),
@@ -2534,11 +2605,22 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - club traffic, search cooldown and low-chance street trigger logic are still local economy logic
-  const findEscortInClub = () => {
+  const findEscortInClub = async () => {
     if (!canDoStreetAction()) return;
-    if (!requireOfflineDemoAuthority("Szukanie kontaktow w klubie")) return;
     if (!currentClubVenue) return pushLog("Najpierw wejdz do jakiegos klubu. Dopiero tam szukasz kontaktow.");
     if (game.player.cash < CLUB_ESCORT_SEARCH_COST) return pushLog(`Brakuje ${formatMoney(CLUB_ESCORT_SEARCH_COST)} na wejscie i szukanie kontaktow.`);
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await searchEscortInClubOnline(sessionToken, currentClubVenue.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Szukanie kontaktow w klubie")) return;
 
     const chance = escortFindChance;
     const unlocked = ESCORTS.filter((escort) => escort.respect <= game.player.respect);
@@ -2805,12 +2887,23 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - dealer stock and buy pricing must be centrally controlled to prevent client exploits
-  const buyDrugFromDealer = (drug) => {
+  const buyDrugFromDealer = async (drug) => {
     if (!canDoStreetAction()) return;
-    if (!requireOfflineDemoAuthority("Dealer")) return;
     if (game.player.respect < drug.unlockRespect) return pushLog(`Diler puszcza ${drug.name} dopiero od ${drug.unlockRespect} szacunu.`);
     if ((game.dealerInventory?.[drug.id] || 0) <= 0) return pushLog(`Diler nie ma juz ${drug.name} na stanie.`);
     if (game.player.cash < drug.streetPrice) return pushLog(`Brakuje ${formatMoney(drug.streetPrice)} na ${drug.name}.`);
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyDrugFromDealerOnline(sessionToken, drug.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Dealer")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -2822,11 +2915,22 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - dealer sell-back and stock refill loop must be validated on backend
-  const sellDrugToDealer = (drug) => {
+  const sellDrugToDealer = async (drug) => {
     if (!canDoStreetAction()) return;
-    if (!requireOfflineDemoAuthority("Dealer")) return;
     if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz czego sprzedac: ${drug.name}.`);
     const payout = Math.max(20, Math.floor(drug.streetPrice * 0.72));
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await sellDrugToDealerOnline(sessionToken, drug.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Dealer")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -3659,9 +3763,22 @@ function AppRuntime() {
     }));
   };
 
-  const addWorldPlayerFriend = (player) => {
-    if (!requireOfflineDemoAuthority("Znajomi")) return;
+  const addWorldPlayerFriend = async (player) => {
+    if (!player?.id) return pushLog("Nie ma gracza do dodania.");
     if (game.online.friends.some((entry) => entry.id === player.id)) return pushLog(`${player.name} juz siedzi w znajomych.`);
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await addFriendOnline(sessionToken, player.id);
+        mergeServerUser(result.user);
+        await refreshSocialState(sessionToken);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Znajomi")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -3677,7 +3794,19 @@ function AppRuntime() {
     }));
   };
 
-  const sendQuickMessageToPlayer = (player) => {
+  const sendQuickMessageToPlayer = async (player) => {
+    if (sessionToken && apiStatus === "online" && player?.id) {
+      try {
+        const result = await sendQuickMessageOnline(sessionToken, player.id);
+        mergeServerUser(result.user);
+        await refreshSocialState(sessionToken);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      setActiveSection("profile", "messages");
+      return;
+    }
+
     if (!requireOfflineDemoAuthority("Prywatne wiadomosci")) return;
     setGame((prev) => ({
       ...prev,
@@ -3693,20 +3822,32 @@ function AppRuntime() {
     setActiveSection("profile", "messages");
   };
 
-  const placeBountyOnPlayer = (player) => {
-    if (!requireOfflineDemoAuthority("Wystawianie bounty")) return;
+  const placeBountyOnPlayer = async (player) => {
     if (!canDoStreetAction("Nie ustawisz bounty z celi.")) return;
-    const price = 2500;
+    const price = PLAYER_BOUNTY_COST;
     if (game.player.cash < price) return pushLog(`Brakuje ${formatMoney(price)} na wystawienie bounty.`);
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await placeBountyOnline(sessionToken, player.id);
+        mergeServerUser(result.user);
+        await refreshSocialState(sessionToken);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Wystawianie bounty")) return;
 
     setGame((prev) => ({
       ...prev,
       player: { ...prev.player, cash: prev.player.cash - price },
       online: {
         ...prev.online,
-        roster: prev.online.roster.map((entry) => (entry.id === player.id ? { ...entry, bounty: entry.bounty + 1500 } : entry)),
+        roster: prev.online.roster.map((entry) => (entry.id === player.id ? { ...entry, bounty: entry.bounty + PLAYER_BOUNTY_INCREMENT } : entry)),
         messages: [
-          { id: `msg-${Date.now()}`, from: "System", subject: "Bounty wystawione", preview: `Na glowe ${player.name} dorzucono ${formatMoney(1500)} bounty.`, time: nowTimeLabel() },
+          { id: `msg-${Date.now()}`, from: "System", subject: "Bounty wystawione", preview: `Na glowe ${player.name} dorzucono ${formatMoney(PLAYER_BOUNTY_INCREMENT)} bounty.`, time: nowTimeLabel() },
           ...prev.online.messages,
         ].slice(0, 20),
       },

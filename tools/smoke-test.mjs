@@ -238,6 +238,77 @@ async function main() {
       throw new Error("Atak na gracza nie zwrocil wyniku akcji.");
     }
 
+    const fightClubResult = await request("/fightclub/round", {
+      method: "POST",
+      token,
+    });
+
+    if (!fightClubResult?.result?.logMessage) {
+      throw new Error("Fightclub nie zwrocil wyniku rundy.");
+    }
+
+    await request("/dealer/buy", {
+      method: "POST",
+      token,
+      body: { drugId: "smokes" },
+    });
+
+    await request("/dealer/sell", {
+      method: "POST",
+      token,
+      body: { drugId: "smokes" },
+    });
+
+    const friendResult = await request(`/social/friends/${attackTarget.id}`, {
+      method: "POST",
+      token,
+    });
+
+    if (!friendResult?.result?.message) {
+      throw new Error("Dodawanie znajomego nie zwrocilo wyniku.");
+    }
+
+    const directMessageResult = await request(`/social/messages/${attackTarget.id}`, {
+      method: "POST",
+      token,
+    });
+
+    if (!directMessageResult?.result?.message) {
+      throw new Error("Prywatna wiadomosc nie zwrocila wyniku.");
+    }
+
+    const bountyResult = await request(`/social/players/${attackTarget.id}/bounty`, {
+      method: "POST",
+      token,
+    });
+
+    if (!bountyResult?.result?.increment) {
+      throw new Error("Bounty nie podnioslo nagrody za glowe.");
+    }
+
+    const escortSearchResult = await request("/clubs/search-escort", {
+      method: "POST",
+      token,
+      body: { venueId: "club-1" },
+    });
+
+    if (!escortSearchResult?.result?.outcome) {
+      throw new Error("Szukania kontaktow w klubie nie rozliczono na backendzie.");
+    }
+
+    const friendsSnapshot = await request("/social/friends", { token });
+    const messagesSnapshot = await request("/social/messages", { token });
+
+    if (!Array.isArray(friendsSnapshot.friends) || !friendsSnapshot.friends.some((entry) => entry.id === attackTarget.id)) {
+      throw new Error("Znajomy nie pojawia sie w liscie znajomych.");
+    }
+
+    if (!Array.isArray(messagesSnapshot.messages) || messagesSnapshot.messages.length === 0) {
+      throw new Error("Lista prywatnych wiadomosci jest pusta po wysylce.");
+    }
+
+    const preSyncMe = await request("/me", { token });
+
     const syncResult = await request("/sync/client-state", {
       method: "POST",
       token,
@@ -260,10 +331,10 @@ async function main() {
     }
 
     const postSyncMe = await request("/me", { token });
-    if (postSyncMe.user.profile.cash !== midMe.user.profile.cash) {
+    if (postSyncMe.user.profile.cash !== preSyncMe.user.profile.cash) {
       throw new Error("Sync klienta nadpisal gotowke na backendzie.");
     }
-    if (postSyncMe.user.profile.attack !== midMe.user.profile.attack) {
+    if (postSyncMe.user.profile.attack !== preSyncMe.user.profile.attack) {
       throw new Error("Sync klienta nadpisal statystyki na backendzie.");
     }
     if (postSyncMe.user.clientState?.screen !== "fake-screen") {
@@ -294,6 +365,14 @@ async function main() {
       throw new Error("Avatar gracza nie przetrwal restartu backendu.");
     }
 
+    if (!persistedMe.user.online?.friends?.some((entry) => entry.id === attackTarget.id)) {
+      throw new Error("Znajomi nie przetrwali restartu backendu.");
+    }
+
+    if (!persistedMe.user.online?.messages?.length) {
+      throw new Error("Prywatne wiadomosci nie przetrwaly restartu backendu.");
+    }
+
     if (persistedMe.user.clientState?.screen !== "fake-screen") {
       throw new Error("Bezpieczne podsumowanie client state nie przetrwalo restartu backendu.");
     }
@@ -311,6 +390,12 @@ async function main() {
       gym: "ok",
       avatar: "ok",
       playerAttack: attackResult.result.success ? "ok-success" : "ok-failed",
+      fightClub: fightClubResult.result.success ? "ok-success" : "ok-failed",
+      dealer: "ok",
+      friends: "ok",
+      directMessages: "ok",
+      bounty: bountyResult.result.increment,
+      clubEscortSearch: escortSearchResult.result.outcome,
       clientStateAuthority: "ok",
       persistenceAfterRestart: "ok",
       socialPlayers: players.players.length,

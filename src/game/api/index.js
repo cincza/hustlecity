@@ -187,6 +187,35 @@ export async function attackPlayerOnline(token, targetUserId) {
   });
 }
 
+export async function addFriendOnline(token, targetUserId) {
+  return request(`/social/friends/${encodeURIComponent(targetUserId)}`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function fetchFriendListOnline(token) {
+  return request("/social/friends", { token });
+}
+
+export async function sendQuickMessageOnline(token, targetUserId) {
+  return request(`/social/messages/${encodeURIComponent(targetUserId)}`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function fetchMessageListOnline(token) {
+  return request("/social/messages", { token });
+}
+
+export async function placeBountyOnline(token, targetUserId) {
+  return request(`/social/players/${encodeURIComponent(targetUserId)}/bounty`, {
+    method: "POST",
+    token,
+  });
+}
+
 export async function fetchRankingsOnline(token) {
   return request("/social/rankings", { token });
 }
@@ -200,5 +229,36 @@ export async function sendGlobalChatMessageOnline(token, text) {
     method: "POST",
     token,
     body: { text },
+  });
+}
+
+export async function playFightClubRoundOnline(token) {
+  return request("/fightclub/round", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function buyDrugFromDealerOnline(token, drugId) {
+  return request("/dealer/buy", {
+    method: "POST",
+    token,
+    body: { drugId },
+  });
+}
+
+export async function sellDrugToDealerOnline(token, drugId) {
+  return request("/dealer/sell", {
+    method: "POST",
+    token,
+    body: { drugId },
+  });
+}
+
+export async function searchEscortInClubOnline(token, venueId) {
+  return request("/clubs/search-escort", {
+    method: "POST",
+    token,
+    body: { venueId },
   });
 }
