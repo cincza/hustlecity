@@ -2915,6 +2915,7 @@ function AppRuntime() {
 
   // TODO: TO_MIGRATE_TO_SERVER - fallback solo heist roll/reward only exists for offline demo; online economy must stay server-authoritative
   const executeHeist = async (heist) => {
+    if (!heist?.id) return pushLog("Ten napad nie jest teraz gotowy. Odswiez ekran i sprobuj jeszcze raz.");
     if (!canDoStreetAction()) return;
     if (game.player.respect < heist.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${heist.respect}.`);
     if (game.player.energy < heist.energy) return pushLog(`Brakuje energii. Potrzebujesz ${heist.energy}.`);
@@ -5955,7 +5956,7 @@ function AppRuntime() {
               <Text style={styles.inlineButtonText}>Wyslij</Text>
             </Pressable>
           </View>
-          {game.prisonChat.map((entry) => (
+          {(Array.isArray(game.prisonChat) ? game.prisonChat : []).map((entry) => (
             <View key={entry.id} style={styles.chatBubble}>
               <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
               <Text style={styles.chatText}>{entry.text}</Text>

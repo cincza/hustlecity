@@ -230,7 +230,7 @@ export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel
           </View>
         ) : null}
       </View>
-      <Pressable onPress={onPress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
+      <Pressable disabled={disabled} onPress={disabled ? undefined : onPress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
         <Text style={styles.heistActionText}>{lockedLabel || "Wykonaj"}</Text>
       </Pressable>
     </LinearGradient>

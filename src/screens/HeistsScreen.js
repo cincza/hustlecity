@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { HEIST_TIERS, getNextHeistTier, groupHeistsByTier } from "../game/config/heistTiers";
 import { HeistCard, HeistTabs } from "../components/GameShellUI";
@@ -10,7 +10,6 @@ export function HeistsScreen({
   styles,
   SceneArtwork,
   SectionCard,
-  ProgressBar,
   StatLine,
   Tag,
   formatMoney,
@@ -26,30 +25,39 @@ export function HeistsScreen({
   onExecuteOperation,
   sceneBackgrounds,
 }) {
-  const grouped = useMemo(() => groupHeistsByTier(heists), [heists]);
+  const safeHeists = Array.isArray(heists) ? heists : [];
+  const safeOperations = Array.isArray(availableOperations) ? availableOperations : [];
+  const safeOperationChoices = Array.isArray(activeOperationChoices) ? activeOperationChoices : [];
+  const safeDistrictSummaries = Array.isArray(districtSummaries) ? districtSummaries : [];
+  const grouped = useMemo(() => groupHeistsByTier(safeHeists), [safeHeists]);
   const unlockedTierIds = HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).map((tier) => tier.id);
   const [selectedTier, setSelectedTier] = useState(unlockedTierIds[unlockedTierIds.length - 1] || HEIST_TIERS[0].id);
+
+  useEffect(() => {
+    if (!HEIST_TIERS.some((tier) => tier.id === selectedTier && game.player.respect >= tier.unlockRespect)) {
+      setSelectedTier(unlockedTierIds[unlockedTierIds.length - 1] || HEIST_TIERS[0].id);
+    }
+  }, [game.player.respect, selectedTier, unlockedTierIds]);
+
   const nextTier = getNextHeistTier(game.player.respect);
   const activeHeists = grouped[selectedTier] || [];
   const activeOperationTitle = useMemo(
     () =>
       activeOperation
-        ? (availableOperations.find((operation) => operation.id === activeOperation.operationId)?.name || activeOperation.operationId)
+        ? (safeOperations.find((operation) => operation.id === activeOperation.operationId)?.name || activeOperation.operationId)
         : null,
-    [activeOperation, availableOperations]
+    [activeOperation, safeOperations]
   );
   const districtLabelById = useMemo(
-    () =>
-      Object.fromEntries(
-        (Array.isArray(districtSummaries) ? districtSummaries : []).map((district) => [district.id, district.name])
-      ),
-    [districtSummaries]
+    () => Object.fromEntries(safeDistrictSummaries.map((district) => [district.id, district.name])),
+    [safeDistrictSummaries]
   );
+
   const tierTabs = HEIST_TIERS.map((tier) => ({
     id: tier.id,
     label: tier.shortLabel,
     locked: game.player.respect < tier.unlockRespect,
-    lockedLabel: game.player.respect < tier.unlockRespect ? `🔒 Szacunek ${tier.unlockRespect}` : null,
+    lockedLabel: game.player.respect < tier.unlockRespect ? `Szacunek ${tier.unlockRespect}` : null,
   }));
 
   return (
@@ -57,13 +65,16 @@ export function HeistsScreen({
       <SceneArtwork
         eyebrow="Napady"
         title="Miasto po zmroku"
-        lines={["Ulica, sklepy, firmy i high risk bez zbędnego scrolla."]}
+        lines={["Ulica, sklepy, firmy i high risk bez zbednego scrolla."]}
         source={sceneBackgrounds.heists}
       />
 
       <SectionCard title="Napady" subtitle="Wybierasz prog, widzisz tylko akcje z tego progu i od razu wchodzisz do roboty.">
         <StatLine label="Aktualny szacunek" value={`${game.player.respect}`} />
-        <StatLine label="Odblokowany tier" value={HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).slice(-1)[0]?.title || HEIST_TIERS[0].title} />
+        <StatLine
+          label="Odblokowany tier"
+          value={HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).slice(-1)[0]?.title || HEIST_TIERS[0].title}
+        />
         <StatLine label="Nastepny prog" value={nextTier ? `${nextTier.title} przy Szacunku ${nextTier.unlockRespect}` : "Masz wszystkie progi"} />
       </SectionCard>
 
@@ -76,7 +87,7 @@ export function HeistsScreen({
             </Text>
             {activeOperationStage ? (
               <View style={styles.listActionsRow}>
-                {activeOperationChoices.map((choice) => (
+                {safeOperationChoices.map((choice) => (
                   <Pressable key={choice.id} onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
                     <Text style={styles.inlineButtonText}>{choice.label}</Text>
                   </Pressable>
@@ -90,8 +101,8 @@ export function HeistsScreen({
           </View>
         ) : (
           <>
-            {!availableOperations.length ? <Text style={styles.emptyText}>Najpierw dobij do wyzszych progow szacunu.</Text> : null}
-            {(availableOperations || []).map((operation) => (
+            {!safeOperations.length ? <Text style={styles.emptyText}>Najpierw dobij do wyzszych progow szacunu.</Text> : null}
+            {safeOperations.map((operation) => (
               <View key={operation.id} style={styles.listCard}>
                 <View style={styles.listCardHeader}>
                   <View style={styles.flexOne}>
@@ -127,16 +138,19 @@ export function HeistsScreen({
         {activeHeists.map((heist) => {
           const locked = game.player.respect < heist.respect;
           const odds = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist);
+          const rewardRange = Array.isArray(heist.reward) ? heist.reward : [0, 0];
+          const xpRange = Array.isArray(heist.xpGain) ? heist.xpGain : [0, 0];
+
           return (
             <HeistCard
               key={heist.id}
               title={heist.name}
-              reward={`${formatMoney(heist.reward[0])} - ${formatMoney(heist.reward[1])}`}
-              xp={`${heist.xpGain[0]} - ${heist.xpGain[1]} XP`}
+              reward={`${formatMoney(rewardRange[0])} - ${formatMoney(rewardRange[1])}`}
+              xp={`${xpRange[0]} - ${xpRange[1]} XP`}
               chance={`${Math.round(odds.chance * 100)}%`}
               energy={`${heist.energy}`}
               risk={`${Math.round(heist.risk * 100)}%`}
-              lockedLabel={locked ? `🔒 Wymagany szacunek: ${heist.respect}` : "Wykonaj"}
+              lockedLabel={locked ? `Wymagany szacunek: ${heist.respect}` : "Wykonaj"}
               onPress={() => !locked && onExecuteHeist(heist)}
               disabled={locked}
             />
