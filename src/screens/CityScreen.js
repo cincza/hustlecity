@@ -1,5 +1,16 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+
+const MAX_GYM_BATCH = 10;
+
+function getAffordableGymSeries(energy, exerciseCost) {
+  const safeCost = Math.max(1, Number(exerciseCost || 1));
+  return Math.max(0, Math.min(MAX_GYM_BATCH, Math.floor(Number(energy || 0) / safeCost)));
+}
+
+function clampGymSeries(value, maxSeries) {
+  return Math.max(1, Math.min(Math.max(1, maxSeries), Math.floor(Number(value || 1))));
+}
 
 export function CityScreen({
   section,
@@ -20,6 +31,8 @@ export function CityScreen({
   sceneBackgrounds,
   systemVisuals,
   energyRegenSeconds,
+  healthRegenSeconds,
+  healthRegenAmount,
   jailRemaining,
   totalBusinessIncome,
   totalEscortIncome,
@@ -42,6 +55,37 @@ export function CityScreen({
   helpers,
   actions,
 }) {
+  const [gymBatchByExercise, setGymBatchByExercise] = useState({});
+
+  useEffect(() => {
+    if (section !== "gym") return;
+
+    setGymBatchByExercise((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      gymExercises.forEach((exercise) => {
+        const affordableSeries = getAffordableGymSeries(game.player.energy, exercise.costEnergy);
+        const maxSeries = Math.max(1, affordableSeries || 1);
+        const currentSeries = clampGymSeries(next[exercise.id] || 1, maxSeries);
+
+        if (next[exercise.id] !== currentSeries) {
+          next[exercise.id] = currentSeries;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [section, gymExercises, game.player.energy]);
+
+  const setGymSeries = (exerciseId, nextSeries, maxSeries) => {
+    setGymBatchByExercise((prev) => ({
+      ...prev,
+      [exerciseId]: clampGymSeries(nextSeries, maxSeries),
+    }));
+  };
+
   const quickStartCards = [
     { id: "quick-heist", title: "Napad", subtitle: "Najwyzszy odblokowany prog.", visual: systemVisuals.heist, onPress: actions.quickHeist, danger: true },
     { id: "bank", title: "Bank", subtitle: `Saldo ${formatMoney(game.player.bank || 0)}.`, visual: systemVisuals.bank, onPress: () => actions.openSection("city", "bank") },
@@ -282,7 +326,7 @@ export function CityScreen({
   if (section === "gym") {
     return (
       <>
-      <SectionCard title="Silownia" subtitle={helpers.hasGymPass(game.player) ? `Karnet aktywny: ${game.player.gymPassTier === "perm" ? "na stale" : `jeszcze ${formatDuration((game.player.gymPassUntil || 0) - Date.now())}`}` : "Bez karnetu nie wejdziesz."}>
+        <SectionCard title="Silownia" subtitle={helpers.hasGymPass(game.player) ? `Karnet aktywny: ${game.player.gymPassTier === "perm" ? "na stale" : `jeszcze ${formatDuration((game.player.gymPassUntil || 0) - Date.now())}`}` : "Bez karnetu nie wejdziesz."}>
           {gymPasses.map((pass) => (
             <View key={pass.id} style={styles.listCard}>
               <View style={styles.inlineRow}>
@@ -298,20 +342,75 @@ export function CityScreen({
           ))}
         </SectionCard>
 
-        <SectionCard title="Cwiczenia" subtitle="Wchodzisz, robisz serie, rosniesz.">
-          {gymExercises.map((exercise) => (
-            <View key={exercise.id} style={styles.listCard}>
-              <View style={styles.inlineRow}>
-                <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{exercise.name}</Text>
-                  <Text style={styles.listCardMeta}>{exercise.note} | koszt energii {exercise.costEnergy}</Text>
+        <SectionCard title="Cwiczenia" subtitle="Ustawiasz serie raz i robisz trening jednym ruchem.">
+          {gymExercises.map((exercise) => {
+            const affordableSeries = getAffordableGymSeries(game.player.energy, exercise.costEnergy);
+            const maxSeries = Math.max(1, affordableSeries || 1);
+            const selectedSeries = clampGymSeries(gymBatchByExercise[exercise.id] || 1, maxSeries);
+            const totalEnergyCost = selectedSeries * exercise.costEnergy;
+            const canTrainNow = helpers.hasGymPass(game.player) && affordableSeries > 0;
+
+            return (
+              <View key={exercise.id} style={styles.listCard}>
+                <View style={styles.inlineRow}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{exercise.name}</Text>
+                    <Text style={styles.listCardMeta}>{exercise.note} | 1 seria kosztuje {exercise.costEnergy} energii</Text>
+                  </View>
+                  <Text style={styles.costLabel}>
+                    {canTrainNow ? `Do ${affordableSeries} serii` : "Brak energii"}
+                  </Text>
                 </View>
-                <Pressable onPress={() => actions.handleTrain(exercise)} style={[styles.inlineButton, !helpers.hasGymPass(game.player) && styles.tileDisabled]}>
-                  <Text style={styles.inlineButtonText}>Cwicz</Text>
-                </Pressable>
+
+                <View style={styles.gymBatchControls}>
+                  <Pressable
+                    onPress={() => setGymSeries(exercise.id, selectedSeries - 1, maxSeries)}
+                    style={[styles.gymBatchAdjustButton, selectedSeries <= 1 && styles.tileDisabled]}
+                  >
+                    <Text style={styles.gymBatchAdjustText}>-</Text>
+                  </Pressable>
+
+                  <View style={styles.gymBatchTrack}>
+                    {Array.from({ length: maxSeries }).map((_, index) => {
+                      const step = index + 1;
+                      const active = step <= selectedSeries;
+
+                      return (
+                        <Pressable
+                          key={`${exercise.id}-batch-${step}`}
+                          onPress={() => setGymSeries(exercise.id, step, maxSeries)}
+                          style={[styles.gymBatchStep, active && styles.gymBatchStepActive]}
+                        >
+                          <Text style={[styles.gymBatchStepText, active && styles.gymBatchStepTextActive]}>{step}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Pressable
+                    onPress={() => setGymSeries(exercise.id, selectedSeries + 1, maxSeries)}
+                    style={[styles.gymBatchAdjustButton, selectedSeries >= maxSeries && styles.tileDisabled]}
+                  >
+                    <Text style={styles.gymBatchAdjustText}>+</Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.inlineRow}>
+                  <Text style={styles.gymBatchMeta}>
+                    {canTrainNow
+                      ? `${selectedSeries} ${selectedSeries === 1 ? "seria" : selectedSeries < 5 ? "serie" : "serii"} · energia ${totalEnergyCost}`
+                      : "Najpierw doladuj energie albo kup karnet."}
+                  </Text>
+                  <Pressable
+                    onPress={() => actions.handleTrain(exercise, selectedSeries)}
+                    style={[styles.inlineButton, !canTrainNow && styles.tileDisabled]}
+                  >
+                    <Text style={styles.inlineButtonText}>{selectedSeries > 1 ? `Cwicz x${selectedSeries}` : "Cwicz"}</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
-          ))}
+            );
+          })}
         </SectionCard>
       </>
     );
@@ -340,6 +439,7 @@ export function CityScreen({
   return (
     <SectionCard title="Szpital" subtitle="Jak wtopisz akcje albo przedawkujesz, tu wracasz do pionu.">
       <StatLine label="Obecne zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} visual={systemVisuals.defense} />
+      <StatLine label="Regeneracja" value={`+${healthRegenAmount} HP / ${Math.round(healthRegenSeconds / 60)} min`} visual={systemVisuals.defense} />
       <StatLine label="Heat" value={`${game.player.heat}%`} visual={systemVisuals.heat} />
       <View style={styles.grid}>
         <ActionTile title="Lekarz zaplecza" subtitle="Koszt $220, +30 HP i lekki zjazd heat." visual={systemVisuals.defense} onPress={actions.handleHeal} />

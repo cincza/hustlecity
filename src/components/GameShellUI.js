@@ -240,15 +240,15 @@ export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel
 export function ResultModal({ visible, tone = "warning", title, message, onClose }) {
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={[styles.resultModal, tone === "success" && styles.resultModalSuccess, tone === "failure" && styles.resultModalFailure]}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable onPress={onClose} style={[styles.resultModal, tone === "success" && styles.resultModalSuccess, tone === "failure" && styles.resultModalFailure]}>
           <Text style={styles.resultModalTitle}>{title}</Text>
           <Text style={styles.resultModalMessage}>{message}</Text>
           <Pressable onPress={onClose} style={styles.resultModalButton}>
             <Text style={styles.resultModalButtonText}>OK</Text>
           </Pressable>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
@@ -256,8 +256,8 @@ export function ResultModal({ visible, tone = "warning", title, message, onClose
 export function QuickActionModal({ visible, title, children, onClose }) {
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.quickModalShell}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable onPress={(event) => event.stopPropagation?.()} style={styles.quickModalShell}>
           <View style={styles.quickModalHeader}>
             <Text style={styles.quickModalTitle}>{title}</Text>
             <Pressable onPress={onClose} style={styles.quickModalClose}>
@@ -267,8 +267,8 @@ export function QuickActionModal({ visible, title, children, onClose }) {
           <ScrollView style={styles.quickModalScroll} contentContainerStyle={styles.quickModalBody}>
             {children}
           </ScrollView>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }

@@ -417,6 +417,7 @@ function createInitialPlayerData(username = "gracz") {
     },
     timers: {
       energyUpdatedAt: now,
+      hpUpdatedAt: now,
     },
     casino: {
       lossDayKey: new Date(now).toISOString().slice(0, 10),
@@ -514,6 +515,12 @@ function ensurePlayerExtendedState(player) {
       }))
       .filter((entry) => entry.expiresAt > 0);
   }
+  if (!player.timers || typeof player.timers !== "object" || Array.isArray(player.timers)) {
+    player.timers = {};
+  }
+  const now = Date.now();
+  player.timers.energyUpdatedAt = Math.max(0, Math.floor(Number(player.timers.energyUpdatedAt || now)));
+  player.timers.hpUpdatedAt = Math.max(0, Math.floor(Number(player.timers.hpUpdatedAt || now)));
   player.drugInventory = normalizeDrugInventory(player.drugInventory);
   player.dealerInventory = normalizeDealerInventory(player.dealerInventory);
   if (!player.online || typeof player.online !== "object" || Array.isArray(player.online)) {
@@ -887,6 +894,30 @@ function syncPlayerEnergy(player, now = Date.now()) {
   }
 }
 
+function syncPlayerHealth(player, now = Date.now()) {
+  if (!player.timers) player.timers = { hpUpdatedAt: now };
+  const regenMs = ECONOMY_RULES.health.regenSeconds * 1000;
+  const regenAmount = Math.max(1, Math.floor(Number(ECONOMY_RULES.health.regenAmount || 1)));
+  const lastHealthAt = player.timers.hpUpdatedAt || now;
+  const maxHp = Math.max(0, Number(player.profile?.maxHp || 0));
+
+  if (Number(player.profile?.hp || 0) >= maxHp) {
+    player.timers.hpUpdatedAt = now;
+    return;
+  }
+
+  const elapsed = now - lastHealthAt;
+  if (elapsed < regenMs) return;
+
+  const recoveredTicks = Math.floor(elapsed / regenMs);
+  player.profile.hp = Math.min(maxHp, Number(player.profile.hp || 0) + recoveredTicks * regenAmount);
+  player.timers.hpUpdatedAt = lastHealthAt + recoveredTicks * regenMs;
+
+  if (Number(player.profile.hp || 0) >= maxHp) {
+    player.timers.hpUpdatedAt = now;
+  }
+}
+
 function syncClubState(player, now = Date.now()) {
   if (!player?.club || typeof player.club !== "object") return;
   const referenceAt = Math.max(
@@ -902,6 +933,7 @@ function syncClubState(player, now = Date.now()) {
 function syncPlayerState(player, now = Date.now()) {
   ensurePlayerExtendedState(player);
   syncPlayerEnergy(player, now);
+  syncPlayerHealth(player, now);
   syncClubState(player, now);
   syncBusinessCollections(player, now);
   syncCityStateForPlayer(player, now);
@@ -2080,16 +2112,38 @@ app.post("/player/gym/pass", auth, asyncHandler(async (req, res) => {
 app.post("/player/gym/train", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const exerciseId = String(req.body?.exerciseId || "").trim();
-
-  await withPlayerActionLock(req, "player-gym-train", async () => {
-    await commitPlayerMutation(req, "player-gym-train", async (player) => {
-      const { logMessage } = trainPlayerAtGym(player, exerciseId, now);
-      pushLog(player, logMessage);
-      return null;
-    });
+  const repetitionsParsed = parsePositiveInteger(req.body?.repetitions ?? 1, {
+    min: 1,
+    max: 20,
+    field: "repetitions",
   });
 
-  res.json({ user: publicPlayer(req.player, now) });
+  if (repetitionsParsed.error) {
+    res.status(400).json({ error: repetitionsParsed.error });
+    return;
+  }
+
+  const result = await withPlayerActionLock(req, "player-gym-train", async () =>
+    commitPlayerMutation(req, "player-gym-train", async (player) => {
+      const { logMessage, repetitions, energySpent, totalGains } = trainPlayerAtGym(
+        player,
+        exerciseId,
+        repetitionsParsed.value,
+        now
+      );
+      pushLog(player, logMessage);
+      return {
+        repetitions,
+        energySpent,
+        totalGains,
+      };
+    })
+  );
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result: result || null,
+  });
 }));
 
 app.post("/player/restaurant/eat", auth, asyncHandler(async (req, res) => {

@@ -38,10 +38,15 @@ export function buyGymPassForPlayer(player, passId, now = Date.now()) {
   };
 }
 
-export function trainPlayerAtGym(player, exerciseId, now = Date.now()) {
+export function trainPlayerAtGym(player, exerciseId, repetitions = 1, now = Date.now()) {
   const exercise = GYM_EXERCISES.find((entry) => entry.id === exerciseId);
+  const normalizedRepetitions = Math.floor(Number(repetitions || 1));
+  const seriesCount = Number.isFinite(normalizedRepetitions) ? normalizedRepetitions : 1;
   if (!exercise) {
     fail("Gym exercise not found", 404);
+  }
+  if (seriesCount < 1 || seriesCount > 20) {
+    fail("Liczba serii musi miescic sie w przedziale 1-20.");
   }
   if (Number(player?.profile?.jailUntil || 0) > now) {
     fail("Z celi nie dojdziesz na silownie.");
@@ -49,23 +54,43 @@ export function trainPlayerAtGym(player, exerciseId, now = Date.now()) {
   if (!hasGymPass(player?.profile, now)) {
     fail("Najpierw kup karnet na silownie.");
   }
-  if (Number(player?.profile?.energy || 0) < exercise.costEnergy) {
+  const currentEnergy = Number(player?.profile?.energy || 0);
+  const energySpent = Number(exercise.costEnergy || 0) * seriesCount;
+  const maxSeries = Math.floor(currentEnergy / Math.max(1, Number(exercise.costEnergy || 1)));
+  if (currentEnergy < exercise.costEnergy) {
     fail("Za malo energii na trening.");
   }
+  if (seriesCount > maxSeries) {
+    fail(`Masz energii tylko na ${maxSeries} ${maxSeries === 1 ? "serie" : "serii"}.`);
+  }
 
-  player.profile.energy -= exercise.costEnergy;
-  player.profile.attack += Number(exercise.gains?.attack || 0);
-  player.profile.defense += Number(exercise.gains?.defense || 0);
-  player.profile.dexterity += Number(exercise.gains?.dexterity || 0);
-  player.profile.maxHp += Number(exercise.gains?.maxHp || 0);
+  const totalGains = {
+    attack: Number(exercise.gains?.attack || 0) * seriesCount,
+    defense: Number(exercise.gains?.defense || 0) * seriesCount,
+    dexterity: Number(exercise.gains?.dexterity || 0) * seriesCount,
+    maxHp: Number(exercise.gains?.maxHp || 0) * seriesCount,
+    hp: Number(exercise.gains?.hp || 0) * seriesCount,
+  };
+
+  player.profile.energy -= energySpent;
+  player.profile.attack += totalGains.attack;
+  player.profile.defense += totalGains.defense;
+  player.profile.dexterity += totalGains.dexterity;
+  player.profile.maxHp += totalGains.maxHp;
   player.profile.hp = Math.min(
     player.profile.maxHp,
-    player.profile.hp + Number(exercise.gains?.hp || 0)
+    player.profile.hp + totalGains.hp
   );
 
   return {
     exercise,
-    logMessage: `Silownia zaliczona: ${exercise.name}. ${exercise.note}.`,
+    repetitions: seriesCount,
+    energySpent,
+    totalGains,
+    logMessage:
+      seriesCount > 1
+        ? `Silownia zaliczona x${seriesCount}: ${exercise.name}. ${exercise.note}.`
+        : `Silownia zaliczona: ${exercise.name}. ${exercise.note}.`,
   };
 }
 

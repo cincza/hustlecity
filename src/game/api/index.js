@@ -137,11 +137,11 @@ export async function buyGymPassOnline(token, passId) {
   });
 }
 
-export async function trainAtGymOnline(token, exerciseId) {
+export async function trainAtGymOnline(token, exerciseId, repetitions = 1) {
   return request("/player/gym/train", {
     method: "POST",
     token,
-    body: { exerciseId },
+    body: { exerciseId, repetitions },
   });
 }
 

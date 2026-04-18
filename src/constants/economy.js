@@ -11,6 +11,8 @@ export {
 };
 
 export const ENERGY_REGEN_SECONDS = ECONOMY_RULES.energy.regenSeconds;
+export const HEALTH_REGEN_SECONDS = ECONOMY_RULES.health.regenSeconds;
+export const HEALTH_REGEN_AMOUNT = ECONOMY_RULES.health.regenAmount;
 export const PASSIVE_COLLECTION_CAP_MINUTES = ECONOMY_RULES.energy.passiveClaimCapMinutes;
 export const RESTAURANT_ENERGY_CAP_PER_HOUR = ECONOMY_RULES.energy.restaurantEnergyCapPerHour;
 export const CLUB_TAKEOVER_COST = ECONOMY_RULES.empire.clubTakeoverCost;

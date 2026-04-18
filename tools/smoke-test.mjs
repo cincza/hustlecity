@@ -254,11 +254,15 @@ async function main() {
       throw new Error("Claim taska gym-pass nie zwrocil nagrody.");
     }
 
-    await request("/player/gym/train", {
+    const gymTrainResult = await request("/player/gym/train", {
       method: "POST",
       token,
-      body: { exerciseId: "power" },
+      body: { exerciseId: "power", repetitions: 3 },
     });
+
+    if (gymTrainResult?.result?.repetitions !== 3) {
+      throw new Error("Backend nie policzyl treningu wieloserii.");
+    }
 
     const claimedFirstWaveTask = await request("/tasks/claim", {
       method: "POST",

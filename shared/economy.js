@@ -8,6 +8,10 @@ export const ECONOMY_RULES = {
     passiveClaimCapMinutes: 12 * 60,
     restaurantEnergyCapPerHour: 10,
   },
+  health: {
+    regenSeconds: 10 * 60,
+    regenAmount: 5,
+  },
   bank: {
     depositFeeRate: 0.005,
     depositFeeFreeUnder: 2500,

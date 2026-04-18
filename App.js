@@ -87,6 +87,8 @@ import {
   CLUB_FOUNDING_CASH_COST,
   CLUB_TAKEOVER_COST,
   ENERGY_REGEN_SECONDS,
+  HEALTH_REGEN_AMOUNT,
+  HEALTH_REGEN_SECONDS,
   HEIST_DEFINITIONS,
   MARKET_PRODUCTS,
   PASSIVE_COLLECTION_CAP_MINUTES,
@@ -670,6 +672,7 @@ const INITIAL = {
   },
   tasksClaimed: [],
   regenRemainder: 0,
+  hpRegenRemainder: 0,
   lastTick: Date.now(),
   log: [
     "Hustle City wrze. Lokalne ekipy testuja kazdy nowy ruch na dzielni.",
@@ -1504,20 +1507,24 @@ function inferFeedbackNotice(message, deltas = {}) {
   };
 }
 
-function buildGymExerciseNotice(exercise) {
-  const gains = exercise?.gains || {};
+function buildGymExerciseNotice(exercise, summary = null) {
+  const gains = summary?.totalGains || exercise?.gains || {};
   const gainParts = [];
+  const repetitions = Math.max(1, Math.floor(Number(summary?.repetitions || 1)));
+  const energySpent = Number.isFinite(summary?.energySpent)
+    ? Number(summary.energySpent)
+    : Number(exercise?.costEnergy || 0);
 
   if (Number(gains.attack || 0) > 0) gainParts.push(`Atak +${gains.attack}`);
   if (Number(gains.defense || 0) > 0) gainParts.push(`Obrona +${gains.defense}`);
   if (Number(gains.dexterity || 0) > 0) gainParts.push(`Zrecznosc +${gains.dexterity}`);
   if (Number(gains.maxHp || 0) > 0) gainParts.push(`Zdrowie max +${gains.maxHp}`);
   if (Number(gains.hp || 0) > 0) gainParts.push(`HP +${gains.hp}`);
-  if (Number(exercise?.costEnergy || 0) > 0) gainParts.push(`Energia -${exercise.costEnergy}`);
+  if (energySpent > 0) gainParts.push(`Energia -${energySpent}`);
 
   return {
     tone: "success",
-    title: "TRENING ZALICZONY",
+    title: repetitions > 1 ? `TRENING x${repetitions}` : "TRENING ZALICZONY",
     message: gainParts.length
       ? `${exercise?.name || "Trening"}. Zysk: ${gainParts.join(" · ")}.`
       : `${exercise?.name || "Trening"} zaliczony.`,
@@ -2196,6 +2203,15 @@ function AppRuntime() {
         const energyPool = prev.regenRemainder + elapsedSeconds;
         const energyRecovered = Math.floor(energyPool / ENERGY_REGEN_SECONDS);
         const regenRemainder = energyPool % ENERGY_REGEN_SECONDS;
+        const healthPool =
+          prev.player.hp >= prev.player.maxHp
+            ? 0
+            : (prev.hpRegenRemainder || 0) + elapsedSeconds;
+        const hpRecovered = Math.floor(healthPool / HEALTH_REGEN_SECONDS) * HEALTH_REGEN_AMOUNT;
+        let hpRegenRemainder =
+          prev.player.hp >= prev.player.maxHp
+            ? 0
+            : healthPool % HEALTH_REGEN_SECONDS;
         const passiveMinutes = elapsedSeconds / 60;
         const businessIncome = isOnlineAuthority ? 0 : getBusinessIncomePerMinute(prev, BUSINESSES);
         const escortIncome = isOnlineAuthority ? 0 : getEscortIncomePerMinute(prev);
@@ -2215,8 +2231,12 @@ function AppRuntime() {
         const nextPlayer = {
           ...prev.player,
           energy: clamp(prev.player.energy + energyRecovered, 0, prev.player.maxEnergy),
+          hp: clamp(prev.player.hp + hpRecovered, 0, prev.player.maxHp),
           heat: clamp(prev.player.heat - Math.floor(elapsedSeconds / 180), 0, 100),
         };
+        if (nextPlayer.hp >= nextPlayer.maxHp) {
+          hpRegenRemainder = 0;
+        }
         const nextEscortsOwned = isOnlineAuthority
           ? prev.escortsOwned
           : prev.escortsOwned.map((entry) => ({
@@ -2308,6 +2328,7 @@ function AppRuntime() {
             : prev.market,
           activeBoosts: remainingBoosts,
           regenRemainder,
+          hpRegenRemainder,
           lastTick: now,
           log: logLines.slice(0, 16),
         };
@@ -2637,13 +2658,14 @@ function AppRuntime() {
     );
   };
 
-  const doGymExercise = async (exercise) => {
+  const doGymExercise = async (exercise, repetitions = 1) => {
+    const safeRepetitions = clamp(Math.floor(Number(repetitions) || 1), 1, 20);
     if (!canDoStreetAction("Z celi nie dojdziesz na silownie.")) return;
     if (sessionToken && apiStatus === "online") {
       try {
-        const result = await trainAtGymOnline(sessionToken, exercise.id);
+        const result = await trainAtGymOnline(sessionToken, exercise.id, safeRepetitions);
         mergeServerUser(result.user);
-        showExplicitNotice(buildGymExerciseNotice(exercise));
+        showExplicitNotice(buildGymExerciseNotice(exercise, result.result));
         return;
       } catch (error) {
         pushLog(error.message);
@@ -2653,20 +2675,45 @@ function AppRuntime() {
     if (!hasGymPass(game.player)) return pushLog("Najpierw kup karnet na silownie.");
     if (game.player.energy < exercise.costEnergy) return pushLog("Za malo energii na trening.");
 
+    const maxSeries = Math.floor(game.player.energy / Math.max(1, exercise.costEnergy));
+    if (safeRepetitions > maxSeries) {
+      return pushLog(`Masz energii tylko na ${maxSeries} ${maxSeries === 1 ? "serie" : "serii"}.`);
+    }
+
+    const totalGains = {
+      attack: Number(exercise.gains?.attack || 0) * safeRepetitions,
+      defense: Number(exercise.gains?.defense || 0) * safeRepetitions,
+      dexterity: Number(exercise.gains?.dexterity || 0) * safeRepetitions,
+      maxHp: Number(exercise.gains?.maxHp || 0) * safeRepetitions,
+      hp: Number(exercise.gains?.hp || 0) * safeRepetitions,
+    };
+    const energySpent = exercise.costEnergy * safeRepetitions;
+
     setGame((prev) => {
-      const player = { ...prev.player, energy: prev.player.energy - exercise.costEnergy };
-      if (exercise.gains.attack) player.attack += exercise.gains.attack;
-      if (exercise.gains.defense) player.defense += exercise.gains.defense;
-      if (exercise.gains.dexterity) player.dexterity += exercise.gains.dexterity;
-      if (exercise.gains.maxHp) player.maxHp += exercise.gains.maxHp;
-      if (exercise.gains.hp) player.hp = clamp(prev.player.hp + exercise.gains.hp, 0, player.maxHp);
+      const player = { ...prev.player, energy: prev.player.energy - energySpent };
+      if (totalGains.attack) player.attack += totalGains.attack;
+      if (totalGains.defense) player.defense += totalGains.defense;
+      if (totalGains.dexterity) player.dexterity += totalGains.dexterity;
+      if (totalGains.maxHp) player.maxHp += totalGains.maxHp;
+      if (totalGains.hp) player.hp = clamp(prev.player.hp + totalGains.hp, 0, player.maxHp);
       return {
         ...prev,
         player,
-        log: [`Silownia zaliczona: ${exercise.name}. ${exercise.note}.`, ...prev.log].slice(0, 16),
+        log: [
+          safeRepetitions > 1
+            ? `Silownia zaliczona x${safeRepetitions}: ${exercise.name}. ${exercise.note}.`
+            : `Silownia zaliczona: ${exercise.name}. ${exercise.note}.`,
+          ...prev.log,
+        ].slice(0, 16),
       };
     });
-    showExplicitNotice(buildGymExerciseNotice(exercise));
+    showExplicitNotice(
+      buildGymExerciseNotice(exercise, {
+        repetitions: safeRepetitions,
+        energySpent,
+        totalGains,
+      })
+    );
   };
 
   const buyMeal = async (meal) => {
@@ -6508,6 +6555,8 @@ function AppRuntime() {
     sceneBackgrounds: SCENE_BACKGROUNDS,
     systemVisuals: SYSTEM_VISUALS,
     energyRegenSeconds: ENERGY_REGEN_SECONDS,
+    healthRegenSeconds: HEALTH_REGEN_SECONDS,
+    healthRegenAmount: HEALTH_REGEN_AMOUNT,
     jailRemaining,
     totalBusinessIncome,
     totalEscortIncome,
@@ -7277,6 +7326,15 @@ const styles = StyleSheet.create({
   inlineButton: { alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 2, backgroundColor: "#201712", borderWidth: 1, borderColor: "#5b3529" },
   inlineButtonText: { color: "#f6efe6", fontWeight: "700", fontSize: 13 },
   inlineRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 },
+  gymBatchControls: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12, marginBottom: 10 },
+  gymBatchAdjustButton: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "#17181d", borderWidth: 1, borderColor: "#30313a" },
+  gymBatchAdjustText: { color: "#f4efe8", fontSize: 18, fontWeight: "900" },
+  gymBatchTrack: { flex: 1, flexDirection: "row", gap: 6, flexWrap: "wrap" },
+  gymBatchStep: { minWidth: 28, height: 30, paddingHorizontal: 8, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "#111214", borderWidth: 1, borderColor: "#2f3034" },
+  gymBatchStepActive: { backgroundColor: "#1f1712", borderColor: "#c49539" },
+  gymBatchStepText: { color: "#91887c", fontSize: 11, fontWeight: "800" },
+  gymBatchStepTextActive: { color: "#f4d37e" },
+  gymBatchMeta: { color: "#c2b8a9", fontSize: 12, fontWeight: "700", flex: 1 },
   messageComposerInput: { minHeight: 130, borderWidth: 1, borderColor: "#2f3034", backgroundColor: "#111214", color: "#f1f1f1", paddingHorizontal: 12, paddingVertical: 12, borderRadius: 14, marginTop: 12 },
   messageComposerMeta: { color: "#988f84", fontSize: 11, textAlign: "right", marginTop: 8 },
   costLabel: { color: "#c2b8a9", fontWeight: "700", flexShrink: 1 },
