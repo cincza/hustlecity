@@ -448,11 +448,11 @@ async function main() {
       throw new Error("Logowanie admina nie zwrocilo tokena.");
     }
 
-    const grantAmount = 20000;
-    const grantResult = await request(`/admin/players/${socialEntry.id}/grant-cash`, {
-      method: "POST",
-      token: adminToken,
-      body: { amount: grantAmount },
+      const grantAmount = 20000;
+      const grantResult = await request(`/admin/players/${socialEntry.id}/grant-cash`, {
+        method: "POST",
+        token: adminToken,
+        body: { amount: grantAmount },
     });
 
     if (Number(grantResult?.result?.amount || 0) !== grantAmount) {
@@ -460,9 +460,25 @@ async function main() {
     }
 
     const postGrantMe = await request("/me", { token });
-    if (Number(postGrantMe?.user?.profile?.cash || 0) < Number(midMe?.user?.profile?.cash || 0) + grantAmount) {
-      throw new Error("Admin grant nie dosypal gotowki wskazanemu graczowi.");
-    }
+      if (Number(postGrantMe?.user?.profile?.cash || 0) < Number(midMe?.user?.profile?.cash || 0) + grantAmount) {
+        throw new Error("Admin grant nie dosypal gotowki wskazanemu graczowi.");
+      }
+
+      const respectGrantAmount = 10;
+      const respectGrantResult = await request(`/admin/players/${socialEntry.id}/grant-respect`, {
+        method: "POST",
+        token: adminToken,
+        body: { amount: respectGrantAmount },
+      });
+
+      if (Number(respectGrantResult?.result?.amount || 0) !== respectGrantAmount) {
+        throw new Error("Admin respect grant nie zwrocil prawidlowej kwoty.");
+      }
+
+      const postRespectGrantMe = await request("/me", { token });
+      if (Number(postRespectGrantMe?.user?.profile?.respect || 0) < Number(postGrantMe?.user?.profile?.respect || 0) + respectGrantAmount) {
+        throw new Error("Admin respect grant nie podbil szacunku wskazanemu graczowi.");
+      }
 
     const rankingEntries = [
       ...(rankings.byRespect || []),
@@ -912,9 +928,10 @@ async function main() {
       clubAction: escortSearchResult.result.outcome,
       gang: "ok",
       districts: districtsAfterClub.districts.length,
-      gangProject: investedGangProject.result.level,
-      adminGrant: "ok",
-      clubOwnership: claimedClub.user.club.sourceId,
+        gangProject: investedGangProject.result.level,
+        adminGrant: "ok",
+        adminRespectGrant: "ok",
+        clubOwnership: claimedClub.user.club.sourceId,
       clubNight: clubNight.result.payout,
       operation: executedOperation.result.success ? "ok-success" : "ok-failed",
       prisonChat: "ok",

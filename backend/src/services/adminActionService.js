@@ -2,6 +2,8 @@ import {
   ADMIN_CASH_GRANT_MAX,
   ADMIN_CASH_GRANT_PRESETS,
   ADMIN_PROFILE_FLOORS,
+  ADMIN_RESPECT_GRANT_MAX,
+  ADMIN_RESPECT_GRANT_PRESETS,
   normalizeAdminGrantPresets,
 } from "../../../shared/admin.js";
 
@@ -67,6 +69,7 @@ export function buildAdminPublicState(isAdmin) {
   return {
     isAdmin: true,
     grantPresets: normalizeAdminGrantPresets(ADMIN_CASH_GRANT_PRESETS),
+    respectPresets: normalizeAdminGrantPresets(ADMIN_RESPECT_GRANT_PRESETS),
   };
 }
 
@@ -106,5 +109,44 @@ export function grantCashToPlayerByAdmin({
     targetLogMessage: selfGrant
       ? `Admin refill: konto odswiezone o $${safeAmount}.`
       : `${actorName} dosypuje Ci $${safeAmount} na testy.`,
+  };
+}
+
+export function grantRespectToPlayerByAdmin({
+  actorPlayer,
+  targetPlayer,
+  amount,
+  now = Date.now(),
+  actorName = "Admin",
+}) {
+  ensurePlayerProfile(actorPlayer);
+  const targetProfile = ensurePlayerProfile(targetPlayer);
+  const safeAmount = Math.max(0, Math.floor(Number(amount || 0)));
+
+  if (!safeAmount || safeAmount > ADMIN_RESPECT_GRANT_MAX) {
+    throw new Error(`Admin respect grant must be between 1 and ${ADMIN_RESPECT_GRANT_MAX}.`);
+  }
+
+  targetProfile.respect = Number(targetProfile.respect || 0) + safeAmount;
+  targetPlayer.flags.adminGrantedRespectTotal =
+    Number(targetPlayer.flags?.adminGrantedRespectTotal || 0) + safeAmount;
+  targetPlayer.flags.lastAdminRespectGrantAt = now;
+  actorPlayer.flags.lastAdminActionAt = now;
+
+  const targetName = targetProfile.name || "Gracz";
+  const selfGrant = actorPlayer === targetPlayer;
+
+  return {
+    amount: safeAmount,
+    targetName,
+    logMessage: selfGrant
+      ? `Admin respect: +${safeAmount} RES dla siebie.`
+      : `Admin respect: +${safeAmount} RES dla ${targetName}.`,
+    adminLogMessage: selfGrant
+      ? `Admin respect wpada na profil. +${safeAmount} RES.`
+      : `Wbito +${safeAmount} RES dla ${targetName}.`,
+    targetLogMessage: selfGrant
+      ? `Admin respect: profil podbity o +${safeAmount} RES.`
+      : `${actorName} wbija Ci +${safeAmount} RES na testy.`,
   };
 }

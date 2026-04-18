@@ -18,10 +18,16 @@ export const ADMIN_PROFILE_FLOORS = {
 };
 
 export const ADMIN_CASH_GRANT_MAX = 500000;
+export const ADMIN_RESPECT_GRANT_MAX = 500;
 
 export const ADMIN_CASH_GRANT_PRESETS = [
   { id: "grant-20k", label: "+20k", amount: 20000 },
   { id: "grant-100k", label: "+100k", amount: 100000 },
+];
+
+export const ADMIN_RESPECT_GRANT_PRESETS = [
+  { id: "respect-10", label: "+10 RES", amount: 10 },
+  { id: "respect-50", label: "+50 RES", amount: 50 },
 ];
 
 export function normalizeAdminGrantPresets(presets) {

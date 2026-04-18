@@ -53,6 +53,7 @@ import {
   fetchSocialPlayers,
   deleteAdminPlayerAccountOnline,
   grantAdminCashToPlayerOnline,
+  grantAdminRespectToPlayerOnline,
   healOnline,
   hitBlackjackOnline,
   fortifyClubOnline,
@@ -601,6 +602,7 @@ const INITIAL = {
     jailUntil: null,
     isAdmin: false,
     adminGrantPresets: [],
+    adminRespectPresets: [],
   },
   stats: { heistsDone: 0, heistsWon: 0, totalEarned: 0, gangHeistsWon: 0, casinoWins: 0, drugBatches: 0 },
   gang: createGangState(),
@@ -808,6 +810,7 @@ const normalizeOnlinePlayerEntry = (entry, index = 0) => ({
 const normalizeAdminState = (adminState) => ({
   isAdmin: Boolean(adminState?.isAdmin),
   grantPresets: normalizeAdminGrantPresets(adminState?.grantPresets),
+  respectPresets: normalizeAdminGrantPresets(adminState?.respectPresets),
 });
 const normalizePlayerAttackTargetCooldowns = (cooldowns, now = Date.now()) => {
   if (!cooldowns || typeof cooldowns !== "object" || Array.isArray(cooldowns)) {
@@ -1770,8 +1773,12 @@ function AppRuntime() {
   const gangGoalProgress = useMemo(() => getGangWeeklyProgress(game.gang), [game.gang]);
   const gangProjectEffects = useMemo(() => getGangProjectEffects(game.gang), [game.gang]);
   const adminState = useMemo(
-    () => normalizeAdminState({ isAdmin: game.player.isAdmin, grantPresets: game.player.adminGrantPresets }),
-    [game.player.isAdmin, game.player.adminGrantPresets]
+    () => normalizeAdminState({
+      isAdmin: game.player.isAdmin,
+      grantPresets: game.player.adminGrantPresets,
+      respectPresets: game.player.adminRespectPresets,
+    }),
+    [game.player.isAdmin, game.player.adminGrantPresets, game.player.adminRespectPresets]
   );
 
   const mergeServerUser = (serverUser, marketPayload) => {
@@ -1829,6 +1836,9 @@ function AppRuntime() {
         adminGrantPresets: Array.isArray(serverUser?.admin?.grantPresets)
           ? normalizeAdminGrantPresets(serverUser.admin.grantPresets)
           : prev.player.adminGrantPresets,
+        adminRespectPresets: Array.isArray(serverUser?.admin?.respectPresets)
+          ? normalizeAdminGrantPresets(serverUser.admin.respectPresets)
+          : prev.player.adminRespectPresets,
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
       inventory: serverUser.inventory || prev.inventory,
@@ -5219,6 +5229,28 @@ function AppRuntime() {
     }
   };
 
+  const grantAdminRespectToPlayer = async (player, amount) => {
+    if (!sessionToken || apiStatus !== "online") return pushLog("Admin tools dzialaja tylko online.");
+    if (!game.player.isAdmin) return pushLog("To narzedzie jest tylko dla admina.");
+    if (!player?.id) return pushLog("Tego gracza nie da sie teraz namierzyc.");
+
+    try {
+      const result = await grantAdminRespectToPlayerOnline(sessionToken, player.id, amount);
+      mergeServerUser(result.user);
+      try {
+        await refreshSocialState(sessionToken);
+      } catch (_error) {}
+      showExplicitNotice({
+        tone: "success",
+        title: "SZACUN WBITY",
+        message: `Wbito +${result?.result?.amount || amount} RES dla ${result?.target?.name || player.name}.`,
+        deltas: null,
+      });
+    } catch (error) {
+      pushLog(error.message || "Grant szacunku nie wyszedl.");
+    }
+  };
+
   const deleteAdminPlayerAccount = (player) => {
     const login = String(player?.name || "").trim();
     if (!sessionToken || apiStatus !== "online") return pushLog("Admin tools dzialaja tylko online.");
@@ -6389,6 +6421,17 @@ function AppRuntime() {
                     <Pressable
                       key={preset.id}
                       onPress={() => grantAdminCashToPlayer(selectedWorldPlayer, preset.amount)}
+                      style={styles.inlineButton}
+                    >
+                      <Text style={styles.inlineButtonText}>{preset.label}</Text>
+                    </Pressable>
+                  ))
+                : null}
+              {adminState.isAdmin
+                ? adminState.respectPresets.map((preset) => (
+                    <Pressable
+                      key={preset.id}
+                      onPress={() => grantAdminRespectToPlayer(selectedWorldPlayer, preset.amount)}
                       style={styles.inlineButton}
                     >
                       <Text style={styles.inlineButtonText}>{preset.label}</Text>

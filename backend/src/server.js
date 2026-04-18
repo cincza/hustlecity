@@ -116,6 +116,7 @@ import {
   applyAdminProfileFloors,
   buildAdminPublicState,
   grantCashToPlayerByAdmin,
+  grantRespectToPlayerByAdmin,
 } from "./services/adminActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
@@ -147,6 +148,7 @@ import {
   ADMIN_CASH_GRANT_MAX,
   ADMIN_DEFAULT_USERNAME,
   ADMIN_PROFILE_FLOORS,
+  ADMIN_RESPECT_GRANT_MAX,
 } from "../../shared/admin.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1546,6 +1548,101 @@ app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (re
   });
 
   logInfo("admin", "grant-cash", {
+    adminUserId: req.user.id,
+    targetUserId,
+    amount: result?.amount || parsedAmount.value,
+  });
+
+  res.json({
+    user: publicPlayer(actorRecordSnapshot?.playerData || req.player, now),
+    target: buildDirectoryEntry(targetRecordSnapshot, now),
+    result,
+  });
+}));
+
+app.post("/admin/players/:targetUserId/grant-respect", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) {
+    return;
+  }
+
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "admin-player-grant-respect",
+      400,
+      "Admin action rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const targetUserId = String(req.params?.targetUserId || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "targetUserId is required" });
+    return;
+  }
+
+  const parsedAmount = parsePositiveInteger(req.body?.amount, {
+    min: 1,
+    max: ADMIN_RESPECT_GRANT_MAX,
+    field: "amount",
+  });
+  if (parsedAmount.error) {
+    res.status(400).json({ error: parsedAmount.error });
+    return;
+  }
+
+  const targetPreview = await findUserById(targetUserId);
+  if (!targetPreview?.playerData) {
+    res.status(404).json({ error: "Target player not found" });
+    return;
+  }
+
+  const now = Date.now();
+  let actorRecordSnapshot = null;
+  let targetRecordSnapshot = null;
+  let result = null;
+
+  await withUserMutationLocks([req.user.id, targetUserId], `admin-grant-respect:${targetUserId}`, async () => {
+    const [actorRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!isAdminUsername(actorRecord.username)) {
+      const error = new Error("Admin only");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    result = grantRespectToPlayerByAdmin({
+      actorPlayer: actorRecord.playerData,
+      targetPlayer: targetRecord.playerData,
+      amount: parsedAmount.value,
+      now,
+      actorName: actorRecord.username,
+    });
+
+    pushLog(actorRecord.playerData, result.adminLogMessage);
+    pushLog(targetRecord.playerData, result.targetLogMessage);
+
+    await Promise.all([
+      persistPlayerForUser(actorRecord._id, actorRecord.playerData),
+      persistPlayerForUser(targetRecord._id, targetRecord.playerData),
+    ]);
+
+    actorRecordSnapshot = actorRecord;
+    targetRecordSnapshot = targetRecord;
+  });
+
+  logInfo("admin", "grant-respect", {
     adminUserId: req.user.id,
     targetUserId,
     amount: result?.amount || parsedAmount.value,
