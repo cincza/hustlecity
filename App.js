@@ -84,6 +84,7 @@ import {
   withdrawOnline,
 } from "./api";
 import {
+  ECONOMY_RULES,
   CLUB_FOUNDING_CASH_COST,
   CLUB_TAKEOVER_COST,
   ENERGY_REGEN_SECONDS,
@@ -176,6 +177,7 @@ import {
 } from "./shared/socialGameplay.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
+const PLAYER_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.playerAttackCooldownSeconds || 0) * 1000;
 const AVATAR_ART = {
   ghost: require("./assets/avatars/avatar-ghost-face.png"),
   razor: require("./assets/avatars/avatar-razor-face.png"),
@@ -707,6 +709,9 @@ const INITIAL = {
     verified: 1,
     pending: 2,
     claimedMilestones: [],
+  },
+  cooldowns: {
+    playerAttackUntil: 0,
   },
   collections: {
     businessCash: 0,
@@ -1718,6 +1723,10 @@ function AppRuntime() {
   const inGang = Boolean(game.gang.joined);
   const gangTributeRemaining = Math.max(0, GANG_TRIBUTE_COOLDOWN_MS - (Date.now() - (game.gang.lastTributeAt || 0)));
   const clubNightRemaining = Math.max(0, CLUB_NIGHT_COOLDOWN_MS - (Date.now() - (game.club.lastRunAt || 0)));
+  const playerAttackCooldownRemaining = Math.max(
+    0,
+    Number(game.cooldowns?.playerAttackUntil || 0) - Date.now()
+  );
   const crewLockdownRemaining = Math.max(0, (game.gang.crewLockdownUntil || 0) - Date.now());
   const districtSummaries = useMemo(() => getDistrictSummaries(game.city), [game.city]);
   const focusDistrictSummary = useMemo(
@@ -1855,6 +1864,17 @@ function AppRuntime() {
               ...normalizeBusinessCollections(serverUser.collections),
             }
           : prev.collections,
+      cooldowns:
+        serverUser?.cooldowns && typeof serverUser.cooldowns === "object"
+          ? {
+              ...prev.cooldowns,
+              ...serverUser.cooldowns,
+              playerAttackUntil: Math.max(
+                0,
+                Number(serverUser.cooldowns?.playerAttackUntil || 0)
+              ),
+            }
+          : prev.cooldowns,
       club:
         serverUser?.club && typeof serverUser.club === "object"
           ? normalizeClubState({
@@ -5178,6 +5198,9 @@ function AppRuntime() {
 
   const attackWorldPlayer = (player) => {
     if (!player?.id) return pushLog("Nie ma celu do ataku.");
+    if (playerAttackCooldownRemaining > 0) {
+      return pushLog(`Kolejny atak na gracza odpalasz za ${formatCooldown(playerAttackCooldownRemaining)}.`);
+    }
 
     if (sessionToken && apiStatus === "online") {
       attackPlayerOnline(sessionToken, player.id)
@@ -5221,6 +5244,10 @@ function AppRuntime() {
           energy: prev.player.energy - 2,
           heat: clamp(prev.player.heat + 6, 0, 100),
         },
+        cooldowns: {
+          ...(prev.cooldowns || {}),
+          playerAttackUntil: Date.now() + PLAYER_ATTACK_COOLDOWN_MS,
+        },
         online: {
           ...prev.online,
           roster: prev.online.roster.map((entry) => (entry.id === player.id ? { ...entry, cash: Math.max(0, entry.cash - steal) } : entry)),
@@ -5241,6 +5268,10 @@ function AppRuntime() {
         energy: prev.player.energy - 2,
         hp: clamp(prev.player.hp - randomBetween(8, 18), 0, prev.player.maxHp),
         heat: clamp(prev.player.heat + 3, 0, 100),
+      },
+      cooldowns: {
+        ...(prev.cooldowns || {}),
+        playerAttackUntil: Date.now() + PLAYER_ATTACK_COOLDOWN_MS,
       },
       online: {
         ...prev.online,
@@ -6264,10 +6295,19 @@ function AppRuntime() {
               </Pressable>
               <Pressable
                 onPress={() => attackWorldPlayer(selectedWorldPlayer)}
-                disabled={!selectedWorldPlayer.online}
-                style={[styles.inlineButton, !selectedWorldPlayer.online && styles.tileDisabled]}
+                disabled={!selectedWorldPlayer.online || playerAttackCooldownRemaining > 0}
+                style={[
+                  styles.inlineButton,
+                  (!selectedWorldPlayer.online || playerAttackCooldownRemaining > 0) && styles.tileDisabled,
+                ]}
               >
-                <Text style={styles.inlineButtonText}>Atakuj</Text>
+                <Text style={styles.inlineButtonText}>
+                  {!selectedWorldPlayer.online
+                    ? "Offline"
+                    : playerAttackCooldownRemaining > 0
+                      ? `Atak za ${formatCooldown(playerAttackCooldownRemaining)}`
+                      : "Atakuj"}
+                </Text>
               </Pressable>
               <Pressable onPress={() => addWorldPlayerFriend(selectedWorldPlayer)} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Dodaj do znajomych</Text>

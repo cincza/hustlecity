@@ -494,6 +494,19 @@ async function main() {
     if (!attackResult?.result?.message) {
       throw new Error("Atak na gracza nie zwrocil wyniku akcji.");
     }
+    if (Number(attackResult?.user?.cooldowns?.playerAttackUntil || 0) <= Date.now()) {
+      throw new Error("Atak na gracza nie ustawil cooldownu po stronie backendu.");
+    }
+
+    await delay(1900);
+    await expectRequestFailure(
+      `/social/players/${attackTarget.id}/attack`,
+      {
+        method: "POST",
+        token,
+      },
+      /atak na gracza odpalisz za|cooldown/i
+    );
 
     const fightClubResult = await request("/fightclub/round", {
       method: "POST",

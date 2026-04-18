@@ -414,6 +414,7 @@ function createInitialPlayerData(username = "gracz") {
     cooldowns: {
       heists: {},
       casinoActionUntil: 0,
+      playerAttackUntil: 0,
     },
     timers: {
       energyUpdatedAt: now,
@@ -552,6 +553,14 @@ function ensurePlayerExtendedState(player) {
     player.club.districtId = resolveClubDistrictId(player, player.club.sourceId);
   }
   ensurePlayerEmpireState(player);
+  if (!player.cooldowns || typeof player.cooldowns !== "object" || Array.isArray(player.cooldowns)) {
+    player.cooldowns = {};
+  }
+  if (!player.cooldowns.heists || typeof player.cooldowns.heists !== "object" || Array.isArray(player.cooldowns.heists)) {
+    player.cooldowns.heists = {};
+  }
+  player.cooldowns.casinoActionUntil = Math.max(0, Number(player.cooldowns.casinoActionUntil || 0));
+  player.cooldowns.playerAttackUntil = Math.max(0, Number(player.cooldowns.playerAttackUntil || 0));
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile.bounty || 0)));
 }
 
@@ -1627,6 +1636,17 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
       error.statusCode = 409;
       throw error;
     }
+    const playerAttackCooldownRemaining = Math.max(
+      0,
+      Number(attacker.cooldowns?.playerAttackUntil || 0) - now
+    );
+    if (playerAttackCooldownRemaining > 0) {
+      const error = new Error(
+        `Kolejny atak na gracza odpalisz za ${Math.ceil(playerAttackCooldownRemaining / 60000)} min.`
+      );
+      error.statusCode = 409;
+      throw error;
+    }
     if (!targetIsOnline) {
       const error = new Error("Ten gracz nie jest teraz online.");
       error.statusCode = 409;
@@ -1660,6 +1680,8 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
     let message = "";
 
     attacker.profile.energy = Math.max(0, Number(attacker.profile.energy || 0) - 2);
+    attacker.cooldowns.playerAttackUntil =
+      now + ECONOMY_RULES.clubPvp.playerAttackCooldownSeconds * 1000;
 
     if (attackSucceeded) {
       steal = Math.min(

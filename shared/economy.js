@@ -113,7 +113,7 @@ export const ECONOMY_RULES = {
     selfTrafficWeight: 0.2,
   },
   clubPvp: {
-    playerAttackCooldownSeconds: 45 * 60,
+    playerAttackCooldownSeconds: 60 * 60,
     gangAttackCooldownSeconds: 90 * 60,
     defenderShieldAfterAttackSeconds: 75 * 60,
     sameTargetRepeatCooldownSeconds: 4 * 60 * 60,
