@@ -45,6 +45,14 @@ import {
   logMutationFailure,
   logMutationSuccess,
 } from "./services/actionLogService.js";
+import {
+  bribePlayerOutOfJail,
+  buyGymPassForPlayer,
+  buyRestaurantItemForPlayer,
+  healPlayer,
+  trainPlayerAtGym,
+  updatePlayerAvatar,
+} from "./services/playerActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import {
@@ -53,6 +61,7 @@ import {
   signAuthToken,
   verifyAuthToken,
 } from "./middleware/auth.js";
+import { logError, logInfo, logWarn } from "./utils/logger.js";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -427,9 +436,9 @@ async function withPlayerActionLock(req, actionKey, handler) {
     throw new Error("Authenticated user id missing for action lock");
   }
 
-  const key = `${req.user.id}:${actionKey}`;
+  const key = `${req.user.id}:mutation`;
   if (state.actionLocks.has(key)) {
-    const error = new Error("Action already in progress");
+    const error = new Error(`Another action is already in progress (${actionKey})`);
     error.statusCode = 409;
     throw error;
   }
@@ -567,57 +576,18 @@ function sanitizeClientGamePayload(game) {
   return JSON.parse(serialized);
 }
 
-function applyClientGameSnapshotToPlayerData(player, game) {
-  if (!player || !game || typeof game !== "object") {
-    return;
-  }
+function createClientStateSummary(game) {
+  const screen =
+    typeof game?.ui?.screen === "string"
+      ? game.ui.screen
+      : typeof game?.ui?.activeSection === "string"
+        ? game.ui.activeSection
+        : null;
 
-  const profile = game.player || {};
-  const stats = game.stats || {};
-  const inventory = game.inventory || {};
-
-  player.profile = {
-    ...player.profile,
-    name: typeof profile.name === "string" && profile.name.trim() ? profile.name.trim() : player.profile.name,
-    avatarId: typeof profile.avatarId === "string" ? profile.avatarId : player.profile.avatarId,
-    avatarCustomUri: typeof profile.avatarCustomUri === "string" ? profile.avatarCustomUri : player.profile.avatarCustomUri,
-    rank: typeof profile.rank === "string" ? profile.rank : player.profile.rank,
-    cash: Number.isFinite(profile.cash) ? profile.cash : player.profile.cash,
-    bank: Number.isFinite(profile.bank) ? profile.bank : player.profile.bank,
-    premiumTokens: Number.isFinite(profile.premiumTokens) ? profile.premiumTokens : player.profile.premiumTokens,
-    energy: Number.isFinite(profile.energy) ? profile.energy : player.profile.energy,
-    maxEnergy: Number.isFinite(profile.maxEnergy) ? profile.maxEnergy : player.profile.maxEnergy,
-    hp: Number.isFinite(profile.hp) ? profile.hp : player.profile.hp,
-    maxHp: Number.isFinite(profile.maxHp) ? profile.maxHp : player.profile.maxHp,
-    respect: Number.isFinite(profile.respect) ? profile.respect : player.profile.respect,
-    xp: Number.isFinite(profile.xp) ? profile.xp : player.profile.xp,
-    attack: Number.isFinite(profile.attack) ? profile.attack : player.profile.attack,
-    defense: Number.isFinite(profile.defense) ? profile.defense : player.profile.defense,
-    dexterity: Number.isFinite(profile.dexterity) ? profile.dexterity : player.profile.dexterity,
-    charisma: Number.isFinite(profile.charisma) ? profile.charisma : player.profile.charisma,
-    heat: Number.isFinite(profile.heat) ? profile.heat : player.profile.heat,
-    stamina: Number.isFinite(profile.stamina) ? profile.stamina : player.profile.stamina,
-    level: getLevelFromRespect(Number.isFinite(profile.respect) ? profile.respect : player.profile.respect),
-    gymPassTier: profile.gymPassTier ?? player.profile.gymPassTier,
-    gymPassUntil: profile.gymPassUntil ?? player.profile.gymPassUntil,
-    jailUntil: profile.jailUntil ?? player.profile.jailUntil,
+  return {
+    updatedAt: new Date().toISOString(),
+    screen,
   };
-
-  player.stats = {
-    ...player.stats,
-    ...Object.fromEntries(Object.entries(stats).filter(([, value]) => Number.isFinite(value))),
-  };
-
-  player.inventory = {
-    ...player.inventory,
-    ...Object.fromEntries(Object.entries(inventory).filter(([, value]) => Number.isFinite(value))),
-  };
-
-  if (Array.isArray(game.log)) {
-    player.log = game.log.slice(0, 16);
-  }
-
-  player.clientState = { game };
 }
 
 function syncCasinoDay(player, now = Date.now()) {
@@ -768,7 +738,11 @@ async function commitPlayerMutation(req, actionName, mutator) {
   const before = snapshotPlayerMutationState(req.player);
   try {
     const result = await mutator(req.player);
-    await persistPlayerForUser(req.user.id, req.player);
+    const updatedRecord = await persistPlayerForUser(req.user.id, req.player);
+    if (updatedRecord?.playerData) {
+      req.userRecord = updatedRecord;
+      req.player = updatedRecord.playerData;
+    }
     const after = snapshotPlayerMutationState(req.player);
     logMutationSuccess({
       actionName,
@@ -910,6 +884,11 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
   });
 
   markUserActive(userRecord._id);
+  logInfo("auth", "register", {
+    userId: userRecord._id,
+    username: userRecord.username,
+    email: userRecord.email || null,
+  });
   const token = signAuthToken(userRecord);
   res.status(201).json({
     token,
@@ -955,6 +934,10 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
   }
 
   markUserActive(userRecord._id);
+  logInfo("auth", "login", {
+    userId: userRecord._id,
+    username: userRecord.username,
+  });
   const token = signAuthToken(userRecord);
   res.json({
     token,
@@ -1064,6 +1047,11 @@ app.post("/chat/global", auth, asyncHandler(async (req, res) => {
     author,
     text,
   });
+  logInfo("chat", "global-message", {
+    userId: req.user.id,
+    author,
+    textLength: text.length,
+  });
 
   const { globalChat } = await buildSocialSnapshot();
   res.json({ messages: globalChat });
@@ -1088,12 +1076,98 @@ app.post("/sync/client-state", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  applyClientGameSnapshotToPlayerData(req.player, safeGame);
+  req.player.clientState = createClientStateSummary(safeGame);
   await commitPlayerMutation(req, "sync-client-state", async () => ({ ok: true }));
   res.json({
     ok: true,
+    authoritative: true,
     user: publicPlayer(req.player),
   });
+}));
+
+app.post("/player/profile/avatar", auth, asyncHandler(async (req, res) => {
+  const avatarId = String(req.body?.avatarId || "").trim();
+
+  await withPlayerActionLock(req, "player-profile-avatar", async () => {
+    await commitPlayerMutation(req, "player-profile-avatar", async (player) => {
+      const { logMessage } = updatePlayerAvatar(player, avatarId);
+      pushLog(player, logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player) });
+}));
+
+app.post("/player/gym/pass", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const passId = String(req.body?.passId || "").trim();
+
+  await withPlayerActionLock(req, "player-gym-pass", async () => {
+    await commitPlayerMutation(req, "player-gym-pass", async (player) => {
+      const { logMessage } = buyGymPassForPlayer(player, passId, now);
+      pushLog(player, logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now) });
+}));
+
+app.post("/player/gym/train", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const exerciseId = String(req.body?.exerciseId || "").trim();
+
+  await withPlayerActionLock(req, "player-gym-train", async () => {
+    await commitPlayerMutation(req, "player-gym-train", async (player) => {
+      const { logMessage } = trainPlayerAtGym(player, exerciseId, now);
+      pushLog(player, logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now) });
+}));
+
+app.post("/player/restaurant/eat", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const itemId = String(req.body?.itemId || "").trim();
+
+  await withPlayerActionLock(req, "player-restaurant-eat", async () => {
+    await commitPlayerMutation(req, "player-restaurant-eat", async (player) => {
+      const { logMessage } = buyRestaurantItemForPlayer(player, itemId, now);
+      pushLog(player, logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now) });
+}));
+
+app.post("/player/hospital/heal", auth, asyncHandler(async (req, res) => {
+  await withPlayerActionLock(req, "player-hospital-heal", async () => {
+    await commitPlayerMutation(req, "player-hospital-heal", async (player) => {
+      const { logMessage } = healPlayer(player);
+      pushLog(player, logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player) });
+}));
+
+app.post("/player/jail/bribe", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+
+  await withPlayerActionLock(req, "player-jail-bribe", async () => {
+    await commitPlayerMutation(req, "player-jail-bribe", async (player) => {
+      const { logMessage } = bribePlayerOutOfJail(player, now);
+      pushLog(player, logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now) });
 }));
 
 app.post("/club-pvp/preview", auth, (req, res) => {
@@ -1811,6 +1885,12 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
     logHeistEvent(
       `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: success reward=$${gain} xp=${xpGain} energy=${player.profile.energy}`
     );
+    logInfo("heists", "execute-success", {
+      userId: req.user.id,
+      heistId: heist.id,
+      reward: gain,
+      xpGain,
+    });
     return;
   }
 
@@ -1853,10 +1933,29 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   logHeistEvent(
     `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: failure loss=$${loss} damage=${damage} jailed=${jailed ? "yes" : "no"}`
   );
+  logWarn("heists", "execute-failure", {
+    userId: req.user.id,
+    heistId: heist.id,
+    loss,
+    damage,
+    jailed,
+    jailSeconds,
+  });
 }));
 
+app.use((req, res) => {
+  sendError(res, "Route not found", 404, {
+    method: req.method,
+    path: req.path,
+  });
+});
+
 app.use((error, _req, res, _next) => {
-  console.error("[api-error]", error?.message || error);
+  logError("api", "unhandled-error", {
+    message: error?.message || "unknown",
+    statusCode: error?.statusCode || 500,
+    type: error?.type,
+  });
   if (error?.type === "entity.parse.failed") {
     sendError(res, "Invalid JSON body", 400);
     return;
@@ -1869,7 +1968,10 @@ app.use((error, _req, res, _next) => {
 });
 
 app.listen(port, host, () => {
-  console.log(`Hustle City API listening on ${host}:${port}`);
-  console.log(`CORS origins: ${allowedOrigins.length ? allowedOrigins.join(", ") : "all (dev default)"}`);
+  logInfo("api", "server-started", {
+    host,
+    port,
+    corsOrigins: allowedOrigins.length ? allowedOrigins.join(",") : "all",
+  });
 });
 

@@ -3,13 +3,19 @@ services:
     name: hustle-city-api
     runtime: node
     rootDir: backend
-    plan: free
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
+    disk:
+      name: hustle-city-api-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATA_DIR
+        value: /var/data/hustle-city
       - key: JWT_SECRET
         sync: false
       - key: CORS_ORIGIN

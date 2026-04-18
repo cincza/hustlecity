@@ -1,13 +1,13 @@
-const DEV_LOCALHOST_API_BASE_URL = "http://localhost:4000";
+const PRODUCTION_API_BASE_URL = "https://hustle-city-api.onrender.com";
 
 function normalizeApiBaseUrl(value) {
   if (typeof value !== "string") {
-    return DEV_LOCALHOST_API_BASE_URL;
+    return PRODUCTION_API_BASE_URL;
   }
 
   const trimmed = value.trim();
   if (!trimmed) {
-    return DEV_LOCALHOST_API_BASE_URL;
+    return PRODUCTION_API_BASE_URL;
   }
 
   return trimmed.replace(/\/+$/, "");

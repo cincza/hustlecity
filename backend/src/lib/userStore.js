@@ -3,10 +3,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Datastore from "@seald-io/nedb";
+import { logError, logInfo } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dataDir = path.resolve(__dirname, "../../data");
+const configuredDataDir = String(process.env.DATA_DIR || "").trim();
+const dataDir = configuredDataDir
+  ? path.resolve(configuredDataDir)
+  : path.resolve(__dirname, "../../data");
 const userDbPath = path.join(dataDir, "users.db");
 const globalChatDbPath = path.join(dataDir, "global-chat.db");
 
@@ -17,7 +21,7 @@ const VERBOSE_USER_STORE_LOGS = process.env.VERBOSE_USER_STORE_LOGS === "1";
 
 function logUserStore(message, level = "log") {
   if (!VERBOSE_USER_STORE_LOGS) return;
-  console[level](`[userStore] ${message}`);
+  logInfo("user-store", level, { message, dataDir });
 }
 
 function normalizeEmail(email) {
@@ -74,7 +78,11 @@ async function getDb() {
       dataDir,
       `users.db.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`
     );
-    console.error(`[userStore] failed to load users.db, moving broken file to ${corruptPath}`);
+    logError("persistence", "users-db-load-failed", {
+      userDbPath,
+      corruptPath,
+      reason: error?.message || "unknown",
+    });
     await fs.rename(userDbPath, corruptPath);
     await fs.writeFile(userDbPath, "", "utf8");
     usersDb = new Datastore({ filename: userDbPath });
@@ -101,6 +109,11 @@ async function getGlobalChatDb() {
 export async function initUserStore() {
   await getDb();
   await getGlobalChatDb();
+  logInfo("persistence", "store-initialized", {
+    dataDir,
+    userDbPath,
+    globalChatDbPath,
+  });
 }
 
 export async function findUserById(userId) {
@@ -198,6 +211,11 @@ export async function saveUserPlayerData(userId, playerData) {
     {}
   );
   logUserStore(`saved playerData for ${userId} at ${updatedAt}`);
+  logInfo("persistence", "player-saved", {
+    userId,
+    updatedAt,
+    dataDir,
+  });
   return findUserById(userId);
 }
 

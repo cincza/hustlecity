@@ -45,6 +45,7 @@ Wazne zmienne backendu:
 - `PORT` - port procesu HTTP, uzywany na deployu przez Render / Railway
 - `JWT_SECRET` - sekret do podpisywania tokenow
 - `CORS_ORIGIN` - dozwolone originy frontendu, po przecinku
+- `DATA_DIR` - katalog na pliki `users.db` i `global-chat.db`; w produkcji ustaw go na sciezke z persistent diskiem
 
 Deploy backendu:
 
@@ -54,10 +55,14 @@ Deploy backendu:
 
 Uwaga:
 
-- domyslnie na `web` aplikacja laczy sie z `http://localhost:4000`
+- frontend domyslnie celuje w `https://hustle-city-api.onrender.com`; lokalny backend ustawiasz przez `EXPO_PUBLIC_API_BASE_URL`
 - zeby ustawic inny backend, ustaw `EXPO_PUBLIC_API_BASE_URL`
-- jesli backend nie dziala albo testujesz na telefonie bez konfiguracji adresu LAN, appka wraca do lokalnego fallbacku
-- userzy sa zapisywani lokalnie w `backend/data/users.db`, wiec po restarcie serwera konta i stan gracza nie znikaja
+- backend zwraca teraz JSON rowniez dla nieistniejacych tras, wiec frontend nie powinien juz dostawac surowego `Cannot POST ...`
+- userzy sa zapisywani do `DATA_DIR/users.db`; lokalnie przetrwa to restart procesu, ale na darmowym Render Web Service pliki sa efemeryczne i znikaja po restarcie / spin-downie
+
+Smoke test:
+
+- `node tools/smoke-test.mjs` odpala lokalny backend na osobnym porcie, robi rejestracje, login, heist, chat, silownie, avatar, bezpieczny sync klienta, restart backendu i sprawdza, czy dane dalej istnieja
 
 ## Najblizszy cel
 

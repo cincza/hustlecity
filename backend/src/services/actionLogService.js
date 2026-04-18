@@ -1,3 +1,5 @@
+import { logError, logInfo } from "../utils/logger.js";
+
 const VERBOSE_MUTATION_LOGS = process.env.VERBOSE_MUTATION_LOGS === "1";
 
 function formatSnapshot(snapshot = {}) {
@@ -5,6 +7,12 @@ function formatSnapshot(snapshot = {}) {
 }
 
 export function logMutationSuccess({ actionName, userId, before, after }) {
+  logInfo("mutation", "success", {
+    actionName,
+    userId,
+    before,
+    after,
+  });
   if (!VERBOSE_MUTATION_LOGS) return;
   console.log(
     `[mutation] ${actionName} user=${userId} before(${formatSnapshot(before)}) after(${formatSnapshot(after)}) result=success`
@@ -12,6 +20,12 @@ export function logMutationSuccess({ actionName, userId, before, after }) {
 }
 
 export function logMutationFailure({ actionName, userId, before, reason }) {
+  logError("mutation", "failure", {
+    actionName,
+    userId,
+    before,
+    reason: reason || "unknown",
+  });
   console.error(
     `[mutation] ${actionName} user=${userId} before(${formatSnapshot(before)}) result=fail reason=${reason || "unknown"}`
   );

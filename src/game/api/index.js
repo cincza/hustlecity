@@ -121,6 +121,52 @@ export async function standBlackjackOnline(token) {
   });
 }
 
+export async function updateAvatarOnline(token, avatarId) {
+  return request("/player/profile/avatar", {
+    method: "POST",
+    token,
+    body: { avatarId },
+  });
+}
+
+export async function buyGymPassOnline(token, passId) {
+  return request("/player/gym/pass", {
+    method: "POST",
+    token,
+    body: { passId },
+  });
+}
+
+export async function trainAtGymOnline(token, exerciseId) {
+  return request("/player/gym/train", {
+    method: "POST",
+    token,
+    body: { exerciseId },
+  });
+}
+
+export async function buyMealOnline(token, itemId) {
+  return request("/player/restaurant/eat", {
+    method: "POST",
+    token,
+    body: { itemId },
+  });
+}
+
+export async function healOnline(token) {
+  return request("/player/hospital/heal", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function bribeOutOfJailOnline(token) {
+  return request("/player/jail/bribe", {
+    method: "POST",
+    token,
+  });
+}
+
 export async function syncClientStateOnline(token, game) {
   return request("/sync/client-state", {
     method: "POST",

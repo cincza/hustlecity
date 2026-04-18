@@ -19,7 +19,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import {
+  bribeOutOfJailOnline,
   buyProductOnline,
+  buyGymPassOnline,
+  buyMealOnline,
   depositOnline,
   executeHeistOnline,
   fetchCasinoMeta,
@@ -29,6 +32,7 @@ import {
   fetchMe,
   fetchRankingsOnline,
   fetchSocialPlayers,
+  healOnline,
   hitBlackjackOnline,
   loginUser,
   playHighRiskOnline,
@@ -39,7 +43,8 @@ import {
   sendGlobalChatMessageOnline,
   startBlackjackOnline,
   standBlackjackOnline,
-  syncClientStateOnline,
+  trainAtGymOnline,
+  updateAvatarOnline,
   withdrawOnline,
 } from "./api";
 import {
@@ -69,6 +74,7 @@ import { getGameMode } from "./src/game/modes";
 import { getNextHeistTier } from "./src/game/config/heistTiers";
 import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradePreview, getBusinessUpgradeState } from "./src/game/selectors/businessSelectors";
 import { applyXpProgression } from "./shared/progression.js";
+import { GYM_EXERCISES, GYM_PASSES, RESTAURANT_ITEMS } from "./shared/playerActions.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
 const CLUB_ESCORT_SEARCH_COST = 450;
@@ -229,26 +235,6 @@ const FACTORIES = [
   { id: "cartelrefinery", name: "Rafineria kokainy", respect: 25, cost: 1800000, text: "Kokaina daje wielkie pieniadze, ale wymaga solidnego lancucha dostaw.", unlocks: ["cocaine"] },
   { id: "acidlab", name: "Acid Lab", respect: 25, cost: 2550000, text: "Produkcja LSD pod najbardziej odklejonych klientow miasta.", unlocks: ["lsd"] },
   { id: "designerlab", name: "Designer Lab", respect: 25, cost: 3600000, text: "Extasy i meskalina dla topowego rynku i najbogatszych ekip.", unlocks: ["ecstasy", "mescaline"] },
-];
-
-const RESTAURANT_ITEMS = [
-  { id: "burger", name: "Burger uliczny", energy: 3, price: 90 },
-  { id: "kebab", name: "Kebab XXL", energy: 5, price: 180 },
-  { id: "meal", name: "Obiad ochrony", energy: 8, price: 320 },
-  { id: "energybox", name: "Box energetyczny", energy: 12, price: 650 },
-];
-
-const GYM_PASSES = [
-  { id: "day", name: "Karnet 1 dzien", price: 350, durationMs: 24 * 60 * 60 * 1000 },
-  { id: "week", name: "Karnet 7 dni", price: 1800, durationMs: 7 * 24 * 60 * 60 * 1000 },
-  { id: "perm", name: "Karnet na stale", price: 8500, durationMs: null },
-];
-
-const GYM_EXERCISES = [
-  { id: "power", name: "Lawka i ciezary", costEnergy: 2, gains: { attack: 2 }, note: "+2 atak" },
-  { id: "guard", name: "Tarcze i obrona", costEnergy: 2, gains: { defense: 2 }, note: "+2 obrona" },
-  { id: "reflex", name: "Sprint i refleks", costEnergy: 2, gains: { dexterity: 2 }, note: "+2 zrecznosc" },
-  { id: "conditioning", name: "Obwod kondycyjny", costEnergy: 3, gains: { maxHp: 8, hp: 8 }, note: "+8 zdrowie max" },
 ];
 
 const MARKET = PRODUCTS.reduce((acc, item, index) => {
@@ -640,6 +626,12 @@ const INITIAL = {
     selectedPlayerId: null,
     selectedGangId: null,
     heists: [],
+    rankings: {
+      byRespect: [],
+      byCash: [],
+      byHeists: [],
+      byCasino: [],
+    },
     cityChat: [
       { id: "city-1", author: "System", text: "Chat miasta zyje. Tutaj zgadujesz sie z ludzmi na akcje i handel.", time: "14:18" },
     ],
@@ -1378,7 +1370,6 @@ function AppRuntime() {
   const didHydrateFeedbackRef = useRef(false);
   const lastExplicitNoticeAtRef = useRef(0);
   const didHydrateSessionRef = useRef(false);
-  const lastSyncedGameRef = useRef("");
   const [gangProfileView, setGangProfileView] = useState("actions");
   const [casinoState, setCasinoState] = useState({
     slotBet: "200",
@@ -1467,9 +1458,16 @@ function AppRuntime() {
         ...prev.player,
         name: safeProfile.name || prev.player.name,
         avatarId: safeProfile.avatarId || prev.player.avatarId,
-        avatarCustomUri: typeof safeProfile.avatarCustomUri === "string" ? safeProfile.avatarCustomUri : prev.player.avatarCustomUri,
+        avatarCustomUri:
+          safeProfile.avatarCustomUri === null || typeof safeProfile.avatarCustomUri === "string"
+            ? safeProfile.avatarCustomUri
+            : prev.player.avatarCustomUri,
         rank: getRankTitle(safeProfile.respect ?? prev.player.respect),
         cash: Number.isFinite(safeProfile.cash) ? safeProfile.cash : prev.player.cash,
+        bank: Number.isFinite(safeProfile.bank) ? safeProfile.bank : prev.player.bank,
+        premiumTokens: Number.isFinite(safeProfile.premiumTokens)
+          ? safeProfile.premiumTokens
+          : prev.player.premiumTokens,
         energy: Number.isFinite(safeProfile.energy) ? safeProfile.energy : prev.player.energy,
         maxEnergy: Number.isFinite(safeProfile.maxEnergy) ? safeProfile.maxEnergy : prev.player.maxEnergy,
         maxHp: Number.isFinite(safeProfile.maxHp) ? safeProfile.maxHp : prev.player.maxHp,
@@ -1485,7 +1483,8 @@ function AppRuntime() {
         dexterity: Number.isFinite(safeProfile.dexterity) ? safeProfile.dexterity : prev.player.dexterity,
         charisma: Number.isFinite(safeProfile.charisma) ? safeProfile.charisma : prev.player.charisma,
         heat: Number.isFinite(safeProfile.heat) ? safeProfile.heat : prev.player.heat,
-        bank: Number.isFinite(safeProfile.bank) ? safeProfile.bank : prev.player.bank,
+        gymPassTier: safeProfile.gymPassTier ?? prev.player.gymPassTier,
+        gymPassUntil: safeProfile.gymPassUntil ?? prev.player.gymPassUntil,
         jailUntil: safeProfile.jailUntil ?? prev.player.jailUntil,
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
@@ -1493,86 +1492,6 @@ function AppRuntime() {
       log: Array.isArray(serverUser?.log) && serverUser.log.length ? serverUser.log : prev.log,
       ...normalizeMarketPayload(marketPayload, prev.market, prev.marketState, prev.marketMeta),
       }));
-    };
-
-  const restoreClientGameSnapshot = (snapshot) => {
-      if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-        return;
-      }
-
-      const legacyFactoryState = snapshot.factoryState || {};
-      const normalizedFactoriesOwned = (() => {
-        if (snapshot.factoriesOwned && typeof snapshot.factoriesOwned === "object" && !Array.isArray(snapshot.factoriesOwned)) {
-          return snapshot.factoriesOwned;
-        }
-
-        if (Array.isArray(legacyFactoryState.ownedFactories)) {
-          return legacyFactoryState.ownedFactories.reduce((acc, entry) => {
-            if (!entry) return acc;
-            if (typeof entry === "string") {
-              acc[entry] = Math.max(1, acc[entry] || 0);
-              return acc;
-            }
-            if (typeof entry === "object" && typeof entry.id === "string") {
-              acc[entry.id] = Number.isFinite(entry.count) ? Math.max(0, entry.count) : Math.max(1, acc[entry.id] || 0);
-            }
-            return acc;
-          }, {});
-        }
-
-        return INITIAL.factoriesOwned;
-      })();
-
-      setGame({
-        ...INITIAL,
-        ...snapshot,
-        player: {
-          ...INITIAL.player,
-          ...(snapshot.player || {}),
-          xp: Number.isFinite(snapshot.player?.xp) ? snapshot.player.xp : INITIAL.player.xp,
-          avatarCustomUri: typeof snapshot.player?.avatarCustomUri === "string" ? snapshot.player.avatarCustomUri : INITIAL.player.avatarCustomUri,
-        },
-        stats: { ...INITIAL.stats, ...(snapshot.stats || {}) },
-        inventory: { ...INITIAL.inventory, ...(snapshot.inventory || {}) },
-        market: { ...INITIAL.market, ...(snapshot.market || {}) },
-        marketState: { ...INITIAL.marketState, ...(snapshot.marketState || {}) },
-        marketMeta: { ...INITIAL.marketMeta, ...(snapshot.marketMeta || {}) },
-        collections: { ...INITIAL.collections, ...(snapshot.collections || {}) },
-        gang: { ...INITIAL.gang, ...(snapshot.gang || {}) },
-        club: { ...INITIAL.club, ...(snapshot.club || {}) },
-        referrals: { ...INITIAL.referrals, ...(snapshot.referrals || {}) },
-        online: {
-          ...INITIAL.online,
-          ...(snapshot.online || {}),
-          roster: [],
-          heists: Array.isArray(snapshot.online?.heists) ? snapshot.online.heists : INITIAL.online.heists,
-          cityChat: Array.isArray(snapshot.online?.cityChat) ? snapshot.online.cityChat : INITIAL.online.cityChat,
-        },
-        supplierStock: { ...INITIAL.supplierStock, ...(snapshot.supplierStock || {}) },
-        supplierOrderDraft: { ...INITIAL.supplierOrderDraft, ...(snapshot.supplierOrderDraft || {}) },
-        dealerStock: { ...INITIAL.dealerStock, ...(snapshot.dealerStock || {}) },
-        factoriesOwned: normalizedFactoriesOwned,
-        gangInvites: Array.isArray(snapshot.gangInvites) ? snapshot.gangInvites : INITIAL.gangInvites,
-        clubMarket: Array.isArray(snapshot.clubMarket) ? snapshot.clubMarket : INITIAL.clubMarket,
-        contacts: Array.isArray(snapshot.contacts) ? snapshot.contacts : INITIAL.contacts,
-        onlinePlayers: Array.isArray(snapshot.onlinePlayers) ? snapshot.onlinePlayers : INITIAL.onlinePlayers,
-        messages: Array.isArray(snapshot.messages) ? snapshot.messages : INITIAL.messages,
-        friends: Array.isArray(snapshot.friends) ? snapshot.friends : INITIAL.friends,
-        rankings: Array.isArray(snapshot.rankings) ? snapshot.rankings : INITIAL.rankings,
-        activeBoosts: Array.isArray(snapshot.activeBoosts) ? snapshot.activeBoosts : INITIAL.activeBoosts,
-        log: Array.isArray(snapshot.log) && snapshot.log.length ? snapshot.log : INITIAL.log,
-        factoryState: {
-          ...INITIAL.factoryState,
-          ...legacyFactoryState,
-          ownedFactories: Array.isArray(legacyFactoryState?.ownedFactories)
-            ? legacyFactoryState.ownedFactories
-            : INITIAL.factoryState.ownedFactories,
-          shipments: Array.isArray(legacyFactoryState?.shipments)
-            ? legacyFactoryState.shipments
-            : INITIAL.factoryState.shipments,
-          stock: { ...INITIAL.factoryState.stock, ...(legacyFactoryState?.stock || {}) },
-        },
-      });
     };
 
   const refreshMarketState = async (token = sessionToken) => {
@@ -1616,11 +1535,15 @@ function AppRuntime() {
 
   const refreshSocialState = async (token = sessionToken) => {
     if (!token) return;
-    const [playersSnapshot, rankingsSnapshot, chatSnapshot] = await Promise.all([
+    const [playersResult, rankingsResult, chatResult] = await Promise.allSettled([
       fetchSocialPlayers(token),
       fetchRankingsOnline(token),
       fetchGlobalChatOnline(token),
     ]);
+
+    const playersSnapshot = playersResult.status === "fulfilled" ? playersResult.value : null;
+    const rankingsSnapshot = rankingsResult.status === "fulfilled" ? rankingsResult.value : null;
+    const chatSnapshot = chatResult.status === "fulfilled" ? chatResult.value : null;
 
     setGame((prev) => ({
       ...prev,
@@ -1659,17 +1582,8 @@ function AppRuntime() {
       if (!me?.user?.profile) {
         throw new Error("Backend nie zwrocil profilu gracza.");
       }
-      const clientSnapshot = me.user?.clientState?.game;
-      if (clientSnapshot && typeof clientSnapshot === "object") {
-        restoreClientGameSnapshot(clientSnapshot);
-      }
       mergeServerUser(me.user, { prices: me.market, products: me.marketState });
       didHydrateSessionRef.current = true;
-      try {
-        lastSyncedGameRef.current = JSON.stringify(clientSnapshot || null);
-      } catch (_error) {
-        lastSyncedGameRef.current = "";
-      }
       try {
         const casinoMeta = await fetchCasinoMeta(token);
         setCasinoState((prev) => ({
@@ -1792,39 +1706,6 @@ function AppRuntime() {
     }, 45000);
     return () => clearInterval(timer);
   }, [sessionToken, apiStatus]);
-
-  useEffect(() => {
-    if (
-      !sessionToken ||
-      apiStatus !== "online" ||
-      !authReady ||
-      !didHydrateSessionRef.current ||
-      gameMode === "online_alpha"
-    ) {
-      return undefined;
-    }
-
-    let serializedGame = "";
-    try {
-      serializedGame = JSON.stringify(game);
-    } catch (_error) {
-      return undefined;
-    }
-
-    if (!serializedGame || serializedGame === lastSyncedGameRef.current) {
-      return undefined;
-    }
-
-    const timer = setTimeout(() => {
-      syncClientStateOnline(sessionToken, game)
-        .then(() => {
-          lastSyncedGameRef.current = serializedGame;
-        })
-        .catch(() => {});
-    }, 1200);
-
-    return () => clearTimeout(timer);
-  }, [game, sessionToken, apiStatus, authReady]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -2098,8 +1979,19 @@ function AppRuntime() {
     }));
   };
 
-  const setAvatar = (avatarId) => {
+  const setAvatar = async (avatarId) => {
     const avatar = getAvatarById(avatarId, avatarOptions);
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await updateAvatarOnline(sessionToken, avatarId);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message || "Nie udalo sie zapisac avatara.");
+        return;
+      }
+    }
+
     setGame((prev) => ({
       ...prev,
       player: {
@@ -2111,6 +2003,11 @@ function AppRuntime() {
   };
 
   const pickCustomAvatar = async () => {
+    if (sessionToken && apiStatus === "online") {
+      pushLog("Wlasne foto profilowe odpalimy po backendowym uploadzie. W online zapisuje sie teraz tylko avatar z serwera.");
+      return;
+    }
+
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
@@ -2147,8 +2044,18 @@ function AppRuntime() {
     }
   };
 
-  const buyGymPass = (pass) => {
+  const buyGymPass = async (pass) => {
     if (!canDoStreetAction("Nie kupisz karnetu z celi.")) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyGymPassOnline(sessionToken, pass.id);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (game.player.cash < pass.price) return pushLog(`Brakuje ${formatMoney(pass.price)} na ${pass.name}.`);
 
     updateLocalPlayer(
@@ -2161,8 +2068,18 @@ function AppRuntime() {
     );
   };
 
-  const doGymExercise = (exercise) => {
+  const doGymExercise = async (exercise) => {
     if (!canDoStreetAction("Z celi nie dojdziesz na silownie.")) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await trainAtGymOnline(sessionToken, exercise.id);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (!hasGymPass(game.player)) return pushLog("Najpierw kup karnet na silownie.");
     if (game.player.energy < exercise.costEnergy) return pushLog("Za malo energii na trening.");
 
@@ -2181,8 +2098,18 @@ function AppRuntime() {
     });
   };
 
-  const buyMeal = (meal) => {
+  const buyMeal = async (meal) => {
     if (!canDoStreetAction("Wiezienie serwuje tylko standardowy kociolek.")) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyMealOnline(sessionToken, meal.id);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (game.player.cash < meal.price) return pushLog(`Brakuje kasy na ${meal.name}.`);
     updateLocalPlayer(
       {
@@ -2193,7 +2120,17 @@ function AppRuntime() {
     );
   };
 
-  const heal = () => {
+  const heal = async () => {
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await healOnline(sessionToken);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (game.player.cash < 220) return pushLog("Brakuje kasy na lekarza.");
     updateLocalPlayer(
       {
@@ -2206,6 +2143,7 @@ function AppRuntime() {
   };
 
   const fightClubRound = () => {
+    if (!requireOfflineDemoAuthority("Fightclub")) return;
     if (!canDoStreetAction("Fightclub nie dziala zza krat.")) return;
     if (game.player.energy < 3) return pushLog("Za malo energii na sparing.");
 
@@ -2250,7 +2188,17 @@ function AppRuntime() {
     setActiveSection("heists", "prison");
   };
 
-  const bribeOutOfJail = () => {
+  const bribeOutOfJail = async () => {
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await bribeOutOfJailOnline(sessionToken);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (!inJail(game.player)) return pushLog("Nie siedzisz teraz za kratami.");
     const price = 400 + Math.ceil(jailRemaining / 1000) * 8;
     if (game.player.cash < price) return pushLog(`Brakuje ${formatMoney(price)} na kaucje.`);
@@ -3134,6 +3082,7 @@ function AppRuntime() {
   };
 
   const collectGangTribute = () => {
+    if (!requireOfflineDemoAuthority("Haracz gangu")) return;
     if (!canDoStreetAction("Nie odbierzesz haraczu z celi.")) return;
     if (!game.gang.joined) return pushLog("Nie masz jeszcze gangu.");
     if (gangTributeRemaining > 0) return pushLog(`Ludzie jeszcze zbieraja koperte. Wroc za ${formatCooldown(gangTributeRemaining)}.`);
@@ -3148,6 +3097,7 @@ function AppRuntime() {
   };
 
   const sendGangMessage = () => {
+    if (!requireOfflineDemoAuthority("Chat gangu")) return;
     if (!game.gang.joined) return;
     if (!gangMessage.trim()) return;
     setGame((prev) => ({
@@ -3158,6 +3108,7 @@ function AppRuntime() {
   };
 
   const depositGangCash = () => {
+    if (!requireOfflineDemoAuthority("Skarbiec gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     const amount = Number(bankAmountDraft || 0);
     if (!amount || amount <= 0) return pushLog("Wpisz kwote do zasilenia skarbca.");
@@ -3176,6 +3127,7 @@ function AppRuntime() {
   };
 
   const sendPrisonMessage = () => {
+    if (!requireOfflineDemoAuthority("Chat wiezienny")) return;
     if (!inJail(game.player)) return;
     if (!prisonMessage.trim()) return;
     setGame((prev) => ({
@@ -3226,6 +3178,7 @@ function AppRuntime() {
   };
 
   const createGang = () => {
+    if (!requireOfflineDemoAuthority("Zakladanie gangu")) return;
     if (!canDoStreetAction("Gangu nie zakladasz z celi.")) return;
     if (game.gang.joined) return pushLog("Juz jestes w gangu.");
     if (game.player.cash < game.gang.createCost) return pushLog(`Zalozenie gangu kosztuje ${formatMoney(game.gang.createCost)}.`);
@@ -3260,6 +3213,7 @@ function AppRuntime() {
   };
 
   const joinGang = (inviteId) => {
+    if (!requireOfflineDemoAuthority("Dolaczanie do gangu")) return;
     if (!canDoStreetAction("Do gangu dolaczasz dopiero po wyjsciu z celi.")) return;
     if (game.gang.joined) return pushLog("Najpierw opusc obecny gang.");
     const invite = game.gang.invites.find((entry) => entry.id === inviteId);
@@ -3295,6 +3249,7 @@ function AppRuntime() {
   };
 
   const leaveGang = () => {
+    if (!requireOfflineDemoAuthority("Opuszczanie gangu")) return;
     if (!game.gang.joined) return pushLog("Nie jestes w zadnym gangu.");
     setGame((prev) => ({
       ...prev,
@@ -3318,6 +3273,7 @@ function AppRuntime() {
   };
 
   const changeGangInviteThreshold = (delta) => {
+    if (!requireOfflineDemoAuthority("Progi zaproszen gangu")) return;
     if (!game.gang.joined) return;
     if (game.gang.role !== "Boss") return pushLog("Tylko boss ustawia prog zaproszen.");
     setGame((prev) => ({
@@ -3330,6 +3286,7 @@ function AppRuntime() {
   };
 
   const inviteCandidate = (candidateId) => {
+    if (!requireOfflineDemoAuthority("Zaproszenia do gangu")) return;
     if (!game.gang.joined) return;
     if (game.gang.role !== "Boss") return pushLog("Tylko boss moze wysylac zaproszenia.");
     const candidate = (game.online?.roster || []).find((entry) => entry.id === candidateId);
@@ -3406,6 +3363,7 @@ function AppRuntime() {
   };
 
   const claimTask = (task) => {
+    if (!requireOfflineDemoAuthority("Misje i nagrody")) return;
     if (!task.completed || task.claimed) return;
     setGame((prev) => ({
       ...prev,
@@ -3420,6 +3378,7 @@ function AppRuntime() {
   };
 
   const claimReferralMilestone = (milestone) => {
+    if (!requireOfflineDemoAuthority("Program polecen")) return;
     if (game.referrals.verified < milestone.verified) return pushLog(`Prog odblokuje sie przy ${milestone.verified} aktywnych poleconych.`);
     if (game.referrals.claimedMilestones.includes(milestone.id)) return pushLog("Ta nagroda z polecen jest juz odebrana.");
 
@@ -3626,6 +3585,7 @@ function AppRuntime() {
   };
 
   const addWorldPlayerFriend = (player) => {
+    if (!requireOfflineDemoAuthority("Znajomi")) return;
     if (game.online.friends.some((entry) => entry.id === player.id)) return pushLog(`${player.name} juz siedzi w znajomych.`);
 
     setGame((prev) => ({
@@ -3643,6 +3603,7 @@ function AppRuntime() {
   };
 
   const sendQuickMessageToPlayer = (player) => {
+    if (!requireOfflineDemoAuthority("Prywatne wiadomosci")) return;
     setGame((prev) => ({
       ...prev,
       online: {
@@ -3658,6 +3619,7 @@ function AppRuntime() {
   };
 
   const placeBountyOnPlayer = (player) => {
+    if (!requireOfflineDemoAuthority("Wystawianie bounty")) return;
     if (!canDoStreetAction("Nie ustawisz bounty z celi.")) return;
     const price = 2500;
     if (game.player.cash < price) return pushLog(`Brakuje ${formatMoney(price)} na wystawienie bounty.`);
@@ -3678,6 +3640,7 @@ function AppRuntime() {
   };
 
   const attackWorldPlayer = (player) => {
+    if (!requireOfflineDemoAuthority("Ataki na graczy")) return;
     if (!canDoStreetAction("Nie odpalisz ataku zza krat.")) return;
     if (game.player.energy < 2) return pushLog("Za malo energii na atak gracza.");
 
@@ -4791,10 +4754,10 @@ function AppRuntime() {
   );
 
   const renderRankings = () => {
-    const byRespect = [...rankingPool].sort((a, b) => b.respect - a.respect).slice(0, 6);
-    const byCash = [...rankingPool].sort((a, b) => b.cash - a.cash).slice(0, 6);
-    const byHeists = [...rankingPool].sort((a, b) => b.heists - a.heists).slice(0, 6);
-    const byCasino = [...rankingPool].sort((a, b) => b.casino - a.casino).slice(0, 6);
+    const byRespect = (game.online?.rankings?.byRespect?.length ? game.online.rankings.byRespect : [...rankingPool].sort((a, b) => b.respect - a.respect)).slice(0, 6);
+    const byCash = (game.online?.rankings?.byCash?.length ? game.online.rankings.byCash : [...rankingPool].sort((a, b) => b.cash - a.cash)).slice(0, 6);
+    const byHeists = (game.online?.rankings?.byHeists?.length ? game.online.rankings.byHeists : [...rankingPool].sort((a, b) => b.heists - a.heists)).slice(0, 6);
+    const byCasino = (game.online?.rankings?.byCasino?.length ? game.online.rankings.byCasino : [...rankingPool].sort((a, b) => b.casino - a.casino)).slice(0, 6);
 
     const RankingCard = ({ title, entries }) => (
       <View style={styles.sectionCard}>

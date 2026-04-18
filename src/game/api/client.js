@@ -31,18 +31,27 @@ export async function request(path, options = {}) {
   }
 
   const raw = await response.text();
+  const contentType = response.headers.get("content-type") || "";
   let data = {};
 
   if (raw) {
     try {
       data = JSON.parse(raw);
     } catch (_error) {
-      data = { error: raw };
+      const looksLikeHtml =
+        contentType.includes("text/html") ||
+        /^\s*</.test(raw) ||
+        /Cannot (GET|POST|PUT|DELETE)/i.test(raw);
+      data = {
+        error: looksLikeHtml
+          ? `Endpoint ${path} zwrocil HTML zamiast JSON. Sprawdz API_BASE_URL (${API_BASE_URL}).`
+          : raw,
+      };
     }
   }
 
   if (!response.ok) {
-    throw new Error(data.error || "Request failed");
+    throw new Error(data.error || `Request failed (${response.status})`);
   }
 
   return data;
