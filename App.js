@@ -907,6 +907,22 @@ function getCollectionTimeToCap(currentAmount, incomePerMinute) {
   return ((cap - currentAmount) / incomePerMinute) * 60 * 1000;
 }
 
+function getProjectedBusinessCash(collections, incomePerMinute, capAmount, isOnlineAuthority, now = Date.now()) {
+  const baseCash = Math.max(0, Number(collections?.businessCash || 0));
+  if (!isOnlineAuthority || incomePerMinute <= 0) {
+    return baseCash;
+  }
+
+  const accruedAt = Number(collections?.businessAccruedAt || 0);
+  if (!Number.isFinite(accruedAt) || accruedAt <= 0) {
+    return Math.min(baseCash, capAmount);
+  }
+
+  const elapsedMs = Math.max(0, now - accruedAt);
+  const projectedCash = baseCash + incomePerMinute * (elapsedMs / 60000);
+  return Math.min(projectedCash, capAmount);
+}
+
 function isInsideOwnClub(game) {
   return Boolean(game.club.owned && game.club.sourceId && game.club.visitId === game.club.sourceId);
 }
@@ -1614,6 +1630,7 @@ function AppRuntime() {
     if (!safeProfile) {
       throw new Error("Backend zwrocil niepelny profil gracza.");
     }
+    const hasProfileField = (field) => Object.prototype.hasOwnProperty.call(safeProfile, field);
     const nextFriends = Array.isArray(serverUser?.online?.friends)
       ? serverUser.online.friends.map(normalizeOnlineFriendEntry)
       : null;
@@ -1652,9 +1669,9 @@ function AppRuntime() {
         dexterity: Number.isFinite(safeProfile.dexterity) ? safeProfile.dexterity : prev.player.dexterity,
         charisma: Number.isFinite(safeProfile.charisma) ? safeProfile.charisma : prev.player.charisma,
         heat: Number.isFinite(safeProfile.heat) ? safeProfile.heat : prev.player.heat,
-        gymPassTier: safeProfile.gymPassTier ?? prev.player.gymPassTier,
-        gymPassUntil: safeProfile.gymPassUntil ?? prev.player.gymPassUntil,
-        jailUntil: safeProfile.jailUntil ?? prev.player.jailUntil,
+        gymPassTier: hasProfileField("gymPassTier") ? safeProfile.gymPassTier : prev.player.gymPassTier,
+        gymPassUntil: hasProfileField("gymPassUntil") ? safeProfile.gymPassUntil : prev.player.gymPassUntil,
+        jailUntil: hasProfileField("jailUntil") ? safeProfile.jailUntil : prev.player.jailUntil,
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
       inventory: serverUser.inventory || prev.inventory,
@@ -1815,22 +1832,35 @@ function AppRuntime() {
     }));
   };
 
-  const refreshPrisonChatState = async (token = sessionToken) => {
-    if (!token) return;
-    const prisonSnapshot = await fetchPrisonChatOnline(token);
-    setGame((prev) => ({
-      ...prev,
-      prisonChat: Array.isArray(prisonSnapshot?.messages)
-        ? normalizeChatFeedEntries(prisonSnapshot.messages)
-        : prev.prisonChat,
-    }));
+  const refreshProfileState = async (token = sessionToken) => {
+    if (!token) return null;
+    const me = await fetchMe(token);
+    if (!me?.user?.profile) return null;
+    mergeServerUser(me.user, { prices: me.market, products: me.marketState });
+    return me;
   };
 
-  const refreshProfileState = async (token = sessionToken) => {
-    if (!token) return;
-    const me = await fetchMe(token);
-    if (!me?.user?.profile) return;
-    mergeServerUser(me.user, { prices: me.market, products: me.marketState });
+  const refreshPrisonChatState = async (token = sessionToken) => {
+    if (!token) return null;
+    try {
+      const prisonSnapshot = await fetchPrisonChatOnline(token);
+      setGame((prev) => ({
+        ...prev,
+        prisonChat: Array.isArray(prisonSnapshot?.messages)
+          ? normalizeChatFeedEntries(prisonSnapshot.messages)
+          : prev.prisonChat,
+      }));
+      return prisonSnapshot;
+    } catch (error) {
+      if (String(error?.message || "").includes("Chat celi widza tylko osadzeni.")) {
+        setGame((prev) => (prev.prisonChat.length ? { ...prev, prisonChat: [] } : prev));
+        try {
+          await refreshProfileState(token);
+        } catch (_refreshError) {}
+        return null;
+      }
+      throw error;
+    }
   };
 
     const hydrateAuthenticatedSession = async (token) => {
@@ -1983,9 +2013,34 @@ function AppRuntime() {
   useEffect(() => {
     if (!sessionToken || apiStatus !== "online") return;
     if (tab !== "heists" || activeSectionId !== "prison") return;
-    if (!inJail(game.player)) return;
-    refreshPrisonChatState(sessionToken).catch(() => {});
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await refreshProfileState(sessionToken);
+        if (cancelled) return;
+        if (inJail(me?.user?.profile || {})) {
+          await refreshPrisonChatState(sessionToken);
+          return;
+        }
+        setGame((prev) => (prev.prisonChat.length ? { ...prev, prisonChat: [] } : prev));
+      } catch (_error) {}
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [sessionToken, apiStatus, tab, activeSectionId, game.player.jailUntil]);
+
+  useEffect(() => {
+    if (!sessionToken || apiStatus !== "online") return undefined;
+    if (tab !== "empire" || activeSectionId !== "businesses") return undefined;
+
+    refreshProfileState(sessionToken).catch(() => {});
+    const timer = setInterval(() => {
+      refreshProfileState(sessionToken).catch(() => {});
+    }, 12000);
+
+    return () => clearInterval(timer);
+  }, [sessionToken, apiStatus, tab, activeSectionId]);
 
   useEffect(() => {
     if (inJail(game.player)) return;
@@ -5212,11 +5267,28 @@ function AppRuntime() {
     }, 700);
   };
 
+  const isOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
   const totalBusinessIncome = getBusinessIncomePerMinute(game, BUSINESSES);
   const totalEscortIncome = getEscortIncomePerMinute(game);
   const businessCollectionCap = getPassiveCapAmount(totalBusinessIncome);
   const escortCollectionCap = getPassiveCapAmount(totalEscortIncome);
-  const businessCapEta = getCollectionTimeToCap(game.collections?.businessCash || 0, totalBusinessIncome);
+  const projectedBusinessCash = getProjectedBusinessCash(
+    game.collections,
+    totalBusinessIncome,
+    businessCollectionCap,
+    isOnlineAuthority
+  );
+  const projectedScreenGame =
+    isOnlineAuthority && projectedBusinessCash !== Number(game.collections?.businessCash || 0)
+      ? {
+          ...game,
+          collections: {
+            ...game.collections,
+            businessCash: projectedBusinessCash,
+          },
+        }
+      : game;
+  const businessCapEta = getCollectionTimeToCap(projectedBusinessCash, totalBusinessIncome);
   const escortCapEta = getCollectionTimeToCap(game.collections?.escortCash || 0, totalEscortIncome);
   const escortFindChance = currentClubVenue
     ? clamp(currentClubProfile.huntProgressValue / CLUB_SYSTEM_RULES.leadRequired, 0.12, 0.42)
@@ -5983,7 +6055,7 @@ function AppRuntime() {
   const cityScreenProps = {
     section: activeSectionId,
     apiStatus,
-    game,
+    game: projectedScreenGame,
     styles,
     SceneArtwork,
     SectionCard,
@@ -6085,7 +6157,7 @@ function AppRuntime() {
     };
 
   const empireScreenBaseProps = {
-    game,
+    game: projectedScreenGame,
     styles,
     SceneArtwork,
     SectionCard,
