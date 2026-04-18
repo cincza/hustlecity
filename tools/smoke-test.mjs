@@ -6,6 +6,8 @@ import path from "node:path";
 const HOST = "127.0.0.1";
 const PORT = 4100;
 const BASE_URL = `http://${HOST}:${PORT}`;
+const AUTH_REGISTER_DELAY_MS = 2600;
+const AUTH_LOGIN_DELAY_MS = 1300;
 
 async function delay(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -101,6 +103,8 @@ async function main() {
 
     const unique = Date.now();
     const login = `smoke${unique}`;
+    const noEmailLoginOne = `sna${unique}`;
+    const noEmailLoginTwo = `snb${unique}`;
     const password = "smoke123";
     const chatText = `smoke-message-${unique}`;
 
@@ -119,9 +123,39 @@ async function main() {
       throw new Error("Rejestracja nie zwrocila tokena.");
     }
 
+    await delay(AUTH_REGISTER_DELAY_MS);
+    const noEmailRegisterOne = await request("/auth/register", {
+      method: "POST",
+      body: {
+        login: noEmailLoginOne,
+        username: noEmailLoginOne,
+        password,
+      },
+    });
+
+    await delay(AUTH_REGISTER_DELAY_MS);
+    const noEmailRegisterTwo = await request("/auth/register", {
+      method: "POST",
+      body: {
+        login: noEmailLoginTwo,
+        username: noEmailLoginTwo,
+        password,
+      },
+    });
+
+    if (!noEmailRegisterOne.token || !noEmailRegisterTwo.token) {
+      throw new Error("Rejestracja bez maila nie zwrocila tokena.");
+    }
+
     await request("/auth/login", {
       method: "POST",
       body: { login, password },
+    });
+
+    await delay(AUTH_LOGIN_DELAY_MS);
+    await request("/auth/login", {
+      method: "POST",
+      body: { login: noEmailLoginTwo, password },
     });
 
     const heists = await request("/heists", { token });
@@ -256,6 +290,7 @@ async function main() {
 
     const summary = {
       register: "ok",
+      registerWithoutEmail: "ok",
       login: "ok",
       heist: heistResult.result,
       chat: "ok",

@@ -25,7 +25,9 @@ function logUserStore(message, level = "log") {
 }
 
 function normalizeEmail(email) {
-  return typeof email === "string" ? email.trim().toLowerCase() : null;
+  if (typeof email !== "string") return undefined;
+  const normalized = email.trim().toLowerCase();
+  return normalized || undefined;
 }
 
 function normalizeUsername(username) {
@@ -88,6 +90,7 @@ async function getDb() {
     usersDb = new Datastore({ filename: userDbPath });
     await usersDb.loadDatabaseAsync();
   }
+  await migrateOptionalEmailFields(usersDb);
   await usersDb.ensureIndexAsync({ fieldName: "usernameLower", unique: true });
   await usersDb.ensureIndexAsync({ fieldName: "emailLower", sparse: true, unique: true });
   if (!userStoreInitLogged) {
@@ -95,6 +98,39 @@ async function getDb() {
     userStoreInitLogged = true;
   }
   return usersDb;
+}
+
+async function migrateOptionalEmailFields(db) {
+  const docs = await db.findAsync({
+    $or: [{ email: null }, { email: "" }, { emailLower: null }, { emailLower: "" }],
+  });
+
+  if (!docs.length) return;
+
+  for (const doc of docs) {
+    const trimmedEmail = typeof doc.email === "string" ? doc.email.trim() : "";
+    const normalizedEmail = normalizeEmail(trimmedEmail);
+    const update = {};
+
+    if (normalizedEmail) {
+      update.$set = {
+        email: trimmedEmail,
+        emailLower: normalizedEmail,
+      };
+    } else {
+      update.$unset = {
+        email: true,
+        emailLower: true,
+      };
+    }
+
+    await db.updateAsync({ _id: doc._id }, update, {});
+  }
+
+  logInfo("persistence", "optional-email-migration", {
+    cleanedUsers: docs.length,
+    dataDir,
+  });
 }
 
 async function getGlobalChatDb() {
@@ -174,17 +210,21 @@ export async function createUserRecord({
   if (!safePlayerData) {
     throw new Error("playerData must be a valid object");
   }
+  const trimmedEmail = typeof email === "string" ? email.trim() : "";
+  const normalizedEmail = normalizeEmail(trimmedEmail);
   const doc = {
     _id: crypto.randomUUID(),
     username,
     usernameLower: normalizeUsername(username),
-    email: email || null,
-    emailLower: normalizeEmail(email),
     passwordHash,
     playerData: safePlayerData,
     createdAt: now,
     updatedAt: now,
   };
+  if (normalizedEmail) {
+    doc.email = trimmedEmail;
+    doc.emailLower = normalizedEmail;
+  }
   const inserted = await db.insertAsync(doc);
   logUserStore(`created user ${inserted.username} (${inserted._id})`);
   return inserted;
