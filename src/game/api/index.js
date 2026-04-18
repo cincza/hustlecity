@@ -242,6 +242,14 @@ export async function attackPlayerOnline(token, targetUserId) {
   });
 }
 
+export async function grantAdminCashToPlayerOnline(token, targetUserId, amount) {
+  return request(`/admin/players/${encodeURIComponent(targetUserId)}/grant-cash`, {
+    method: "POST",
+    token,
+    body: { amount },
+  });
+}
+
 export async function addFriendOnline(token, targetUserId) {
   return request(`/social/friends/${encodeURIComponent(targetUserId)}`, {
     method: "POST",

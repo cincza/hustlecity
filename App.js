@@ -50,6 +50,7 @@ import {
   fetchPrisonChatOnline,
   fetchRankingsOnline,
   fetchSocialPlayers,
+  grantAdminCashToPlayerOnline,
   healOnline,
   hitBlackjackOnline,
   fortifyClubOnline,
@@ -136,6 +137,7 @@ import {
   GANG_PROJECTS,
   normalizeGangState,
 } from "./shared/gangProjects.js";
+import { normalizeAdminGrantPresets } from "./shared/admin.js";
 import { GYM_EXERCISES, GYM_PASSES, RESTAURANT_ITEMS } from "./shared/playerActions.js";
 import {
   createOperationsState,
@@ -570,6 +572,7 @@ const createInitialCasinoState = () => ({
 const INITIAL = {
   player: {
     name: "Vin Blaze",
+    username: "vinblaze",
     avatarId: "ghost",
     avatarCustomUri: null,
     rank: "Swiezak",
@@ -590,6 +593,8 @@ const INITIAL = {
     gymPassTier: null,
     gymPassUntil: null,
     jailUntil: null,
+    isAdmin: false,
+    adminGrantPresets: [],
   },
   stats: { heistsDone: 0, heistsWon: 0, totalEarned: 0, gangHeistsWon: 0, casinoWins: 0, drugBatches: 0 },
   gang: createGangState(),
@@ -787,6 +792,11 @@ const normalizeOnlinePlayerEntry = (entry, index = 0) => ({
   bounty: Number.isFinite(entry?.bounty) ? entry.bounty : 0,
   heists: Number.isFinite(entry?.heists) ? entry.heists : 0,
   casino: Number.isFinite(entry?.casino) ? entry.casino : 0,
+});
+
+const normalizeAdminState = (adminState) => ({
+  isAdmin: Boolean(adminState?.isAdmin),
+  grantPresets: normalizeAdminGrantPresets(adminState?.grantPresets),
 });
 
 const normalizeOnlineFriendEntry = (entry) => ({
@@ -1700,6 +1710,10 @@ function AppRuntime() {
   );
   const gangGoalProgress = useMemo(() => getGangWeeklyProgress(game.gang), [game.gang]);
   const gangProjectEffects = useMemo(() => getGangProjectEffects(game.gang), [game.gang]);
+  const adminState = useMemo(
+    () => normalizeAdminState({ isAdmin: game.player.isAdmin, grantPresets: game.player.adminGrantPresets }),
+    [game.player.isAdmin, game.player.adminGrantPresets]
+  );
 
   const mergeServerUser = (serverUser, marketPayload) => {
     const safeProfile = serverUser?.profile;
@@ -1719,6 +1733,10 @@ function AppRuntime() {
       player: {
         ...prev.player,
         name: safeProfile.name || prev.player.name,
+        username:
+          typeof serverUser?.username === "string" && serverUser.username.trim()
+            ? serverUser.username.trim()
+            : prev.player.username,
         avatarId: safeProfile.avatarId || prev.player.avatarId,
         avatarCustomUri:
           safeProfile.avatarCustomUri === null || typeof safeProfile.avatarCustomUri === "string"
@@ -1748,6 +1766,10 @@ function AppRuntime() {
         gymPassTier: hasProfileField("gymPassTier") ? safeProfile.gymPassTier : prev.player.gymPassTier,
         gymPassUntil: hasProfileField("gymPassUntil") ? safeProfile.gymPassUntil : prev.player.gymPassUntil,
         jailUntil: hasProfileField("jailUntil") ? safeProfile.jailUntil : prev.player.jailUntil,
+        isAdmin: Boolean(serverUser?.admin?.isAdmin),
+        adminGrantPresets: Array.isArray(serverUser?.admin?.grantPresets)
+          ? normalizeAdminGrantPresets(serverUser.admin.grantPresets)
+          : prev.player.adminGrantPresets,
       },
       stats: { ...prev.stats, ...(serverUser?.stats || {}) },
       inventory: serverUser.inventory || prev.inventory,
@@ -5061,6 +5083,28 @@ function AppRuntime() {
     }));
   };
 
+  const grantAdminCashToPlayer = async (player, amount) => {
+    if (!sessionToken || apiStatus !== "online") return pushLog("Admin tools dzialaja tylko online.");
+    if (!game.player.isAdmin) return pushLog("To narzedzie jest tylko dla admina.");
+    if (!player?.id) return pushLog("Tego gracza nie da sie teraz namierzyc.");
+
+    try {
+      const result = await grantAdminCashToPlayerOnline(sessionToken, player.id, amount);
+      mergeServerUser(result.user);
+      try {
+        await refreshSocialState(sessionToken);
+      } catch (_error) {}
+      showExplicitNotice({
+        tone: "success",
+        title: "ADMIN GRANT",
+        message: `Dosypano ${formatMoney(result?.result?.amount || amount)} dla ${result?.target?.name || player.name}.`,
+        deltas: null,
+      });
+    } catch (error) {
+      pushLog(error.message || "Grant admina nie wyszedl.");
+    }
+  };
+
   const attackWorldPlayer = (player) => {
     if (!player?.id) return pushLog("Nie ma celu do ataku.");
 
@@ -6160,6 +6204,17 @@ function AppRuntime() {
               <Pressable onPress={() => placeBountyOnPlayer(selectedWorldPlayer)} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Wystaw bounty</Text>
               </Pressable>
+              {adminState.isAdmin
+                ? adminState.grantPresets.map((preset) => (
+                    <Pressable
+                      key={preset.id}
+                      onPress={() => grantAdminCashToPlayer(selectedWorldPlayer, preset.amount)}
+                      style={styles.inlineButton}
+                    >
+                      <Text style={styles.inlineButtonText}>{preset.label}</Text>
+                    </Pressable>
+                  ))
+                : null}
               <Pressable onPress={closeWorldPlayerProfile} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Wroc do listy</Text>
               </Pressable>

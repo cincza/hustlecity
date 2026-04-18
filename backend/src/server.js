@@ -112,6 +112,11 @@ import {
   executeOperationForPlayer,
   startOperationForPlayer,
 } from "./services/operationService.js";
+import {
+  applyAdminProfileFloors,
+  buildAdminPublicState,
+  grantCashToPlayerByAdmin,
+} from "./services/adminActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import {
@@ -138,6 +143,11 @@ import { createBusinessCollections, createSupplyCounterMap } from "../../shared/
 import { createCityState, getDistrictSummaries } from "../../shared/districts.js";
 import { createGangState } from "../../shared/gangProjects.js";
 import { createOperationsState, getOperationById, OPERATION_CATALOG } from "../../shared/operations.js";
+import {
+  ADMIN_CASH_GRANT_MAX,
+  ADMIN_DEFAULT_USERNAME,
+  ADMIN_PROFILE_FLOORS,
+} from "../../shared/admin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -174,18 +184,26 @@ const RESET_GAME_ENABLED =
   process.env.ALLOW_TEST_RESET === "1" || process.env.NODE_ENV !== "production";
 const RESET_GAME_TOKEN = String(process.env.RESET_GAME_TOKEN || "").trim();
 const ADMIN_ACCOUNT = {
-  username: "czincza11",
+  username: ADMIN_DEFAULT_USERNAME,
   email: "czincza11@hustle-city.local",
   password: "1234",
-  cash: 5000000,
-  bank: 5000000,
+  cash: ADMIN_PROFILE_FLOORS.cash,
+  bank: ADMIN_PROFILE_FLOORS.bank,
 };
+const ADMIN_USERNAMES = new Set(
+  [
+    ADMIN_ACCOUNT.username,
+    ...String(process.env.ADMIN_USERNAMES || "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  ]
+    .map((entry) => String(entry || "").trim().toLowerCase())
+    .filter(Boolean)
+);
 const SPECIAL_PROFILE_FLOORS = {
-  czincza11: {
-    cash: 5000000,
-    bank: 5000000,
-    respect: 1,
-    level: 1,
+  [ADMIN_ACCOUNT.username]: {
+    ...ADMIN_PROFILE_FLOORS,
   },
 };
 const VERBOSE_SERVER_LOGS = process.env.VERBOSE_SERVER_LOGS === "1";
@@ -244,6 +262,23 @@ function asyncHandler(handler) {
   return function wrappedHandler(req, res, next) {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+function normalizeRuntimeUsername(username) {
+  return typeof username === "string" ? username.trim().toLowerCase() : "";
+}
+
+function isAdminUsername(username) {
+  return ADMIN_USERNAMES.has(normalizeRuntimeUsername(username));
+}
+
+function requireAdminRequest(req, res) {
+  if (isAdminUsername(req?.user?.username)) {
+    return true;
+  }
+
+  res.status(403).json({ error: "Admin only" });
+  return false;
 }
 
 app.use(
@@ -414,10 +449,9 @@ function createInitialPlayerData(username = "gracz") {
 
 function createAdminPlayerData() {
   const playerData = createInitialPlayerData(ADMIN_ACCOUNT.username);
+  applyAdminProfileFloors(playerData);
   playerData.profile.cash = ADMIN_ACCOUNT.cash;
   playerData.profile.bank = ADMIN_ACCOUNT.bank;
-  playerData.profile.respect = 1;
-  playerData.profile.level = 1;
   playerData.profile.rank = "Swiezak";
   playerData.flags.alphaTestGrantApplied = true;
   playerData.log = [
@@ -557,6 +591,10 @@ function ensureAlphaTestGrant(player, authUser = null) {
     if (changed) {
       pushLog(player, "Specjalny bankroll testowy wbity do profilu.");
     }
+  }
+
+  if (isAdminUsername(authUser?.username || player.username || player.profile?.name)) {
+    changed = applyAdminProfileFloors(player) || changed;
   }
 
   return changed;
@@ -921,6 +959,7 @@ function logHeistEvent(message, level = "log") {
 
 function publicPlayer(player, now = Date.now()) {
   syncPlayerState(player, now);
+  const isAdmin = isAdminUsername(player?.username || player?.profile?.name);
   return {
     id: player.id,
     username: player.username,
@@ -952,6 +991,7 @@ function publicPlayer(player, now = Date.now()) {
           blackjackSession: buildBlackjackPublicSession(player.casino.blackjackSession),
         }
       : null,
+    admin: buildAdminPublicState(isAdmin),
     log: player.log,
     clientState: player.clientState || null,
   };
@@ -1371,6 +1411,101 @@ app.get("/me", auth, asyncHandler(async (req, res) => {
       streetIncome: ECONOMY_RULES.streetIncome,
       },
     });
+}));
+
+app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) {
+    return;
+  }
+
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "admin-player-grant-cash",
+      400,
+      "Admin action rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const targetUserId = String(req.params?.targetUserId || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "targetUserId is required" });
+    return;
+  }
+
+  const parsedAmount = parsePositiveInteger(req.body?.amount, {
+    min: 1,
+    max: ADMIN_CASH_GRANT_MAX,
+    field: "amount",
+  });
+  if (parsedAmount.error) {
+    res.status(400).json({ error: parsedAmount.error });
+    return;
+  }
+
+  const targetPreview = await findUserById(targetUserId);
+  if (!targetPreview?.playerData) {
+    res.status(404).json({ error: "Target player not found" });
+    return;
+  }
+
+  const now = Date.now();
+  let actorRecordSnapshot = null;
+  let targetRecordSnapshot = null;
+  let result = null;
+
+  await withUserMutationLocks([req.user.id, targetUserId], `admin-grant-cash:${targetUserId}`, async () => {
+    const [actorRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!isAdminUsername(actorRecord.username)) {
+      const error = new Error("Admin only");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    result = grantCashToPlayerByAdmin({
+      actorPlayer: actorRecord.playerData,
+      targetPlayer: targetRecord.playerData,
+      amount: parsedAmount.value,
+      now,
+      actorName: actorRecord.username,
+    });
+
+    pushLog(actorRecord.playerData, result.adminLogMessage);
+    pushLog(targetRecord.playerData, result.targetLogMessage);
+
+    await Promise.all([
+      persistPlayerForUser(actorRecord._id, actorRecord.playerData),
+      persistPlayerForUser(targetRecord._id, targetRecord.playerData),
+    ]);
+
+    actorRecordSnapshot = actorRecord;
+    targetRecordSnapshot = targetRecord;
+  });
+
+  logInfo("admin", "grant-cash", {
+    adminUserId: req.user.id,
+    targetUserId,
+    amount: result?.amount || parsedAmount.value,
+  });
+
+  res.json({
+    user: publicPlayer(actorRecordSnapshot?.playerData || req.player, now),
+    target: buildDirectoryEntry(targetRecordSnapshot, now),
+    result,
+  });
 }));
 
 app.get("/social/players", auth, asyncHandler(async (req, res) => {

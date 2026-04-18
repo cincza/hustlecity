@@ -428,6 +428,32 @@ async function main() {
       throw new Error("Katalog social nie zwraca avatarId gracza.");
     }
 
+    const adminLogin = await request("/auth/login", {
+      method: "POST",
+      body: { login: "czincza11", password: "1234" },
+    });
+
+    const adminToken = adminLogin?.token;
+    if (!adminToken) {
+      throw new Error("Logowanie admina nie zwrocilo tokena.");
+    }
+
+    const grantAmount = 20000;
+    const grantResult = await request(`/admin/players/${socialEntry.id}/grant-cash`, {
+      method: "POST",
+      token: adminToken,
+      body: { amount: grantAmount },
+    });
+
+    if (Number(grantResult?.result?.amount || 0) !== grantAmount) {
+      throw new Error("Admin grant nie zwrocil prawidlowej kwoty.");
+    }
+
+    const postGrantMe = await request("/me", { token });
+    if (Number(postGrantMe?.user?.profile?.cash || 0) < Number(midMe?.user?.profile?.cash || 0) + grantAmount) {
+      throw new Error("Admin grant nie dosypal gotowki wskazanemu graczowi.");
+    }
+
     const rankingEntries = [
       ...(rankings.byRespect || []),
       ...(rankings.byCash || []),
@@ -850,6 +876,7 @@ async function main() {
       gang: "ok",
       districts: districtsAfterClub.districts.length,
       gangProject: investedGangProject.result.level,
+      adminGrant: "ok",
       clubOwnership: claimedClub.user.club.sourceId,
       clubNight: clubNight.result.payout,
       operation: executedOperation.result.success ? "ok-success" : "ok-failed",
