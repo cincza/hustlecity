@@ -268,9 +268,11 @@ async function main() {
       throw new Error("Dodawanie znajomego nie zwrocilo wyniku.");
     }
 
+    const directMessageText = "Wpadnij na akcje po zmroku.";
     const directMessageResult = await request(`/social/messages/${attackTarget.id}`, {
       method: "POST",
       token,
+      body: { message: directMessageText },
     });
 
     if (!directMessageResult?.result?.message) {
@@ -305,6 +307,9 @@ async function main() {
 
     if (!Array.isArray(messagesSnapshot.messages) || messagesSnapshot.messages.length === 0) {
       throw new Error("Lista prywatnych wiadomosci jest pusta po wysylce.");
+    }
+    if (!messagesSnapshot.messages.some((entry) => entry.preview === directMessageText)) {
+      throw new Error("Prywatna wiadomosc nie zapisala wpisanej tresci.");
     }
 
     const preSyncMe = await request("/me", { token });
@@ -353,7 +358,7 @@ async function main() {
     const persistedMe = await request("/me", { token: relogin.token });
     const persistedChat = await request("/chat/global", { token: relogin.token });
 
-    if (persistedMe.user.profile.attack !== midMe.user.profile.attack) {
+    if (persistedMe.user.profile.attack !== preSyncMe.user.profile.attack) {
       throw new Error("Atak po restarcie backendu nie zostal zachowany.");
     }
 

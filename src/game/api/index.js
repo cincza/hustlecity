@@ -198,6 +198,14 @@ export async function fetchFriendListOnline(token) {
   return request("/social/friends", { token });
 }
 
+export async function sendDirectMessageOnline(token, targetUserId, message) {
+  return request(`/social/messages/${encodeURIComponent(targetUserId)}`, {
+    method: "POST",
+    token,
+    body: { message },
+  });
+}
+
 export async function sendQuickMessageOnline(token, targetUserId) {
   return request(`/social/messages/${encodeURIComponent(targetUserId)}`, {
     method: "POST",

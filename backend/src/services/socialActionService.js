@@ -246,30 +246,53 @@ export function addFriendForPlayer(player, targetEntry, now = Date.now()) {
 }
 
 export function sendQuickMessageBetweenPlayers(senderPlayer, targetPlayer, senderName, targetName, now = Date.now()) {
+  return sendPlayerMessageBetweenPlayers(senderPlayer, targetPlayer, {
+    senderName,
+    targetName,
+    now,
+  });
+}
+
+export function sendPlayerMessageBetweenPlayers(
+  senderPlayer,
+  targetPlayer,
+  {
+    senderName,
+    targetName,
+    message,
+    now = Date.now(),
+  } = {}
+) {
   ensurePlayerSocialState(senderPlayer);
   ensurePlayerSocialState(targetPlayer);
 
   const safeSenderName = senderName || senderPlayer?.profile?.name || "Gracz";
   const safeTargetName = targetName || targetPlayer?.profile?.name || "Gracz";
-  const outboundPreview = `Hej, ${safeTargetName}. Widzimy sie na miescie.`;
-  const inboundPreview = `${safeSenderName}: Hej, ${safeTargetName}. Widzimy sie na miescie.`;
+  const normalizedMessage = typeof message === "string" ? message.trim() : "";
+  const quickMessage = `Hej, ${safeTargetName}. Widzimy sie na miescie.`;
+  const finalMessage = normalizedMessage || quickMessage;
+  const subject = normalizedMessage ? "Prywatna wiadomosc" : "Szybka wiadomosc";
+  const outboundPreview = finalMessage;
+  const inboundPreview = normalizedMessage ? finalMessage : `${safeSenderName}: ${finalMessage}`;
 
   appendPlayerMessage(senderPlayer, {
     from: safeTargetName,
-    subject: "Szybka wiadomosc",
+    subject,
     preview: outboundPreview,
     time: createTimeLabel(now),
   });
   appendPlayerMessage(targetPlayer, {
     from: safeSenderName,
-    subject: "Szybka wiadomosc",
+    subject,
     preview: inboundPreview,
     time: createTimeLabel(now),
   });
 
   return {
     preview: outboundPreview,
-    logMessage: `Odpaliles szybka wiadomosc do ${safeTargetName}.`,
+    logMessage: normalizedMessage
+      ? `Wyslales wiadomosc do ${safeTargetName}.`
+      : `Odpaliles szybka wiadomosc do ${safeTargetName}.`,
   };
 }
 

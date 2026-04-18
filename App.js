@@ -50,7 +50,7 @@ import {
   sellDrugToDealerOnline,
   sellProductOnline,
   sendGlobalChatMessageOnline,
-  sendQuickMessageOnline,
+  sendDirectMessageOnline,
   startBlackjackOnline,
   standBlackjackOnline,
   trainAtGymOnline,
@@ -1407,6 +1407,8 @@ function AppRuntime() {
   const [gangMessage, setGangMessage] = useState("");
   const [prisonMessage, setPrisonMessage] = useState("");
   const [cityMessage, setCityMessage] = useState("");
+  const [directMessageDraft, setDirectMessageDraft] = useState("");
+  const [directMessageRecipient, setDirectMessageRecipient] = useState(null);
   const [gangDraftName, setGangDraftName] = useState("Night Reign");
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
   const [notice, setNotice] = useState(null);
@@ -1417,6 +1419,7 @@ function AppRuntime() {
   const pageScrollRef = useRef(null);
   const didHydrateFeedbackRef = useRef(false);
   const lastExplicitNoticeAtRef = useRef(0);
+  const handledNoticeLogsRef = useRef(new Map());
   const didHydrateSessionRef = useRef(false);
   const [gangProfileView, setGangProfileView] = useState("actions");
   const [casinoState, setCasinoState] = useState(createInitialCasinoState);
@@ -1441,6 +1444,27 @@ function AppRuntime() {
   const activeSectionId = sectionByTab[tab] || activeTab.sections[0].id;
   const activeSection = activeTab.sections.find((entry) => entry.id === activeSectionId) || activeTab.sections[0];
   const visibleSections = activeTab.sections.filter((entry) => !entry.hidden);
+
+  const trimHandledNoticeLogs = (now = Date.now()) => {
+    handledNoticeLogsRef.current.forEach((handledAt, entry) => {
+      if (now - handledAt > 120000) handledNoticeLogsRef.current.delete(entry);
+    });
+  };
+
+  const markNoticeLogHandled = (entry) => {
+    if (!entry) return;
+    const now = Date.now();
+    trimHandledNoticeLogs(now);
+    handledNoticeLogsRef.current.set(entry, now);
+  };
+
+  const wasNoticeLogHandledRecently = (entry) => {
+    if (!entry) return false;
+    const now = Date.now();
+    trimHandledNoticeLogs(now);
+    return handledNoticeLogsRef.current.has(entry);
+  };
+
   const { respectInfo, effectivePlayer, activeAvatar, clubOwnerLabel, escortBaseFindChance } = usePlayerState({
     game,
     avatars: avatarOptions,
@@ -1971,6 +1995,11 @@ function AppRuntime() {
       return;
     }
 
+    if (wasNoticeLogHandledRecently(nextTopLog)) {
+      previousGameRef.current = game;
+      return;
+    }
+
     if (Date.now() - lastExplicitNoticeAtRef.current < 180) {
       previousGameRef.current = game;
       return;
@@ -1983,6 +2012,7 @@ function AppRuntime() {
       respect: (game.player.respect || 0) - (previousGame.player.respect || 0),
     };
 
+    markNoticeLogHandled(nextTopLog);
     setNotice({
       id: Date.now(),
       ...inferFeedbackNotice(nextTopLog, deltas),
@@ -2013,6 +2043,7 @@ function AppRuntime() {
     allowWhileQuickAction = false,
   }) => {
     lastExplicitNoticeAtRef.current = Date.now();
+    markNoticeLogHandled(message);
     setNotice({
       id: Date.now(),
       tone,
@@ -2028,6 +2059,31 @@ function AppRuntime() {
     setQuickActionModal(action);
   };
 
+  const closeQuickAction = () => {
+    const closingModal = quickActionModal;
+    setQuickActionModal(null);
+    setNotice(null);
+    if (closingModal === "compose-message") {
+      setDirectMessageDraft("");
+      setDirectMessageRecipient(null);
+    }
+  };
+
+  const openMessageComposer = (player) => {
+    if (!player?.name) {
+      pushLog("Nie ma do kogo napisac.");
+      return;
+    }
+    setDirectMessageRecipient({
+      id: player.id || null,
+      name: player.name,
+      gang: player.gang || "No gang",
+      online: player.online !== false,
+    });
+    setDirectMessageDraft("");
+    openQuickAction("compose-message");
+  };
+
   const handleLogout = async () => {
     try {
       await clearStoredAuthToken();
@@ -2037,6 +2093,7 @@ function AppRuntime() {
     didHydrateFeedbackRef.current = false;
     previousGameRef.current = INITIAL;
     lastExplicitNoticeAtRef.current = 0;
+    handledNoticeLogsRef.current.clear();
 
     setSessionToken(null);
     setApiStatus("offline");
@@ -2051,6 +2108,8 @@ function AppRuntime() {
     setGangMessage("");
     setPrisonMessage("");
     setCityMessage("");
+    setDirectMessageDraft("");
+    setDirectMessageRecipient(null);
     setGangDraftName("Night Reign");
     setBankAmountDraft("1000");
     setNotice(null);
@@ -3794,12 +3853,36 @@ function AppRuntime() {
     }));
   };
 
-  const sendQuickMessageToPlayer = async (player) => {
-    if (sessionToken && apiStatus === "online" && player?.id) {
+  const sendDirectMessageToPlayer = async () => {
+    const player = directMessageRecipient;
+    const message = directMessageDraft.trim();
+
+    if (!player?.name) {
+      pushLog("Nie ma celu dla tej wiadomosci.");
+      return;
+    }
+    if (!message) {
+      pushLog("Najpierw wpisz tresc wiadomosci.");
+      return;
+    }
+
+    if (sessionToken && apiStatus === "online") {
+      if (!player?.id) {
+        pushLog("Tego kontaktu nie da sie jeszcze zlapac prywatnie online.");
+        return;
+      }
       try {
-        const result = await sendQuickMessageOnline(sessionToken, player.id);
+        const result = await sendDirectMessageOnline(sessionToken, player.id, message);
         mergeServerUser(result.user);
         await refreshSocialState(sessionToken);
+        showExplicitNotice({
+          tone: "success",
+          title: "WIADOMOSC POSZLA",
+          message: `Wyslales wiadomosc do ${player.name}.`,
+          deltas: null,
+          allowWhileQuickAction: true,
+        });
+        closeQuickAction();
       } catch (error) {
         pushLog(error.message);
       }
@@ -3813,12 +3896,13 @@ function AppRuntime() {
       online: {
         ...prev.online,
         messages: [
-          { id: `msg-${Date.now()}`, from: player.name, subject: "Szybka wiadomosc", preview: `Hej, ${prev.player.name}. Widzimy sie na miescie.`, time: nowTimeLabel() },
+          { id: `msg-${Date.now()}`, from: player.name, subject: "Prywatna wiadomosc", preview: message, time: nowTimeLabel() },
           ...prev.online.messages,
         ].slice(0, 20),
       },
-      log: [`Odpaliles szybka wiadomosc do ${player.name}.`, ...prev.log].slice(0, 16),
+      log: [`Wyslales wiadomosc do ${player.name}.`, ...prev.log].slice(0, 16),
     }));
+    closeQuickAction();
     setActiveSection("profile", "messages");
   };
 
@@ -4561,7 +4645,7 @@ function AppRuntime() {
             <Text style={styles.listCardMeta}>{selectedGangProfile.description}</Text>
             <View style={styles.playerProfileActions}>
               {!selectedGangProfile.self ? (
-                <Pressable onPress={() => sendQuickMessageToPlayer({ name: selectedGangProfile.boss })} style={styles.inlineButton}>
+                <Pressable onPress={() => openMessageComposer({ name: selectedGangProfile.boss, gang: selectedGangProfile.name, online: true })} style={styles.inlineButton}>
                   <Text style={styles.inlineButtonText}>Napisz do bossa</Text>
                 </Pressable>
               ) : null}
@@ -4868,8 +4952,8 @@ function AppRuntime() {
               <Pressable onPress={() => openGangProfile(selectedWorldPlayer.gang)} style={[styles.inlineButton, selectedWorldPlayer.gang === "No gang" && styles.tileDisabled]}>
                 <Text style={styles.inlineButtonText}>Profil gangu</Text>
               </Pressable>
-              <Pressable onPress={() => sendQuickMessageToPlayer(selectedWorldPlayer)} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Wyslij wiadomosc</Text>
+              <Pressable onPress={() => openMessageComposer(selectedWorldPlayer)} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Napisz wiadomosc</Text>
               </Pressable>
               <Pressable
                 onPress={() => attackWorldPlayer(selectedWorldPlayer)}
@@ -4945,6 +5029,11 @@ function AppRuntime() {
             </View>
             <Tag text={friend.online ? "ONLINE" : "OFFLINE"} warning={!friend.online} />
           </View>
+          <View style={styles.listActionsRow}>
+            <Pressable onPress={() => openMessageComposer(friend)} style={styles.inlineButton}>
+              <Text style={styles.inlineButtonText}>Napisz</Text>
+            </Pressable>
+          </View>
         </View>
       ))}
     </SectionCard>
@@ -4964,6 +5053,40 @@ function AppRuntime() {
           <Text style={styles.listCardMeta}>{message.preview}</Text>
         </View>
       ))}
+    </SectionCard>
+  );
+
+  const renderDirectMessageComposer = () => (
+    <SectionCard
+      title={directMessageRecipient?.name ? `Wiadomosc do ${directMessageRecipient.name}` : "Nowa wiadomosc"}
+      subtitle="Napisz normalna prywatna wiadomosc."
+    >
+      <View style={styles.lockedPanel}>
+        <Text style={styles.lockedPanelText}>
+          {directMessageRecipient?.name
+            ? `Odbiorca: ${directMessageRecipient.name}${directMessageRecipient.gang ? ` | ${directMessageRecipient.gang}` : ""}`
+            : "Najpierw wybierz gracza albo znajomego."}
+        </Text>
+      </View>
+      <TextInput
+        value={directMessageDraft}
+        onChangeText={setDirectMessageDraft}
+        placeholder="Napisz wiadomosc..."
+        placeholderTextColor="#6c6c6c"
+        style={styles.messageComposerInput}
+        multiline
+        maxLength={280}
+        textAlignVertical="top"
+      />
+      <Text style={styles.messageComposerMeta}>{directMessageDraft.trim().length}/280</Text>
+      <View style={styles.listActionsRow}>
+        <Pressable onPress={sendDirectMessageToPlayer} style={styles.inlineButton}>
+          <Text style={styles.inlineButtonText}>Wyslij</Text>
+        </Pressable>
+        <Pressable onPress={closeQuickAction} style={styles.inlineButton}>
+          <Text style={styles.inlineButtonText}>Anuluj</Text>
+        </Pressable>
+      </View>
     </SectionCard>
   );
 
@@ -5356,6 +5479,8 @@ function AppRuntime() {
         return <CityScreen {...cityScreenProps} section="hospital" />;
       case "gym":
         return <CityScreen {...cityScreenProps} section="gym" />;
+      case "compose-message":
+        return renderDirectMessageComposer();
       default:
         return null;
     }
@@ -5367,6 +5492,7 @@ function AppRuntime() {
     restaurant: "Jedzenie",
     hospital: "Szpital",
     gym: "Trening",
+    "compose-message": directMessageRecipient?.name ? `Wiadomosc do ${directMessageRecipient.name}` : "Nowa wiadomosc",
   };
 
   const renderActiveSection = () => {
@@ -5654,10 +5780,7 @@ function AppRuntime() {
       <QuickActionModal
         visible={Boolean(quickActionModal)}
         title={quickActionModalTitles[quickActionModal] || "Szybka akcja"}
-        onClose={() => {
-          setQuickActionModal(null);
-          setNotice(null);
-        }}
+        onClose={closeQuickAction}
       >
         {renderQuickActionContent()}
       </QuickActionModal>
@@ -5867,6 +5990,7 @@ const styles = StyleSheet.create({
   listCardTitle: { color: "#f3eee7", fontSize: 15, fontWeight: "800", marginBottom: 4 },
   listCardMeta: { color: "#999082", fontSize: 12, lineHeight: 18 },
   listCardReward: { color: "#d6a04f", fontSize: 13, fontWeight: "800", maxWidth: "100%", flexShrink: 1, textAlign: "right" },
+  listActionsRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", marginTop: 12 },
   oddsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
   oddsBlock: { flex: 1, minWidth: 132, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "#27282d", backgroundColor: "#101114" },
   oddsLabel: { color: "#948a7d", fontSize: 11, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.8 },
@@ -5874,6 +5998,8 @@ const styles = StyleSheet.create({
   inlineButton: { alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 2, backgroundColor: "#201712", borderWidth: 1, borderColor: "#5b3529" },
   inlineButtonText: { color: "#f6efe6", fontWeight: "700", fontSize: 13 },
   inlineRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 },
+  messageComposerInput: { minHeight: 130, borderWidth: 1, borderColor: "#2f3034", backgroundColor: "#111214", color: "#f1f1f1", paddingHorizontal: 12, paddingVertical: 12, borderRadius: 14, marginTop: 12 },
+  messageComposerMeta: { color: "#988f84", fontSize: 11, textAlign: "right", marginTop: 8 },
   costLabel: { color: "#c2b8a9", fontWeight: "700", flexShrink: 1 },
   marketRow: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#1f2024" },
   marketInfo: { marginBottom: 8 },

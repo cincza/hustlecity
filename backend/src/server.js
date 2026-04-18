@@ -63,6 +63,7 @@ import {
   placeBountyOnPlayer,
   searchEscortInClubForPlayer,
   sellDrugToDealerForPlayer,
+  sendPlayerMessageBetweenPlayers,
   sendQuickMessageBetweenPlayers,
 } from "./services/socialActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
@@ -1406,12 +1407,21 @@ app.get("/social/messages", auth, asyncHandler(async (req, res) => {
 
 app.post("/social/messages/:id", auth, asyncHandler(async (req, res) => {
   const targetUserId = String(req.params?.id || "").trim();
+  const rawMessage = typeof req.body?.message === "string" ? req.body.message.trim() : "";
   if (!targetUserId) {
     res.status(400).json({ error: "Target player id is required" });
     return;
   }
   if (targetUserId === req.user.id) {
     res.status(400).json({ error: "Nie wysylasz prywatnej wiadomosci do siebie." });
+    return;
+  }
+  if (typeof req.body?.message === "string" && !rawMessage) {
+    res.status(400).json({ error: "Message is required" });
+    return;
+  }
+  if (rawMessage.length > 280) {
+    res.status(400).json({ error: "Message too long" });
     return;
   }
 
@@ -1437,9 +1447,16 @@ app.post("/social/messages/:id", auth, asyncHandler(async (req, res) => {
 
     const actorName = actor.profile?.name || actorRecord.username || "Gracz";
     const targetName = target.profile?.name || targetRecord.username || "Gracz";
-    const result = sendQuickMessageBetweenPlayers(actor, target, actorName, targetName, now);
+    const result = rawMessage
+      ? sendPlayerMessageBetweenPlayers(actor, target, {
+          senderName: actorName,
+          targetName,
+          message: rawMessage,
+          now,
+        })
+      : sendQuickMessageBetweenPlayers(actor, target, actorName, targetName, now);
     pushLog(actor, result.logMessage);
-    pushLog(target, `${actorName} zostawia Ci szybka wiadomosc.`);
+    pushLog(target, rawMessage ? `${actorName} wysyla Ci prywatna wiadomosc.` : `${actorName} zostawia Ci szybka wiadomosc.`);
 
     const [updatedActorRecord, updatedTargetRecord] = await Promise.all([
       persistPlayerForUser(actorRecord._id, actor),
@@ -1452,6 +1469,7 @@ app.post("/social/messages/:id", auth, asyncHandler(async (req, res) => {
     logInfo("social", "direct-message", {
       userId: actorRecord._id,
       targetUserId: targetRecord._id,
+      length: rawMessage.length || 0,
     });
 
     res.json({
