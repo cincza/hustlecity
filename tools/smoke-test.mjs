@@ -204,6 +204,12 @@ async function main() {
     await delay(AUTH_LOGIN_DELAY_MS);
     await request("/auth/login", {
       method: "POST",
+      body: { login: noEmailLoginOne, password },
+    });
+
+    await delay(AUTH_LOGIN_DELAY_MS);
+    await request("/auth/login", {
+      method: "POST",
       body: { login: noEmailLoginTwo, password },
     });
 
@@ -481,12 +487,13 @@ async function main() {
       throw new Error("Trening na silowni nie podniosl statystyki ataku.");
     }
 
-    const attackTarget = players.players.find((entry) => entry.name === noEmailLoginTwo);
-    if (!attackTarget?.id) {
-      throw new Error("Nie znaleziono celu do testu ataku gracza.");
+    const firstAttackTarget = players.players.find((entry) => entry.name === noEmailLoginTwo);
+    const secondAttackTarget = players.players.find((entry) => entry.name === noEmailLoginOne);
+    if (!firstAttackTarget?.id || !secondAttackTarget?.id) {
+      throw new Error("Nie znaleziono celow do testu ataku gracza.");
     }
 
-    const attackResult = await request(`/social/players/${attackTarget.id}/attack`, {
+    const attackResult = await request(`/social/players/${firstAttackTarget.id}/attack`, {
       method: "POST",
       token,
     });
@@ -494,18 +501,31 @@ async function main() {
     if (!attackResult?.result?.message) {
       throw new Error("Atak na gracza nie zwrocil wyniku akcji.");
     }
-    if (Number(attackResult?.user?.cooldowns?.playerAttackUntil || 0) <= Date.now()) {
-      throw new Error("Atak na gracza nie ustawil cooldownu po stronie backendu.");
+    if (Number(attackResult?.user?.cooldowns?.playerAttackTargets?.[firstAttackTarget.id] || 0) <= Date.now()) {
+      throw new Error("Atak na gracza nie ustawil cooldownu per target po stronie backendu.");
+    }
+
+    await delay(1900);
+    const secondTargetAttackResult = await request(`/social/players/${secondAttackTarget.id}/attack`, {
+      method: "POST",
+      token,
+    });
+
+    if (!secondTargetAttackResult?.result?.message) {
+      throw new Error("Atak na drugiego gracza nie zwrocil wyniku akcji.");
+    }
+    if (Number(secondTargetAttackResult?.user?.cooldowns?.playerAttackTargets?.[secondAttackTarget.id] || 0) <= Date.now()) {
+      throw new Error("Atak na drugiego gracza nie ustawil osobnego cooldownu.");
     }
 
     await delay(1900);
     await expectRequestFailure(
-      `/social/players/${attackTarget.id}/attack`,
+      `/social/players/${firstAttackTarget.id}/attack`,
       {
         method: "POST",
         token,
       },
-      /atak na gracza odpalisz za|cooldown/i
+      /na tego gracza odpalisz kolejny atak za|cooldown/i
     );
 
     const fightClubResult = await request("/fightclub/round", {
@@ -551,7 +571,7 @@ async function main() {
       body: { drugId: "smokes" },
     });
 
-    const friendResult = await request(`/social/friends/${attackTarget.id}`, {
+    const friendResult = await request(`/social/friends/${firstAttackTarget.id}`, {
       method: "POST",
       token,
     });
@@ -561,7 +581,7 @@ async function main() {
     }
 
     const directMessageText = "Wpadnij na akcje po zmroku.";
-    const directMessageResult = await request(`/social/messages/${attackTarget.id}`, {
+    const directMessageResult = await request(`/social/messages/${firstAttackTarget.id}`, {
       method: "POST",
       token,
       body: { message: directMessageText },
@@ -571,7 +591,7 @@ async function main() {
       throw new Error("Prywatna wiadomosc nie zwrocila wyniku.");
     }
 
-    const bountyResult = await request(`/social/players/${attackTarget.id}/bounty`, {
+    const bountyResult = await request(`/social/players/${firstAttackTarget.id}/bounty`, {
       method: "POST",
       token,
     });
@@ -699,7 +719,7 @@ async function main() {
     const friendsSnapshot = await request("/social/friends", { token });
     const messagesSnapshot = await request("/social/messages", { token });
 
-    if (!Array.isArray(friendsSnapshot.friends) || !friendsSnapshot.friends.some((entry) => entry.id === attackTarget.id)) {
+    if (!Array.isArray(friendsSnapshot.friends) || !friendsSnapshot.friends.some((entry) => entry.id === firstAttackTarget.id)) {
       throw new Error("Znajomy nie pojawia sie w liscie znajomych.");
     }
 
@@ -852,7 +872,7 @@ async function main() {
       throw new Error("Historia operacji nie przetrwala restartu backendu.");
     }
 
-    if (!persistedMe.user.online?.friends?.some((entry) => entry.id === attackTarget.id)) {
+    if (!persistedMe.user.online?.friends?.some((entry) => entry.id === firstAttackTarget.id)) {
       throw new Error("Znajomi nie przetrwali restartu backendu.");
     }
 

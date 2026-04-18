@@ -177,7 +177,7 @@ import {
 } from "./shared/socialGameplay.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
-const PLAYER_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.playerAttackCooldownSeconds || 0) * 1000;
+const PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.sameTargetRepeatCooldownSeconds || 0) * 1000;
 const AVATAR_ART = {
   ghost: require("./assets/avatars/avatar-ghost-face.png"),
   razor: require("./assets/avatars/avatar-razor-face.png"),
@@ -712,6 +712,7 @@ const INITIAL = {
   },
   cooldowns: {
     playerAttackUntil: 0,
+    playerAttackTargets: {},
   },
   collections: {
     businessCash: 0,
@@ -806,6 +807,17 @@ const normalizeAdminState = (adminState) => ({
   isAdmin: Boolean(adminState?.isAdmin),
   grantPresets: normalizeAdminGrantPresets(adminState?.grantPresets),
 });
+const normalizePlayerAttackTargetCooldowns = (cooldowns, now = Date.now()) => {
+  if (!cooldowns || typeof cooldowns !== "object" || Array.isArray(cooldowns)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(cooldowns)
+      .map(([targetUserId, until]) => [String(targetUserId || "").trim(), Math.max(0, Number(until || 0))])
+      .filter(([targetUserId, until]) => targetUserId && until > now)
+  );
+};
 
 const normalizeOnlineFriendEntry = (entry) => ({
   id: entry?.id || `friend-${Math.random().toString(36).slice(2, 8)}`,
@@ -1723,9 +1735,13 @@ function AppRuntime() {
   const inGang = Boolean(game.gang.joined);
   const gangTributeRemaining = Math.max(0, GANG_TRIBUTE_COOLDOWN_MS - (Date.now() - (game.gang.lastTributeAt || 0)));
   const clubNightRemaining = Math.max(0, CLUB_NIGHT_COOLDOWN_MS - (Date.now() - (game.club.lastRunAt || 0)));
-  const playerAttackCooldownRemaining = Math.max(
+  const selectedWorldPlayerAttackCooldownRemaining = Math.max(
     0,
-    Number(game.cooldowns?.playerAttackUntil || 0) - Date.now()
+    Number(
+      selectedWorldPlayer?.id
+        ? game.cooldowns?.playerAttackTargets?.[selectedWorldPlayer.id] || 0
+        : 0
+    ) - Date.now()
   );
   const crewLockdownRemaining = Math.max(0, (game.gang.crewLockdownUntil || 0) - Date.now());
   const districtSummaries = useMemo(() => getDistrictSummaries(game.city), [game.city]);
@@ -1872,6 +1888,9 @@ function AppRuntime() {
               playerAttackUntil: Math.max(
                 0,
                 Number(serverUser.cooldowns?.playerAttackUntil || 0)
+              ),
+              playerAttackTargets: normalizePlayerAttackTargetCooldowns(
+                serverUser.cooldowns?.playerAttackTargets
               ),
             }
           : prev.cooldowns,
@@ -5198,8 +5217,9 @@ function AppRuntime() {
 
   const attackWorldPlayer = (player) => {
     if (!player?.id) return pushLog("Nie ma celu do ataku.");
-    if (playerAttackCooldownRemaining > 0) {
-      return pushLog(`Kolejny atak na gracza odpalasz za ${formatCooldown(playerAttackCooldownRemaining)}.`);
+    const targetAttackCooldownRemaining = Math.max(0, Number(game.cooldowns?.playerAttackTargets?.[player.id] || 0) - Date.now());
+    if (targetAttackCooldownRemaining > 0) {
+      return pushLog(`Na tego gracza odpalisz kolejny atak za ${formatCooldown(targetAttackCooldownRemaining)}.`);
     }
 
     if (sessionToken && apiStatus === "online") {
@@ -5246,7 +5266,10 @@ function AppRuntime() {
         },
         cooldowns: {
           ...(prev.cooldowns || {}),
-          playerAttackUntil: Date.now() + PLAYER_ATTACK_COOLDOWN_MS,
+          playerAttackTargets: {
+            ...normalizePlayerAttackTargetCooldowns(prev.cooldowns?.playerAttackTargets),
+            [player.id]: Date.now() + PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS,
+          },
         },
         online: {
           ...prev.online,
@@ -5269,10 +5292,13 @@ function AppRuntime() {
         hp: clamp(prev.player.hp - randomBetween(8, 18), 0, prev.player.maxHp),
         heat: clamp(prev.player.heat + 3, 0, 100),
       },
-      cooldowns: {
-        ...(prev.cooldowns || {}),
-        playerAttackUntil: Date.now() + PLAYER_ATTACK_COOLDOWN_MS,
-      },
+        cooldowns: {
+          ...(prev.cooldowns || {}),
+          playerAttackTargets: {
+            ...normalizePlayerAttackTargetCooldowns(prev.cooldowns?.playerAttackTargets),
+            [player.id]: Date.now() + PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS,
+          },
+        },
       online: {
         ...prev.online,
         messages: [
@@ -6295,17 +6321,17 @@ function AppRuntime() {
               </Pressable>
               <Pressable
                 onPress={() => attackWorldPlayer(selectedWorldPlayer)}
-                disabled={!selectedWorldPlayer.online || playerAttackCooldownRemaining > 0}
+                disabled={!selectedWorldPlayer.online || selectedWorldPlayerAttackCooldownRemaining > 0}
                 style={[
                   styles.inlineButton,
-                  (!selectedWorldPlayer.online || playerAttackCooldownRemaining > 0) && styles.tileDisabled,
+                  (!selectedWorldPlayer.online || selectedWorldPlayerAttackCooldownRemaining > 0) && styles.tileDisabled,
                 ]}
               >
                 <Text style={styles.inlineButtonText}>
                   {!selectedWorldPlayer.online
                     ? "Offline"
-                    : playerAttackCooldownRemaining > 0
-                      ? `Atak za ${formatCooldown(playerAttackCooldownRemaining)}`
+                    : selectedWorldPlayerAttackCooldownRemaining > 0
+                      ? `Atak za ${formatCooldown(selectedWorldPlayerAttackCooldownRemaining)}`
                       : "Atakuj"}
                 </Text>
               </Pressable>

@@ -113,10 +113,10 @@ export const ECONOMY_RULES = {
     selfTrafficWeight: 0.2,
   },
   clubPvp: {
-    playerAttackCooldownSeconds: 60 * 60,
+    playerAttackCooldownSeconds: 0,
     gangAttackCooldownSeconds: 90 * 60,
     defenderShieldAfterAttackSeconds: 75 * 60,
-    sameTargetRepeatCooldownSeconds: 4 * 60 * 60,
+    sameTargetRepeatCooldownSeconds: 60 * 60,
     maxIncomingAttacksPerDay: 4,
     maxIncomingFromSameAttackerPerDay: 2,
     griefProtectionRespectThreshold: 18,

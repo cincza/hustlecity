@@ -415,6 +415,7 @@ function createInitialPlayerData(username = "gracz") {
       heists: {},
       casinoActionUntil: 0,
       playerAttackUntil: 0,
+      playerAttackTargets: {},
     },
     timers: {
       energyUpdatedAt: now,
@@ -561,6 +562,14 @@ function ensurePlayerExtendedState(player) {
   }
   player.cooldowns.casinoActionUntil = Math.max(0, Number(player.cooldowns.casinoActionUntil || 0));
   player.cooldowns.playerAttackUntil = Math.max(0, Number(player.cooldowns.playerAttackUntil || 0));
+  player.cooldowns.playerAttackTargets =
+    player.cooldowns.playerAttackTargets && typeof player.cooldowns.playerAttackTargets === "object" && !Array.isArray(player.cooldowns.playerAttackTargets)
+      ? Object.fromEntries(
+          Object.entries(player.cooldowns.playerAttackTargets)
+            .map(([targetUserId, until]) => [String(targetUserId || "").trim(), Math.max(0, Number(until || 0))])
+            .filter(([targetUserId, until]) => targetUserId && until > Date.now())
+        )
+      : {};
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile.bounty || 0)));
 }
 
@@ -1636,13 +1645,13 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
       error.statusCode = 409;
       throw error;
     }
-    const playerAttackCooldownRemaining = Math.max(
+    const sameTargetAttackCooldownRemaining = Math.max(
       0,
-      Number(attacker.cooldowns?.playerAttackUntil || 0) - now
+      Number(attacker.cooldowns?.playerAttackTargets?.[targetUserId] || 0) - now
     );
-    if (playerAttackCooldownRemaining > 0) {
+    if (sameTargetAttackCooldownRemaining > 0) {
       const error = new Error(
-        `Kolejny atak na gracza odpalisz za ${Math.ceil(playerAttackCooldownRemaining / 60000)} min.`
+        `Na tego gracza odpalisz kolejny atak za ${Math.ceil(sameTargetAttackCooldownRemaining / 60000)} min.`
       );
       error.statusCode = 409;
       throw error;
@@ -1680,8 +1689,11 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
     let message = "";
 
     attacker.profile.energy = Math.max(0, Number(attacker.profile.energy || 0) - 2);
-    attacker.cooldowns.playerAttackUntil =
-      now + ECONOMY_RULES.clubPvp.playerAttackCooldownSeconds * 1000;
+    attacker.cooldowns.playerAttackTargets = {
+      ...(attacker.cooldowns?.playerAttackTargets || {}),
+      [targetUserId]:
+        now + ECONOMY_RULES.clubPvp.sameTargetRepeatCooldownSeconds * 1000,
+    };
 
     if (attackSucceeded) {
       steal = Math.min(
