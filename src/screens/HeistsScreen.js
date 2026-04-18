@@ -25,6 +25,7 @@ export function HeistsScreen({
   onExecuteOperation,
   sceneBackgrounds,
 }) {
+  const SafeTag = Tag || (({ text }) => <Text style={styles.listCardMeta}>{text}</Text>);
   const safeHeists = Array.isArray(heists) ? heists : [];
   const safeOperations = Array.isArray(availableOperations) ? availableOperations : [];
   const safeOperationChoices = Array.isArray(activeOperationChoices) ? activeOperationChoices : [];
@@ -111,7 +112,7 @@ export function HeistsScreen({
                       {districtLabelById[operation.districtId] || operation.districtId} | Start od {operation.respect} RES
                     </Text>
                   </View>
-                  <Tag text={formatMoney(operation.baseReward[0])} />
+                  <SafeTag text={formatMoney(operation.baseReward[0])} />
                 </View>
                 <Text style={styles.listCardMeta}>{operation.summary}</Text>
                 <View style={styles.inlineRow}>

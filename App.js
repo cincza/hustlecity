@@ -6920,6 +6920,7 @@ function AppRuntime() {
     SceneArtwork,
     SectionCard,
     StatLine,
+    Tag,
     formatMoney,
     districtSummaries,
     availableOperations,
