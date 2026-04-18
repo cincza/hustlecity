@@ -335,18 +335,18 @@ const DRUG_VISUALS = {
 };
 
 const BUSINESS_VISUALS = {
-  bar: { icon: "glass-mug-variant", code: "BAR", colors: ["#8b6329", "#251708"] },
-  club: { icon: "party-popper", code: "VIP", colors: ["#7c315e", "#240d1c"], image: UI_ICON_ART.club },
-  laundry: { icon: "washing-machine", code: "PRA", colors: ["#3d6f8e", "#0f1d28"] },
-  cleaning: { icon: "spray-bottle", code: "SPR", colors: ["#2c7d72", "#0a1d1a"] },
-  travel: { icon: "airplane", code: "POD", colors: ["#3b5f8e", "#101927"] },
-  school: { icon: "translate", code: "JZK", colors: ["#56763d", "#111b0c"] },
-  cinema: { icon: "movie-open", code: "KIN", colors: ["#7b2f2f", "#200b0b"] },
-  garage: { icon: "car-wrench", code: "GAR", colors: ["#66727d", "#1a1f24"] },
-  furniture: { icon: "sofa", code: "MBL", colors: ["#7c5d3f", "#1f150e"] },
-  pilllab: { icon: "pill-multiple", code: "LAB", colors: ["#6579af", "#171b35"] },
-  brew: { icon: "barrel", code: "DST", colors: ["#93622f", "#261607"] },
-  tower: { icon: "office-building", code: "IMP", colors: ["#51637c", "#121820"], image: UI_ICON_ART.cash },
+  bar: { icon: "glass-mug-variant", code: "BAR", colors: ["#8b6329", "#251708"], image: require("./assets/business-icons/bar.png") },
+  club: { icon: "party-popper", code: "VIP", colors: ["#7c315e", "#240d1c"], image: require("./assets/business-icons/club.png") },
+  laundry: { icon: "washing-machine", code: "PRA", colors: ["#3d6f8e", "#0f1d28"], image: require("./assets/business-icons/laundry.png") },
+  cleaning: { icon: "spray-bottle", code: "SPR", colors: ["#2c7d72", "#0a1d1a"], image: require("./assets/business-icons/cleaning.png") },
+  travel: { icon: "airplane", code: "POD", colors: ["#3b5f8e", "#101927"], image: require("./assets/business-icons/travel.png") },
+  school: { icon: "translate", code: "JZK", colors: ["#56763d", "#111b0c"], image: require("./assets/business-icons/school.png") },
+  cinema: { icon: "movie-open", code: "KIN", colors: ["#7b2f2f", "#200b0b"], image: require("./assets/business-icons/cinema.png") },
+  garage: { icon: "car-wrench", code: "GAR", colors: ["#66727d", "#1a1f24"], image: require("./assets/business-icons/garage.png") },
+  furniture: { icon: "sofa", code: "MBL", colors: ["#7c5d3f", "#1f150e"], image: require("./assets/business-icons/furniture.png") },
+  pilllab: { icon: "pill-multiple", code: "LAB", colors: ["#6579af", "#171b35"], image: require("./assets/business-icons/pilllab.png") },
+  brew: { icon: "barrel", code: "DST", colors: ["#93622f", "#261607"], image: require("./assets/business-icons/brew.png") },
+  tower: { icon: "office-building", code: "IMP", colors: ["#51637c", "#121820"], image: require("./assets/business-icons/tower.png") },
 };
 
 const ESCORT_VISUALS = {
