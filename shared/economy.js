@@ -13,11 +13,11 @@ export const ECONOMY_RULES = {
     regenAmount: 5,
   },
   bank: {
-    depositFeeRate: 0.005,
-    depositFeeFreeUnder: 2500,
-    depositFeeMin: 10,
-    withdrawFeeRate: 0.02,
-    withdrawFeeMin: 15,
+    depositFeeRate: 0,
+    depositFeeFreeUnder: 0,
+    depositFeeMin: 0,
+    withdrawFeeRate: 0,
+    withdrawFeeMin: 0,
   },
   market: {
     updateIntervalMs: 5 * 60 * 1000,
@@ -1582,12 +1582,13 @@ export function createMarketSnapshot(now = Date.now(), activePlayers = 1) {
 }
 
 export function getBankDepositFee(amount) {
-  if (amount < ECONOMY_RULES.bank.depositFeeFreeUnder) return 0;
-  return Math.max(ECONOMY_RULES.bank.depositFeeMin, Math.floor(amount * ECONOMY_RULES.bank.depositFeeRate));
+  void amount;
+  return 0;
 }
 
 export function getBankWithdrawFee(amount) {
-  return Math.max(ECONOMY_RULES.bank.withdrawFeeMin, Math.floor(amount * ECONOMY_RULES.bank.withdrawFeeRate));
+  void amount;
+  return 0;
 }
 
 export function getHeistById(id) {

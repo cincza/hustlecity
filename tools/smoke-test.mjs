@@ -3,6 +3,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { FACTORIES, SUPPLIERS, getDrugBatchSupplyCost } from "../shared/empire.js";
+import { DRUGS, getDealerPayoutForDrug } from "../shared/socialGameplay.js";
 
 const HOST = "127.0.0.1";
 const PORT = 4100;
@@ -142,11 +144,28 @@ async function forceUsersIntoJail(dataDir, logins, durationMs = 15 * 60 * 1000) 
   await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
 }
 
+function assertFactoryRecipeProfitability() {
+  const factoryNames = Object.fromEntries(FACTORIES.map((factory) => [factory.id, factory.name]));
+
+  for (const drug of DRUGS) {
+    const supplyCost = getDrugBatchSupplyCost(drug, SUPPLIERS);
+    const payout = getDealerPayoutForDrug(drug) * Number(drug.batchSize || 0);
+    const profit = payout - supplyCost;
+
+    if (profit <= 0) {
+      throw new Error(
+        `Balans fabryki znowu jest na minusie: ${factoryNames[drug.factoryId] || drug.factoryId} / ${drug.name} daje ${profit}.`
+      );
+    }
+  }
+}
+
 async function main() {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hustle-city-smoke-"));
   let server = null;
 
   try {
+    assertFactoryRecipeProfitability();
     server = startServer(dataDir);
     await waitForHealth();
 
@@ -170,6 +189,33 @@ async function main() {
     const token = registerResult.token;
     if (!token) {
       throw new Error("Rejestracja nie zwrocila tokena.");
+    }
+
+    const depositAmount = 12345;
+    const depositedBank = await request("/bank/deposit", {
+      method: "POST",
+      token,
+      body: { amount: depositAmount },
+    });
+
+    if (Number(depositedBank?.user?.profile?.cash || 0) !== 7500000 - depositAmount) {
+      throw new Error("Bank deposit nadal zjada dodatkowa kase.");
+    }
+    if (Number(depositedBank?.user?.profile?.bank || 0) !== 5000000 + depositAmount) {
+      throw new Error("Bank deposit nie podniosl salda o pelna kwote.");
+    }
+
+    const withdrawnBank = await request("/bank/withdraw", {
+      method: "POST",
+      token,
+      body: { amount: depositAmount },
+    });
+
+    if (Number(withdrawnBank?.user?.profile?.cash || 0) !== 7500000) {
+      throw new Error("Bank withdraw nadal zjada dodatkowa kase.");
+    }
+    if (Number(withdrawnBank?.user?.profile?.bank || 0) !== 5000000) {
+      throw new Error("Bank withdraw nie odjal pelnej kwoty bez fee.");
     }
 
     await delay(AUTH_REGISTER_DELAY_MS);
@@ -553,11 +599,16 @@ async function main() {
       throw new Error("Fightclub nie zwrocil wyniku rundy.");
     }
 
-    await request("/dealer/buy", {
+    const dealerTradeStartingSmokes = Number(fightClubResult?.user?.drugInventory?.smokes || 0);
+    const boughtDealerBatch = await request("/dealer/buy", {
       method: "POST",
       token,
-      body: { drugId: "smokes" },
+      body: { drugId: "smokes", quantity: 3 },
     });
+
+    if (Number(boughtDealerBatch?.user?.drugInventory?.smokes || 0) !== dealerTradeStartingSmokes + 3) {
+      throw new Error("Dealer buy x3 nie dodal pelnej ilosci towaru.");
+    }
 
     const consumeResult = await request("/dealer/consume", {
       method: "POST",
@@ -575,17 +626,15 @@ async function main() {
       throw new Error("Boost po zarzuceniu nie zostal zwrocony z backendu.");
     }
 
-    await request("/dealer/buy", {
+    const soldDealerBatch = await request("/dealer/sell", {
       method: "POST",
       token,
-      body: { drugId: "smokes" },
+      body: { drugId: "smokes", quantity: 2 },
     });
 
-    await request("/dealer/sell", {
-      method: "POST",
-      token,
-      body: { drugId: "smokes" },
-    });
+    if (Number(soldDealerBatch?.user?.drugInventory?.smokes || 0) !== dealerTradeStartingSmokes) {
+      throw new Error("Dealer sell x2 nie odjal poprawnej ilosci towaru.");
+    }
 
     const friendResult = await request(`/social/friends/${firstAttackTarget.id}`, {
       method: "POST",

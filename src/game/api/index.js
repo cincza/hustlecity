@@ -338,19 +338,19 @@ export async function playFightClubRoundOnline(token) {
   });
 }
 
-export async function buyDrugFromDealerOnline(token, drugId) {
+export async function buyDrugFromDealerOnline(token, drugId, quantity = 1) {
   return request("/dealer/buy", {
     method: "POST",
     token,
-    body: { drugId },
+    body: { drugId, quantity },
   });
 }
 
-export async function sellDrugToDealerOnline(token, drugId) {
+export async function sellDrugToDealerOnline(token, drugId, quantity = 1) {
   return request("/dealer/sell", {
     method: "POST",
     token,
-    body: { drugId },
+    body: { drugId, quantity },
   });
 }
 

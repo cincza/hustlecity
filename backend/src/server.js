@@ -2546,11 +2546,20 @@ app.post("/fightclub/round", auth, asyncHandler(async (req, res) => {
 
 app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
   const drugId = String(req.body?.drugId || "").trim();
+  const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
+    min: 1,
+    max: BACKEND_RULES.validation.maxMarketQuantity,
+    field: "quantity",
+  });
+  if (parsedQuantity.error) {
+    res.status(400).json({ error: parsedQuantity.error });
+    return;
+  }
   let result = null;
 
   await withPlayerActionLock(req, "dealer-buy", async () => {
     await commitPlayerMutation(req, "dealer-buy", async (player) => {
-      result = buyDrugFromDealerForPlayer(player, drugId);
+      result = buyDrugFromDealerForPlayer(player, drugId, parsedQuantity.value);
       pushLog(player, result.logMessage);
       return null;
     });
@@ -2559,7 +2568,9 @@ app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
   logInfo("dealer", "buy", {
     userId: req.user.id,
     drugId,
+    quantity: result?.quantity || parsedQuantity.value,
     price: result?.price || 0,
+    totalPrice: result?.totalPrice || 0,
   });
 
   res.json({
@@ -2570,11 +2581,20 @@ app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
 
 app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
   const drugId = String(req.body?.drugId || "").trim();
+  const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
+    min: 1,
+    max: BACKEND_RULES.validation.maxMarketQuantity,
+    field: "quantity",
+  });
+  if (parsedQuantity.error) {
+    res.status(400).json({ error: parsedQuantity.error });
+    return;
+  }
   let result = null;
 
   await withPlayerActionLock(req, "dealer-sell", async () => {
     await commitPlayerMutation(req, "dealer-sell", async (player) => {
-      result = sellDrugToDealerForPlayer(player, drugId);
+      result = sellDrugToDealerForPlayer(player, drugId, parsedQuantity.value);
       pushLog(player, result.logMessage);
       return null;
     });
@@ -2583,6 +2603,8 @@ app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
   logInfo("dealer", "sell", {
     userId: req.user.id,
     drugId,
+    quantity: result?.quantity || parsedQuantity.value,
+    payoutPerUnit: result?.payoutPerUnit || 0,
     payout: result?.payout || 0,
   });
 
@@ -3268,7 +3290,7 @@ app.post("/bank/deposit", auth, asyncHandler(async (req, res) => {
   const fee = getBankDepositFee(amount);
   const totalCost = amount + fee;
   if (req.player.profile.cash < totalCost) {
-    res.status(400).json({ error: `Not enough wallet cash for deposit and fee ($${fee})` });
+    res.status(400).json({ error: "Not enough wallet cash for deposit" });
     return;
   }
 
@@ -3276,7 +3298,7 @@ app.post("/bank/deposit", auth, asyncHandler(async (req, res) => {
     await commitPlayerMutation(req, "bank-deposit", async (player) => {
       player.profile.cash -= totalCost;
       player.profile.bank += amount;
-      pushLog(player, `Wplacono do banku $${amount}. Fee: $${fee}.`);
+      pushLog(player, `Wplacono do banku $${amount}.`);
       return null;
     });
   });
@@ -3309,7 +3331,7 @@ app.post("/bank/withdraw", auth, asyncHandler(async (req, res) => {
   const fee = getBankWithdrawFee(amount);
   const totalDebit = amount + fee;
   if (req.player.profile.bank < totalDebit) {
-    res.status(400).json({ error: `Not enough bank cash for withdrawal and fee ($${fee})` });
+    res.status(400).json({ error: "Not enough bank cash for withdrawal" });
     return;
   }
 
@@ -3317,7 +3339,7 @@ app.post("/bank/withdraw", auth, asyncHandler(async (req, res) => {
     await commitPlayerMutation(req, "bank-withdraw", async (player) => {
       player.profile.bank -= totalDebit;
       player.profile.cash += amount;
-      pushLog(player, `Wyplacono z banku $${amount}. Fee: $${fee}.`);
+      pushLog(player, `Wyplacono z banku $${amount}.`);
       return null;
     });
   });

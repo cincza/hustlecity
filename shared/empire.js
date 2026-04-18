@@ -17,33 +17,33 @@ export const BUSINESSES = [
 ];
 
 export const SUPPLIERS = [
-  { id: "tobacco", name: "Tyton i filtry", unit: "karton", price: 70 },
-  { id: "grain", name: "Zboze i zacier", unit: "worek", price: 80 },
+  { id: "tobacco", name: "Tyton i filtry", unit: "karton", price: 55 },
+  { id: "grain", name: "Zboze i zacier", unit: "worek", price: 60 },
   { id: "spores", name: "Zarodniki", unit: "zestaw", price: 95 },
   { id: "herbs", name: "Trawa i nasiona", unit: "paczka", price: 55 },
   { id: "resin", name: "Zywica i prasowanka", unit: "kostka", price: 120 },
-  { id: "chemicals", name: "Chemia bazowa", unit: "kanister", price: 110 },
+  { id: "chemicals", name: "Chemia bazowa", unit: "kanister", price: 95 },
   { id: "pharma", name: "Odczynniki farmaceutyczne", unit: "pakiet", price: 170 },
   { id: "pills", name: "Puste kapsuly", unit: "rolka", price: 75 },
-  { id: "solvent", name: "Rozpuszczalnik", unit: "baniak", price: 145 },
-  { id: "poppy", name: "Mak i lateks", unit: "skrzynka", price: 210 },
+  { id: "solvent", name: "Rozpuszczalnik", unit: "baniak", price: 125 },
+  { id: "poppy", name: "Mak i lateks", unit: "skrzynka", price: 180 },
   { id: "coca", name: "Liscie koki", unit: "belka", price: 260 },
   { id: "acid", name: "Kwasy laboratoryjne", unit: "pojemnik", price: 290 },
   { id: "cactus", name: "Kaktusy i ekstrakt", unit: "pakiet", price: 240 },
-  { id: "glass", name: "Szklo laboratoryjne", unit: "skrzynka", price: 190 },
-  { id: "packaging", name: "Pakowanie i woreczki", unit: "karton", price: 60 },
+  { id: "glass", name: "Szklo laboratoryjne", unit: "skrzynka", price: 160 },
+  { id: "packaging", name: "Pakowanie i woreczki", unit: "karton", price: 50 },
 ];
 
 export const FACTORIES = [
-  { id: "smokeworks", name: "Fabryka fajek", respect: 8, cost: 80000, text: "Tani, szybki towar na poczatek i pod lokalne bary.", unlocks: ["smokes"] },
-  { id: "distillery", name: "Destylarnia spirytusu", respect: 12, cost: 125000, text: "Spirytus schodzi zawsze, ale wymaga zaplecza i butelek.", unlocks: ["spirit"] },
-  { id: "wetlab", name: "Wet Lab GBL", respect: 16, cost: 240000, text: "Chemia klubowa i szybki zarobek przy dobrym ruchu.", unlocks: ["gbl"] },
-  { id: "greenhouse", name: "Szklarnie botaniczne", respect: 20, cost: 450000, text: "Salvia, grzybki, hasz i marihuana dla stalych klientow.", unlocks: ["salvia", "shrooms", "hash", "weed"] },
-  { id: "powderlab", name: "Laboratorium proszkow", respect: 25, cost: 820000, text: "Amfetamina i rohypnol, czyli mocniejszy towar z wiekszym ryzykiem.", unlocks: ["amphetamine", "rohypnol"] },
-  { id: "poppyworks", name: "Zaklad opium i heroiny", respect: 25, cost: 1250000, text: "Ciezki zarobek, ciezkie ryzyko i bardzo mocny towar.", unlocks: ["opium", "heroin"] },
-  { id: "cartelrefinery", name: "Rafineria kokainy", respect: 25, cost: 1800000, text: "Kokaina daje wielkie pieniadze, ale wymaga solidnego lancucha dostaw.", unlocks: ["cocaine"] },
-  { id: "acidlab", name: "Acid Lab", respect: 25, cost: 2550000, text: "Produkcja LSD pod najbardziej odklejonych klientow miasta.", unlocks: ["lsd"] },
-  { id: "designerlab", name: "Designer Lab", respect: 25, cost: 3600000, text: "Extasy i meskalina dla topowego rynku i najbogatszych ekip.", unlocks: ["ecstasy", "mescaline"] },
+  { id: "smokeworks", name: "Fabryka fajek", respect: 8, cost: 65000, text: "Tani, szybki towar na poczatek i pod lokalne bary.", unlocks: ["smokes"] },
+  { id: "distillery", name: "Destylarnia spirytusu", respect: 12, cost: 105000, text: "Spirytus schodzi zawsze, ale wymaga zaplecza i butelek.", unlocks: ["spirit"] },
+  { id: "wetlab", name: "Wet Lab GBL", respect: 16, cost: 210000, text: "Chemia klubowa i szybki zarobek przy dobrym ruchu.", unlocks: ["gbl"] },
+  { id: "greenhouse", name: "Szklarnie botaniczne", respect: 20, cost: 410000, text: "Salvia, grzybki, hasz i marihuana dla stalych klientow.", unlocks: ["salvia", "shrooms", "hash", "weed"] },
+  { id: "powderlab", name: "Laboratorium proszkow", respect: 25, cost: 760000, text: "Amfetamina i rohypnol, czyli mocniejszy towar z wiekszym ryzykiem.", unlocks: ["amphetamine", "rohypnol"] },
+  { id: "poppyworks", name: "Zaklad opium i heroiny", respect: 25, cost: 1150000, text: "Ciezki zarobek, ciezkie ryzyko i bardzo mocny towar.", unlocks: ["opium", "heroin"] },
+  { id: "cartelrefinery", name: "Rafineria kokainy", respect: 25, cost: 1650000, text: "Kokaina daje wielkie pieniadze, ale wymaga solidnego lancucha dostaw.", unlocks: ["cocaine"] },
+  { id: "acidlab", name: "Acid Lab", respect: 25, cost: 2350000, text: "Produkcja LSD pod najbardziej odklejonych klientow miasta.", unlocks: ["lsd"] },
+  { id: "designerlab", name: "Designer Lab", respect: 25, cost: 3300000, text: "Extasy i meskalina dla topowego rynku i najbogatszych ekip.", unlocks: ["ecstasy", "mescaline"] },
 ];
 
 export function createSupplyCounterMap(initialValue = 0) {
@@ -248,5 +248,13 @@ export function getFactoryRisk(factory) {
   return Math.max(
     0,
     ...(safeFactory.unlocks || []).map((drugId) => getDrugPoliceProfile(DRUGS.find((entry) => entry.id === drugId)).risk)
+  );
+}
+
+export function getDrugBatchSupplyCost(drug, suppliers = SUPPLIERS) {
+  const supplierPrices = Object.fromEntries((Array.isArray(suppliers) ? suppliers : SUPPLIERS).map((entry) => [entry.id, Number(entry.price || 0)]));
+  return Object.entries(drug?.supplies || {}).reduce(
+    (sum, [supplyId, amount]) => sum + Number(amount || 0) * Number(supplierPrices[supplyId] || 0),
+    0
   );
 }

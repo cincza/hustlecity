@@ -1,5 +1,6 @@
 import React from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
+import { getDealerPayoutForDrug } from "../../shared/socialGameplay.js";
 
 export function MarketScreen({
   section,
@@ -19,6 +20,8 @@ export function MarketScreen({
   systemVisuals,
   marketState,
   marketMeta,
+  dealerTradeDraft,
+  setDealerTradeDraft,
   actions,
 }) {
   // TODO: TO_MIGRATE_TO_SERVER market drug flow still executes local fallback actions from App.js.
@@ -32,6 +35,8 @@ export function MarketScreen({
     ...game,
   };
   const safeMarketState = marketState || {};
+  const parsedDealerTradeQuantity = Number.parseInt(String(dealerTradeDraft || "").replace(/[^\d]/g, ""), 10);
+  const dealerTradeQuantity = Math.max(1, Number.isFinite(parsedDealerTradeQuantity) ? parsedDealerTradeQuantity : 1);
 
   const getTrendLabel = (snapshot) => {
     if (!snapshot) return "Brak danych";
@@ -134,15 +139,38 @@ export function MarketScreen({
               </View>
             </View>
           </View>
+          <View style={styles.listCard}>
+            <View style={styles.entityHead}>
+              <EntityBadge visual={systemVisuals.cash} />
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Ilosc transakcji</Text>
+                <Text style={styles.listCardMeta}>Jedna liczba dla kupna i sprzedazy u dilera.</Text>
+              </View>
+            </View>
+            <TextInput
+              value={dealerTradeDraft}
+              onChangeText={(text) => setDealerTradeDraft(text.replace(/[^\d]/g, ""))}
+              placeholder="Np. 5"
+              placeholderTextColor="#6c6c6c"
+              keyboardType="numeric"
+              style={styles.chatInput}
+            />
+          </View>
           {drugs.map((drug) => (
             <View key={drug.id} style={styles.listCard}>
+              {(() => {
+                const dealerPayout = getDealerPayoutForDrug(drug);
+                const tradeBuyTotal = Number(drug.streetPrice || 0) * dealerTradeQuantity;
+                const tradeSellTotal = dealerPayout * dealerTradeQuantity;
+                return (
+                  <>
               <View style={styles.listCardHeader}>
                 <View style={styles.entityHead}>
                   <EntityBadge visual={drugVisuals[drug.id]} />
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{drug.name}</Text>
                     <Text style={styles.listCardMeta}>
-                      Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | U dilera: {safeGame.dealerInventory?.[drug.id] || 0} | Ulica: {formatMoney(drug.streetPrice)}
+                      Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | U dilera: {safeGame.dealerInventory?.[drug.id] || 0} | Ulica: {formatMoney(drug.streetPrice)} | Skup: {formatMoney(dealerPayout)}
                     </Text>
                   </View>
                 </View>
@@ -161,20 +189,36 @@ export function MarketScreen({
               <Text style={styles.listCardMeta}>
                 Daje: {Object.entries(drug.effect).map(([key, value]) => `${key} +${value}`).join(" | ")} | Efekt trwa ok. {Math.round(drug.durationSeconds / 60)} min
               </Text>
+              <Text style={styles.listCardMeta}>
+                Przy x{dealerTradeQuantity}: kupno {formatMoney(tradeBuyTotal)} | skup {formatMoney(tradeSellTotal)}
+              </Text>
               <View style={styles.marketButtons}>
                 <Pressable
-                  onPress={() => actions.buyDrugFromDealer(drug)}
-                  style={[styles.marketButton, (safeGame.player.respect < drug.unlockRespect || (safeGame.dealerInventory?.[drug.id] || 0) <= 0) && styles.tileDisabled]}
+                  onPress={() => actions.buyDrugFromDealer(drug, dealerTradeDraft)}
+                  style={[
+                    styles.marketButton,
+                    (
+                      safeGame.player.respect < drug.unlockRespect ||
+                      Number(safeGame.dealerInventory?.[drug.id] || 0) < dealerTradeQuantity ||
+                      Number(safeGame.player.cash || 0) < Number(drug.streetPrice || 0) * dealerTradeQuantity
+                    ) && styles.tileDisabled,
+                  ]}
                 >
-                  <Text style={styles.marketButtonText}>Kup od dilera</Text>
+                  <Text style={styles.marketButtonText}>Kup za {formatMoney(tradeBuyTotal)}</Text>
                 </Pressable>
-                <Pressable onPress={() => actions.sellDrugToDealer(drug)} style={[styles.marketButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
-                  <Text style={styles.marketButtonText}>Sprzedaj dilerowi</Text>
+                <Pressable
+                  onPress={() => actions.sellDrugToDealer(drug, dealerTradeDraft)}
+                  style={[styles.marketButton, Number(safeGame.drugInventory[drug.id] || 0) < dealerTradeQuantity && styles.tileDisabled]}
+                >
+                  <Text style={styles.marketButtonText}>Sprzedaj za {formatMoney(tradeSellTotal)}</Text>
                 </Pressable>
                 <Pressable onPress={() => actions.consumeDrug(drug)} style={[styles.marketButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
                   <Text style={styles.marketButtonText}>Zarzuc</Text>
                 </Pressable>
               </View>
+                  </>
+                );
+              })()}
             </View>
           ))}
         </SectionCard>

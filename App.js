@@ -175,6 +175,7 @@ import {
   getClubTrafficLabel,
   getClubVenueProfile as getSharedClubVenueProfile,
   getClubVisitDiminishing,
+  getDealerPayoutForDrug,
   getLeadTargetEscortForVenue,
   normalizeClubState,
 } from "./shared/socialGameplay.js";
@@ -1643,6 +1644,7 @@ function AppRuntime() {
   const [directMessageRecipient, setDirectMessageRecipient] = useState(null);
   const [gangDraftName, setGangDraftName] = useState("Night Reign");
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
+  const [dealerTradeDraft, setDealerTradeDraft] = useState("1");
   const [notice, setNotice] = useState(null);
   const [quickActionModal, setQuickActionModal] = useState(null);
   const [adminDeleteBusyLogin, setAdminDeleteBusyLogin] = useState("");
@@ -3835,15 +3837,17 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - dealer stock and buy pricing must be centrally controlled to prevent client exploits
-  const buyDrugFromDealer = async (drug) => {
+  const buyDrugFromDealer = async (drug, quantityOverride) => {
     if (!canDoStreetAction()) return;
+    const parsedQuantity = Number.parseInt(String(quantityOverride ?? dealerTradeDraft).replace(/[^\d]/g, ""), 10);
+    const quantity = Math.max(1, Number.isFinite(parsedQuantity) ? parsedQuantity : 1);
     if (game.player.respect < drug.unlockRespect) return pushLog(`Diler puszcza ${drug.name} dopiero od ${drug.unlockRespect} szacunu.`);
-    if ((game.dealerInventory?.[drug.id] || 0) <= 0) return pushLog(`Diler nie ma juz ${drug.name} na stanie.`);
-    if (game.player.cash < drug.streetPrice) return pushLog(`Brakuje ${formatMoney(drug.streetPrice)} na ${drug.name}.`);
+    if ((game.dealerInventory?.[drug.id] || 0) < quantity) return pushLog(`Diler nie ma tyle ${drug.name} na stanie.`);
+    if (game.player.cash < drug.streetPrice * quantity) return pushLog(`Brakuje ${formatMoney(drug.streetPrice * quantity)} na ${drug.name} x${quantity}.`);
 
     if (sessionToken && apiStatus === "online") {
       try {
-        const result = await buyDrugFromDealerOnline(sessionToken, drug.id);
+        const result = await buyDrugFromDealerOnline(sessionToken, drug.id, quantity);
         mergeServerUser(result.user);
       } catch (error) {
         pushLog(error.message);
@@ -3855,22 +3859,25 @@ function AppRuntime() {
 
     setGame((prev) => ({
       ...prev,
-      player: { ...prev.player, cash: prev.player.cash - drug.streetPrice },
-      drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] + 1 },
-      dealerInventory: { ...prev.dealerInventory, [drug.id]: Math.max(0, (prev.dealerInventory[drug.id] || 0) - 1) },
-      log: [`Kupiles od dilera: ${drug.name} za ${formatMoney(drug.streetPrice)}.`, ...prev.log].slice(0, 16),
+      player: { ...prev.player, cash: prev.player.cash - drug.streetPrice * quantity },
+      drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] + quantity },
+      dealerInventory: { ...prev.dealerInventory, [drug.id]: Math.max(0, (prev.dealerInventory[drug.id] || 0) - quantity) },
+      log: [`Kupiles od dilera: ${drug.name} x${quantity} za ${formatMoney(drug.streetPrice * quantity)}.`, ...prev.log].slice(0, 16),
     }));
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - dealer sell-back and stock refill loop must be validated on backend
-  const sellDrugToDealer = async (drug) => {
+  const sellDrugToDealer = async (drug, quantityOverride) => {
     if (!canDoStreetAction()) return;
-    if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz czego sprzedac: ${drug.name}.`);
-    const payout = Math.max(20, Math.floor(drug.streetPrice * 0.72));
+    const parsedQuantity = Number.parseInt(String(quantityOverride ?? dealerTradeDraft).replace(/[^\d]/g, ""), 10);
+    const quantity = Math.max(1, Number.isFinite(parsedQuantity) ? parsedQuantity : 1);
+    if ((game.drugInventory[drug.id] || 0) < quantity) return pushLog(`Nie masz tyle ${drug.name} do sprzedania.`);
+    const payoutPerUnit = getDealerPayoutForDrug(drug);
+    const payout = payoutPerUnit * quantity;
 
     if (sessionToken && apiStatus === "online") {
       try {
-        const result = await sellDrugToDealerOnline(sessionToken, drug.id);
+        const result = await sellDrugToDealerOnline(sessionToken, drug.id, quantity);
         mergeServerUser(result.user);
       } catch (error) {
         pushLog(error.message);
@@ -3883,10 +3890,10 @@ function AppRuntime() {
     setGame((prev) => ({
       ...prev,
       player: { ...prev.player, cash: prev.player.cash + payout },
-      drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - 1 },
-      dealerInventory: { ...prev.dealerInventory, [drug.id]: (prev.dealerInventory[drug.id] || 0) + 1 },
+      drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - quantity },
+      dealerInventory: { ...prev.dealerInventory, [drug.id]: (prev.dealerInventory[drug.id] || 0) + quantity },
       stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + payout },
-      log: [`Sprzedales dilerowi ${drug.name} za ${formatMoney(payout)}.`, ...prev.log].slice(0, 16),
+      log: [`Sprzedales dilerowi ${drug.name} x${quantity} za ${formatMoney(payout)}.`, ...prev.log].slice(0, 16),
     }));
   };
 
@@ -6724,6 +6731,8 @@ function AppRuntime() {
     systemVisuals: SYSTEM_VISUALS,
     marketState: game.marketState,
     marketMeta: game.marketMeta,
+    dealerTradeDraft,
+    setDealerTradeDraft,
     actions: { buyProduct, sellProduct, buyDrugFromDealer, sellDrugToDealer, consumeDrug },
   };
 
