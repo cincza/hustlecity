@@ -12,6 +12,7 @@ export function EmpireScreen({
   EntityBadge,
   Tag,
   formatMoney,
+  formatAccruedMoney,
   formatLongDuration,
   formatCollectionStamp,
   formatCooldown,
@@ -60,6 +61,22 @@ export function EmpireScreen({
     gang: game?.gang || {},
     ...game,
   };
+  const businessCash = Number(safeGame.collections?.businessCash || 0);
+  const businessCollectableCash = Math.floor(businessCash);
+  const escortCash = Number(safeGame.collections?.escortCash || 0);
+  const escortCollectableCash = Math.floor(escortCash);
+  const businessCollectionSubtitle =
+    businessCash > 0
+      ? businessCollectableCash > 0
+        ? `Czeka ${formatAccruedMoney(businessCash)}.`
+        : `Rośnie ${formatAccruedMoney(businessCash)}. Jeszcze chwila do pelnego dolara.`
+      : "Na razie pusto.";
+  const escortCollectionSubtitle =
+    escortCash > 0
+      ? escortCollectableCash > 0
+        ? `Czeka ${formatAccruedMoney(escortCash)}.`
+        : `Rośnie ${formatAccruedMoney(escortCash)}. Jeszcze chwila do rozliczenia.`
+      : "Dziewczyny jeszcze nie rozliczyly nocy.";
 
   const unlockedBusinesses = businesses.filter((business) => safeGame.player.respect >= business.respect);
   const availableBusinesses = unlockedBusinesses.filter((business) => {
@@ -161,15 +178,15 @@ export function EmpireScreen({
           </View>
           <Text style={styles.listCardReward}>{formatMoney(totalBusinessIncome)}/min</Text>
         </View>
-        <StatLine label="Do odbioru" value={`${formatMoney(safeGame.collections?.businessCash || 0)} / ${formatMoney(businessCollectionCap)}`} />
+        <StatLine label="Do odbioru" value={`${formatAccruedMoney(businessCash)} / ${formatMoney(businessCollectionCap)}`} />
         <StatLine label="Cap 24h za" value={formatLongDuration(businessCapEta)} />
         <StatLine label="Ostatni odbior" value={formatCollectionStamp(safeGame.collections?.businessCollectedAt)} />
         <ActionTile
           title="Odbierz biznesy"
-          subtitle={Math.floor(safeGame.collections?.businessCash || 0) > 0 ? `Czeka ${formatMoney(safeGame.collections.businessCash)}.` : "Na razie pusto."}
+          subtitle={businessCollectionSubtitle}
           visual={systemVisuals.cash}
           onPress={actions.collectBusinessIncome}
-          disabled={Math.floor(safeGame.collections?.businessCash || 0) <= 0}
+          disabled={businessCollectableCash <= 0}
         />
       </View>
 
@@ -184,15 +201,15 @@ export function EmpireScreen({
           </View>
           <Text style={styles.listCardReward}>{formatMoney(totalEscortIncome)}/min</Text>
         </View>
-        <StatLine label="Do odbioru" value={`${formatMoney(safeGame.collections?.escortCash || 0)} / ${formatMoney(escortCollectionCap)}`} />
+        <StatLine label="Do odbioru" value={`${formatAccruedMoney(escortCash)} / ${formatMoney(escortCollectionCap)}`} />
         <StatLine label="Cap 24h za" value={formatLongDuration(escortCapEta)} />
         <StatLine label="Ostatni odbior" value={formatCollectionStamp(safeGame.collections?.escortCollectedAt)} />
         <ActionTile
           title="Odbierz ulice"
-          subtitle={Math.floor(safeGame.collections?.escortCash || 0) > 0 ? `Czeka ${formatMoney(safeGame.collections.escortCash)}.` : "Dziewczyny jeszcze nie rozliczyly nocy."}
+          subtitle={escortCollectionSubtitle}
           visual={systemVisuals.street}
           onPress={actions.collectEscortIncome}
-          disabled={Math.floor(safeGame.collections?.escortCash || 0) <= 0}
+          disabled={escortCollectableCash <= 0}
         />
       </View>
     </SectionCard>

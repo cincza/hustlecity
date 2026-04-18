@@ -24,6 +24,7 @@ export function CityScreen({
   EntityBadge,
   Tag,
   formatMoney,
+  formatAccruedMoney,
   formatDuration,
   formatLongDuration,
   formatCooldown,
@@ -56,6 +57,22 @@ export function CityScreen({
   actions,
 }) {
   const [gymBatchByExercise, setGymBatchByExercise] = useState({});
+  const businessCash = Number(game.collections?.businessCash || 0);
+  const businessCollectableCash = Math.floor(businessCash);
+  const escortCash = Number(game.collections?.escortCash || 0);
+  const escortCollectableCash = Math.floor(escortCash);
+  const businessCollectionSubtitle =
+    businessCash > 0
+      ? businessCollectableCash > 0
+        ? formatAccruedMoney(businessCash)
+        : `${formatAccruedMoney(businessCash)}. Jeszcze chwila do pelnego dolara.`
+      : "Skrytka biznesow jest pusta.";
+  const escortCollectionSubtitle =
+    escortCash > 0
+      ? escortCollectableCash > 0
+        ? formatAccruedMoney(escortCash)
+        : `${formatAccruedMoney(escortCash)}. Jeszcze chwila do rozliczenia.`
+      : "Dziewczyny jeszcze nie rozliczyly nocy.";
 
   useEffect(() => {
     if (section !== "gym") return;
@@ -116,15 +133,15 @@ export function CityScreen({
           </View>
           <Text style={styles.listCardReward}>{formatMoney(totalBusinessIncome)}/min</Text>
         </View>
-        <StatLine label="Do odbioru" value={`${formatMoney(game.collections?.businessCash || 0)} / ${formatMoney(businessCollectionCap)}`} visual={systemVisuals.cash} />
+        <StatLine label="Do odbioru" value={`${formatAccruedMoney(businessCash)} / ${formatMoney(businessCollectionCap)}`} visual={systemVisuals.cash} />
         <StatLine label="Cap 24h za" value={formatLongDuration(businessCapEta)} />
         <StatLine label="Ostatni odbior" value={formatCollectionStamp(game.collections?.businessCollectedAt)} />
         <ActionTile
           title="Odbierz biznesy"
-          subtitle={Math.floor(game.collections?.businessCash || 0) > 0 ? formatMoney(game.collections.businessCash) : "Skrytka biznesow jest pusta."}
+          subtitle={businessCollectionSubtitle}
           visual={systemVisuals.cash}
           onPress={actions.collectBusinessIncome}
-          disabled={Math.floor(game.collections?.businessCash || 0) <= 0}
+          disabled={businessCollectableCash <= 0}
         />
       </View>
 
@@ -139,15 +156,15 @@ export function CityScreen({
           </View>
           <Text style={styles.listCardReward}>{formatMoney(totalEscortIncome)}/min</Text>
         </View>
-        <StatLine label="Do odbioru" value={`${formatMoney(game.collections?.escortCash || 0)} / ${formatMoney(escortCollectionCap)}`} visual={systemVisuals.street} />
+        <StatLine label="Do odbioru" value={`${formatAccruedMoney(escortCash)} / ${formatMoney(escortCollectionCap)}`} visual={systemVisuals.street} />
         <StatLine label="Cap 24h za" value={formatLongDuration(escortCapEta)} />
         <StatLine label="Ostatni odbior" value={formatCollectionStamp(game.collections?.escortCollectedAt)} />
         <ActionTile
           title="Odbierz ulice"
-          subtitle={Math.floor(game.collections?.escortCash || 0) > 0 ? formatMoney(game.collections.escortCash) : "Dziewczyny jeszcze nie rozliczyly nocy."}
+          subtitle={escortCollectionSubtitle}
           visual={systemVisuals.street}
           onPress={actions.collectEscortIncome}
-          disabled={Math.floor(game.collections?.escortCash || 0) <= 0}
+          disabled={escortCollectableCash <= 0}
         />
       </View>
     </SectionCard>
@@ -179,8 +196,8 @@ export function CityScreen({
             <ActionTile title="Fightclub" subtitle="Sparing podbija sile, zrecznosc i szacun." visual={systemVisuals.pvp} onPress={actions.fightClubRound} />
             <ActionTile title="Haracz" subtitle={gangTributeRemaining > 0 ? `Kolejna koperta za ${formatCooldown(gangTributeRemaining)}.` : "Regularna wyplata z terenu i ochrony."} visual={systemVisuals.gang} onPress={actions.collectGangTribute} disabled={!game.gang.joined || gangTributeRemaining > 0} />
             <ActionTile title="Noc w klubie" subtitle={clubNightRemaining > 0 ? `Wroc za ${formatCooldown(clubNightRemaining)}.` : "Sprzedaj towar wrzucony do klubu."} visual={systemVisuals.club} onPress={actions.runClubNight} disabled={!game.club.owned || clubNightRemaining > 0} />
-            <ActionTile title="Odbierz biznes" subtitle={Math.floor(game.collections?.businessCash || 0) > 0 ? formatMoney(game.collections.businessCash) : "Skrytka pusta."} visual={systemVisuals.cash} onPress={actions.collectBusinessIncome} disabled={Math.floor(game.collections?.businessCash || 0) <= 0} />
-            <ActionTile title="Odbierz ulice" subtitle={Math.floor(game.collections?.escortCash || 0) > 0 ? formatMoney(game.collections.escortCash) : "Rozliczenie puste."} visual={systemVisuals.street} onPress={actions.collectEscortIncome} disabled={Math.floor(game.collections?.escortCash || 0) <= 0} />
+            <ActionTile title="Odbierz biznes" subtitle={businessCash > 0 ? businessCollectionSubtitle : "Skrytka pusta."} visual={systemVisuals.cash} onPress={actions.collectBusinessIncome} disabled={businessCollectableCash <= 0} />
+            <ActionTile title="Odbierz ulice" subtitle={escortCash > 0 ? escortCollectionSubtitle : "Rozliczenie puste."} visual={systemVisuals.street} onPress={actions.collectEscortIncome} disabled={escortCollectableCash <= 0} />
           </View>
         </SectionCard>
 

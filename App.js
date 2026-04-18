@@ -840,6 +840,22 @@ const formatMoney = (value) => {
   if (absolute >= 1000) return compact(1000, "tys");
   return `${sign}$${Math.floor(absolute)}`;
 };
+const formatAccruedMoney = (value) => {
+  const amount = Number(value || 0);
+  const sign = amount < 0 ? "-" : "";
+  const absolute = Math.abs(amount);
+
+  if (absolute >= 1000) {
+    return formatMoney(amount);
+  }
+
+  if (absolute <= 0) {
+    return `${sign}$0`;
+  }
+
+  const decimals = absolute >= 100 ? 1 : 2;
+  return `${sign}$${absolute.toFixed(decimals).replace(".", ",")}`;
+};
 const getPassiveCapAmount = (incomePerMinute) => incomePerMinute * PASSIVE_COLLECTION_CAP_MINUTES;
 
 function formatDuration(ms) {
@@ -6556,6 +6572,7 @@ function AppRuntime() {
     EntityBadge,
     Tag,
     formatMoney,
+    formatAccruedMoney,
     formatDuration,
     formatLongDuration,
     formatCooldown,
@@ -6666,6 +6683,7 @@ function AppRuntime() {
     EntityBadge,
     Tag,
     formatMoney,
+    formatAccruedMoney,
     formatLongDuration,
     formatCollectionStamp,
     formatCooldown,
