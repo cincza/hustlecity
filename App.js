@@ -189,14 +189,21 @@ const AVATAR_OPTIONS = [
 
 const TAB_SIGILS = {
   start: "¦",
+  city: "?",
   heists: "?",
   empire: "?",
   market: "?",
   gang: "?",
   profile: "?",
+  dashboard: "¦",
   solo: "?",
   fightclub: "?",
   cell: "?",
+  tasks: "?",
+  bank: "$",
+  gym: "?",
+  restaurant: "?",
+  hospital: "+",
   businesses: "?",
   factories: "?",
   supply: "?",
@@ -498,6 +505,18 @@ const WORLD_GANGS = [
 ];
 
 const TAB_DEFINITIONS = [
+  {
+    id: "city",
+    label: "Miasto",
+    sections: [
+      { id: "dashboard", label: "Miasto", title: "Miasto" },
+      { id: "tasks", label: "Misje", title: "Zadania" },
+      { id: "bank", label: "Bank", title: "Bank" },
+      { id: "gym", label: "Silownia", title: "Silownia" },
+      { id: "restaurant", label: "Jedzenie", title: "Restauracja" },
+      { id: "hospital", label: "Szpital", title: "Szpital" },
+    ],
+  },
   { id: "heists", label: "Napady", sections: [{ id: "solo", label: "Solo", title: "Napady" }, { id: "fightclub", label: "Fight", title: "Fightclub" }, { id: "prison", label: "Cela", title: "Wiezienie" }] },
   { id: "empire", label: "Biznes", sections: [{ id: "businesses", label: "Biznesy", title: "Biznesy" }, { id: "factories", label: "Fabryki", title: "Fabryki" }, { id: "suppliers", label: "Dostawy", title: "Hurtownie" }, { id: "club", label: "Klub", title: "Klub" }] },
   { id: "market", label: "Rynek", sections: [{ id: "street", label: "Handel", title: "Handel" }, { id: "drugs", label: "Towar", title: "Narkotyki" }, { id: "boosts", label: "Boosty", title: "Boosty" }] },
@@ -6691,6 +6710,12 @@ function AppRuntime() {
 
   const renderActiveSection = () => {
     switch (`${tab}:${activeSectionId}`) {
+      case "city:dashboard":
+      case "city:tasks":
+      case "city:bank":
+      case "city:gym":
+      case "city:restaurant":
+      case "city:hospital":
       case "profile:tasks":
       case "profile:bank":
       case "profile:gym":
