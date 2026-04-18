@@ -56,17 +56,29 @@ import {
   updatePlayerAvatar,
 } from "./services/playerActionService.js";
 import {
+  applyClubVisitDeltaToOwnerClub,
   addFriendForPlayer,
   appendPlayerMessage,
   buyDrugFromDealerForPlayer,
   consumeDrugForPlayer,
   fightClubRoundForPlayer,
   placeBountyOnPlayer,
-  searchEscortInClubForPlayer,
+  performClubActionForPlayer,
   sellDrugToDealerForPlayer,
   sendPlayerMessageBetweenPlayers,
   sendQuickMessageBetweenPlayers,
 } from "./services/socialActionService.js";
+import {
+  buyBusinessForPlayer,
+  buyFactoryForPlayer,
+  buyFactorySupplyForPlayer,
+  claimTaskForPlayer,
+  collectBusinessIncomeForPlayer,
+  ensurePlayerEmpireState,
+  produceDrugForPlayer,
+  syncBusinessCollections,
+  upgradeBusinessForPlayer,
+} from "./services/empireActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import {
@@ -77,12 +89,19 @@ import {
 } from "./middleware/auth.js";
 import { logError, logInfo, logWarn } from "./utils/logger.js";
 import {
+  createClubState,
   createDealerInventory,
   createDrugCounterMap,
   createOnlineSocialState,
+  findClubVenueById,
+  getClubNightPlan,
+  getClubPressureAfterDecay,
+  getClubTrafficAfterDecay,
   normalizeDealerInventory,
   normalizeDrugInventory,
+  normalizeClubState,
 } from "../../shared/socialGameplay.js";
+import { createBusinessCollections, createSupplyCounterMap } from "../../shared/empire.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -112,9 +131,9 @@ const allowedOrigins = Array.from(
     "http://127.0.0.1:8090",
   ])
 );
-const ALPHA_TEST_STARTING_CASH = 5000;
-const ALPHA_TEST_STARTING_BANK = 10000;
-const ALPHA_TEST_STARTING_RESPECT = 1;
+const ALPHA_TEST_STARTING_CASH = Math.max(0, Math.floor(Number(process.env.ALPHA_TEST_STARTING_CASH || 5000)));
+const ALPHA_TEST_STARTING_BANK = Math.max(0, Math.floor(Number(process.env.ALPHA_TEST_STARTING_BANK || 10000)));
+const ALPHA_TEST_STARTING_RESPECT = Math.max(1, Math.floor(Number(process.env.ALPHA_TEST_STARTING_RESPECT || 1)));
 const RESET_GAME_ENABLED =
   process.env.ALLOW_TEST_RESET === "1" || process.env.NODE_ENV !== "production";
 const RESET_GAME_TOKEN = String(process.env.RESET_GAME_TOKEN || "").trim();
@@ -260,6 +279,7 @@ function createInitialPlayerData(username = "gracz") {
       heistsWon: 0,
       totalEarned: 0,
       casinoWins: 0,
+      drugBatches: 0,
     },
     inventory: Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0])),
     activeBoosts: [],
@@ -288,19 +308,13 @@ function createInitialPlayerData(username = "gracz") {
     },
     online: createOnlineSocialState(),
     escortsOwned: [],
-    club: {
-      owned: false,
-      name: "Velvet Static",
-      sourceId: null,
-      visitId: null,
-      ownerLabel: null,
-      popularity: 0,
-      mood: 60,
-      policeBase: 0,
-      note: null,
-      lastRunAt: 0,
-      stash: createDrugCounterMap(),
-    },
+    club: createClubState(),
+    businessesOwned: [],
+    businessUpgrades: {},
+    factoriesOwned: {},
+    supplies: createSupplyCounterMap(0),
+    tasksClaimed: [],
+    collections: createBusinessCollections(),
   };
 }
 
@@ -395,35 +409,8 @@ function ensurePlayerExtendedState(player) {
       }))
       .filter((entry) => entry.count > 0);
   }
-  if (!player.club || typeof player.club !== "object" || Array.isArray(player.club)) {
-    player.club = {
-      owned: false,
-      name: "Velvet Static",
-      sourceId: null,
-      visitId: null,
-      ownerLabel: null,
-      popularity: 0,
-      mood: 60,
-      policeBase: 0,
-      note: null,
-      lastRunAt: 0,
-      stash: createDrugCounterMap(),
-    };
-  } else {
-    player.club = {
-      owned: Boolean(player.club.owned),
-      name: typeof player.club.name === "string" ? player.club.name : "Velvet Static",
-      sourceId: player.club.sourceId ?? null,
-      visitId: player.club.visitId ?? null,
-      ownerLabel: player.club.ownerLabel ?? null,
-      popularity: Math.max(0, Math.floor(Number(player.club.popularity || 0))),
-      mood: Math.max(0, Math.floor(Number(player.club.mood || 60))),
-      policeBase: Math.max(0, Math.floor(Number(player.club.policeBase || 0))),
-      note: player.club.note ?? null,
-      lastRunAt: Math.max(0, Math.floor(Number(player.club.lastRunAt || 0))),
-      stash: normalizeDrugInventory(player.club.stash),
-    };
-  }
+  player.club = normalizeClubState(player.club);
+  ensurePlayerEmpireState(player);
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile.bounty || 0)));
 }
 
@@ -545,6 +532,69 @@ async function buildSocialSnapshot(now = Date.now()) {
     time: new Date(entry.createdAt).toISOString(),
   }));
   return { roster, globalChat };
+}
+
+function buildClubVenueFromPlayer(player) {
+  const club = normalizeClubState(player?.club);
+  const ownerLabel =
+    club.ownerLabel ||
+    (typeof player?.profile?.name === "string" && player.profile.name.trim()
+      ? player.profile.name
+      : "Gracz");
+
+  return {
+    id: club.sourceId,
+    name: club.name,
+    ownerLabel,
+    respect: Math.max(0, Math.floor(Number(player?.profile?.respect || 0))),
+    takeoverCost: ECONOMY_RULES.empire.clubTakeoverCost,
+    popularity: club.popularity,
+    mood: club.mood,
+    policeBase: Math.max(club.policeBase, Math.round(Number(club.policePressure || 0) / 8)),
+    policePressure: Number(club.policePressure || 0),
+    traffic: Number(club.traffic || 0),
+    nightPlanId: club.nightPlanId,
+    note: club.note || "Prywatny lokal gracza. Ruch i presja licza sie z wizyt.",
+  };
+}
+
+async function findClubOwnerRecordByVenueId(venueId) {
+  const safeVenueId = String(venueId || "").trim();
+  if (!safeVenueId) return null;
+  const users = await listUsers();
+  return (
+    users.find(
+      (entry) =>
+        entry?.playerData?.club?.owned &&
+        String(entry.playerData.club.sourceId || "").trim() === safeVenueId
+    ) || null
+  );
+}
+
+function resolveClubVenueSnapshot(venueId, { ownerRecord = null, fallbackPlayer = null } = {}) {
+  const safeVenueId = String(venueId || "").trim();
+  if (!safeVenueId) return null;
+
+  if (ownerRecord?.playerData?.club?.owned) {
+    return buildClubVenueFromPlayer(ownerRecord.playerData);
+  }
+
+  if (
+    fallbackPlayer?.club?.owned &&
+    String(fallbackPlayer.club.sourceId || "").trim() === safeVenueId
+  ) {
+    return buildClubVenueFromPlayer(fallbackPlayer);
+  }
+
+  const staticVenue = findClubVenueById(safeVenueId);
+  if (!staticVenue) return null;
+
+  return {
+    ...staticVenue,
+    nightPlanId: getClubNightPlan().id,
+    traffic: 0,
+    policePressure: Math.max(0, Number(staticVenue.policeBase || 0) * 3),
+  };
 }
 
 async function buildFriendEntries(player, now = Date.now()) {
@@ -673,9 +723,23 @@ function syncPlayerEnergy(player, now = Date.now()) {
   }
 }
 
+function syncClubState(player, now = Date.now()) {
+  if (!player?.club || typeof player.club !== "object") return;
+  const referenceAt = Math.max(
+    0,
+    Math.floor(Number(player.club.lastTrafficAt || player.club.lastRunAt || now))
+  );
+  const elapsedMs = Math.max(0, now - referenceAt);
+  player.club.traffic = getClubTrafficAfterDecay(player.club.traffic, elapsedMs);
+  player.club.policePressure = getClubPressureAfterDecay(player.club.policePressure, elapsedMs);
+  player.club.lastTrafficAt = now;
+}
+
 function syncPlayerState(player, now = Date.now()) {
   ensurePlayerExtendedState(player);
   syncPlayerEnergy(player, now);
+  syncClubState(player, now);
+  syncBusinessCollections(player, now);
   player.activeBoosts = player.activeBoosts.filter((entry) => Number(entry?.expiresAt || 0) > now);
   player.profile.level = getLevelFromRespect(player.profile.respect);
   player.profile.xp = Math.max(0, Math.floor(Number(player.profile.xp) || 0));
@@ -739,6 +803,12 @@ function publicPlayer(player, now = Date.now()) {
     drugInventory: player.drugInventory,
     dealerInventory: player.dealerInventory,
     escortsOwned: player.escortsOwned,
+    businessesOwned: player.businessesOwned,
+    businessUpgrades: player.businessUpgrades,
+    factoriesOwned: player.factoriesOwned,
+    supplies: player.supplies,
+    tasksClaimed: player.tasksClaimed,
+    collections: player.collections,
     club: player.club,
     online: {
       friends: player.online?.friends || [],
@@ -1728,6 +1798,148 @@ app.post("/player/jail/bribe", auth, asyncHandler(async (req, res) => {
   res.json({ user: publicPlayer(req.player, now) });
 }));
 
+app.post("/tasks/claim", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const taskId = String(req.body?.taskId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "tasks-claim", async () => {
+    await commitPlayerMutation(req, "tasks-claim", async (player) => {
+      result = claimTaskForPlayer(player, taskId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/businesses/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const businessId = String(req.body?.businessId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "business-buy", async () => {
+    await commitPlayerMutation(req, "business-buy", async (player) => {
+      result = buyBusinessForPlayer(player, businessId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/businesses/upgrade", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const businessId = String(req.body?.businessId || "").trim();
+  const path = String(req.body?.path || "").trim().toLowerCase();
+  let result = null;
+
+  await withPlayerActionLock(req, "business-upgrade", async () => {
+    await commitPlayerMutation(req, "business-upgrade", async (player) => {
+      result = upgradeBusinessForPlayer(player, businessId, path, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/businesses/collect", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+
+  await withPlayerActionLock(req, "business-collect", async () => {
+    await commitPlayerMutation(req, "business-collect", async (player) => {
+      result = collectBusinessIncomeForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/factories/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const factoryId = String(req.body?.factoryId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "factory-buy", async () => {
+    await commitPlayerMutation(req, "factory-buy", async (player) => {
+      result = buyFactoryForPlayer(player, factoryId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/factories/supplies/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const supplyId = String(req.body?.supplyId || "").trim();
+  const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
+    min: 1,
+    max: 50,
+    field: "quantity",
+  });
+  if (parsedQuantity.error) {
+    res.status(400).json({ error: parsedQuantity.error });
+    return;
+  }
+  let result = null;
+
+  await withPlayerActionLock(req, "factory-supply-buy", async () => {
+    await commitPlayerMutation(req, "factory-supply-buy", async (player) => {
+      result = buyFactorySupplyForPlayer(player, supplyId, parsedQuantity.value, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/factories/produce", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const drugId = String(req.body?.drugId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "factory-produce", async () => {
+    await commitPlayerMutation(req, "factory-produce", async (player) => {
+      result = produceDrugForPlayer(player, drugId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
 app.post("/fightclub/round", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   let result = null;
@@ -1816,17 +2028,181 @@ app.post("/dealer/consume", auth, asyncHandler(async (req, res) => {
   });
 }));
 
+app.post("/clubs/visit", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const mode = String(req.body?.mode || req.body?.action || "enter").trim().toLowerCase();
+  const venueId = String(req.body?.venueId || "").trim();
+
+  await withPlayerActionLock(req, `clubs-visit:${mode}`, async () => {
+    await commitPlayerMutation(req, "clubs-visit", async (player) => {
+      if (mode === "leave") {
+        const previousVenueId = player.club?.visitId || null;
+        player.club.visitId = null;
+        pushLog(
+          player,
+          previousVenueId
+            ? "Wychodzisz z klubu i znikasz z sali."
+            : "Nie siedzialeś teraz w zadnym klubie."
+        );
+        return null;
+      }
+
+      const venue = resolveClubVenueSnapshot(venueId, { fallbackPlayer: player });
+      if (!venue) {
+        const error = new Error("Nie ma takiego lokalu na mapie miasta.");
+        error.statusCode = 404;
+        throw error;
+      }
+
+      player.club.visitId = venue.id;
+      pushLog(player, `Wchodzisz do ${venue.name}.`);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+  });
+}));
+
+app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const actionId = String(req.body?.actionId || "").trim().toLowerCase();
+  const venueId = String(req.body?.venueId || req.player?.club?.visitId || "").trim();
+  if (!["scout", "hunt", "laylow"].includes(actionId)) {
+    res.status(400).json({ error: "Unknown club action." });
+    return;
+  }
+  if (!venueId) {
+    res.status(400).json({ error: "Najpierw wejdz do jakiegos klubu." });
+    return;
+  }
+  const ownerRecordPreview = await findClubOwnerRecordByVenueId(venueId);
+  const ownerUserId =
+    ownerRecordPreview?._id && ownerRecordPreview._id !== req.user.id ? ownerRecordPreview._id : null;
+  let result = null;
+
+  await withUserMutationLocks([req.user.id, ownerUserId].filter(Boolean), `club-action:${venueId}`, async () => {
+    const actorRecord = await findUserById(req.user.id);
+    const ownerRecord = ownerUserId ? await findUserById(ownerUserId) : null;
+
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    const actor = actorRecord.playerData;
+    syncPlayerState(actor, now);
+    if (ownerRecord?.playerData) {
+      syncPlayerState(ownerRecord.playerData, now);
+    }
+
+    const venue = resolveClubVenueSnapshot(venueId, {
+      ownerRecord,
+      fallbackPlayer: actor,
+    });
+    if (!venue) {
+      const error = new Error("Najpierw wejdz do jakiegos klubu.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const ownerSelfVisit = Boolean(actor.club?.owned && actor.club.sourceId === venue.id);
+    result = performClubActionForPlayer(actor, {
+      actionId,
+      venue,
+      now,
+      ownerSelfVisit,
+    });
+    pushLog(actor, result.logMessage);
+
+    if (ownerRecord?.playerData) {
+      applyClubVisitDeltaToOwnerClub(ownerRecord.playerData, venue.id, result.ownerDelta, now);
+    } else if (ownerSelfVisit) {
+      applyClubVisitDeltaToOwnerClub(actor, venue.id, result.ownerDelta, now);
+    }
+
+    const persistTasks = [persistPlayerForUser(actorRecord._id, actor)];
+    if (ownerRecord?.playerData) {
+      persistTasks.push(persistPlayerForUser(ownerRecord._id, ownerRecord.playerData));
+    }
+
+    const [updatedActorRecord] = await Promise.all(persistTasks);
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+  });
+
+  logInfo("clubs", "action", {
+    userId: req.user.id,
+    venueId,
+    actionId,
+    outcome: result?.outcome || "unknown",
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
 app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const venueId = String(req.body?.venueId || req.player?.club?.visitId || "").trim();
+  const ownerRecordPreview = await findClubOwnerRecordByVenueId(venueId);
+  const ownerUserId =
+    ownerRecordPreview?._id && ownerRecordPreview._id !== req.user.id ? ownerRecordPreview._id : null;
   let result = null;
 
-  await withPlayerActionLock(req, "clubs-search-escort", async () => {
-    await commitPlayerMutation(req, "clubs-search-escort", async (player) => {
-      result = searchEscortInClubForPlayer(player, venueId, now);
-      pushLog(player, result.logMessage);
-      return null;
+  await withUserMutationLocks([req.user.id, ownerUserId].filter(Boolean), `club-hunt:${venueId}`, async () => {
+    const actorRecord = await findUserById(req.user.id);
+    const ownerRecord = ownerUserId ? await findUserById(ownerUserId) : null;
+
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    const actor = actorRecord.playerData;
+    syncPlayerState(actor, now);
+    if (ownerRecord?.playerData) {
+      syncPlayerState(ownerRecord.playerData, now);
+    }
+
+    const venue = resolveClubVenueSnapshot(venueId, {
+      ownerRecord,
+      fallbackPlayer: actor,
     });
+    if (!venue) {
+      const error = new Error("Najpierw wejdz do jakiegos klubu.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const ownerSelfVisit = Boolean(actor.club?.owned && actor.club.sourceId === venue.id);
+    result = performClubActionForPlayer(actor, {
+      actionId: "hunt",
+      venue,
+      now,
+      ownerSelfVisit,
+    });
+    pushLog(actor, result.logMessage);
+
+    if (ownerRecord?.playerData) {
+      applyClubVisitDeltaToOwnerClub(ownerRecord.playerData, venue.id, result.ownerDelta, now);
+    } else if (ownerSelfVisit) {
+      applyClubVisitDeltaToOwnerClub(actor, venue.id, result.ownerDelta, now);
+    }
+
+    const persistTasks = [persistPlayerForUser(actorRecord._id, actor)];
+    if (ownerRecord?.playerData) {
+      persistTasks.push(persistPlayerForUser(ownerRecord._id, ownerRecord.playerData));
+    }
+
+    const [updatedActorRecord] = await Promise.all(persistTasks);
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
   });
 
   logInfo("clubs", "search-escort", {

@@ -1,7 +1,10 @@
 import { applyXpProgression } from "../../../shared/progression.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
+  CLUB_SYSTEM_RULES,
+  CLUB_VISITOR_ACTIONS,
   CLUB_MARKET,
+  createClubState,
   DRUGS,
   ESCORTS,
   FIGHT_CLUB_ENERGY_COST,
@@ -14,6 +17,15 @@ import {
   createOnlineSocialState,
   findClubVenueById,
   findDrugById,
+  findEscortById,
+  getClubNightPlan,
+  getClubPressureAfterDecay,
+  getClubTrafficAfterDecay,
+  getClubVenueProfile,
+  getClubVisitDiminishing,
+  getClubVisitorAction,
+  getLeadTargetEscortForVenue,
+  normalizeClubState,
 } from "../../../shared/socialGameplay.js";
 
 function fail(message, statusCode = 400) {
@@ -55,25 +67,7 @@ function ensurePlayerSocialState(player) {
   if (!Array.isArray(player.escortsOwned)) {
     player.escortsOwned = [];
   }
-  if (!player.club || typeof player.club !== "object" || Array.isArray(player.club)) {
-    player.club = {
-      owned: false,
-      name: "Velvet Static",
-      sourceId: null,
-      visitId: null,
-      ownerLabel: null,
-      popularity: 0,
-      mood: 60,
-      policeBase: 0,
-      note: null,
-      lastRunAt: 0,
-      stash: createDrugCounterMap(),
-    };
-  } else {
-    if (!player.club.stash || typeof player.club.stash !== "object" || Array.isArray(player.club.stash)) {
-      player.club.stash = createDrugCounterMap();
-    }
-  }
+  player.club = normalizeClubState(player.club || createClubState());
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile?.bounty || 0)));
 }
 
@@ -379,122 +373,310 @@ export function placeBountyOnPlayer(actorPlayer, targetPlayer, targetName, now =
   };
 }
 
-function getClubVenueProfile(venue) {
-  const popularity = Number(venue?.popularity || 0);
-  const mood = Number(venue?.mood || 0);
-  const respect = Number(venue?.respect || 0);
-  const policeBase = Number(venue?.policeBase || 0);
+function getDayKey(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10);
+}
 
-  return {
-    escortBonus: clampSocialValue(
-      0.008 + popularity * 0.0012 + mood * 0.0006 - policeBase * 0.0008,
-      0.008,
-      0.09
-    ),
-    contactChance: clampSocialValue(
-      0.06 + popularity * 0.0022 + mood * 0.0014 - policeBase * 0.001,
-      0.06,
-      0.34
-    ),
-    drugChance: clampSocialValue(
-      0.05 + popularity * 0.002 + respect * 0.0018 - policeBase * 0.0011,
-      0.05,
-      0.32
-    ),
-    eventChance: clampSocialValue(0.08 + popularity * 0.0018 + mood * 0.0012, 0.08, 0.36),
+function syncClubPassiveState(club, now = Date.now()) {
+  if (!club || typeof club !== "object") return;
+  const referenceAt = Math.max(0, Math.floor(Number(club.lastTrafficAt || club.lastRunAt || now)));
+  const elapsedMs = Math.max(0, now - referenceAt);
+  club.traffic = getClubTrafficAfterDecay(club.traffic, elapsedMs);
+  club.policePressure = getClubPressureAfterDecay(club.policePressure, elapsedMs);
+  club.lastTrafficAt = now;
+}
+
+function getVenueAffinity(player, venueId, now = Date.now()) {
+  const guestState = player.club.guestState;
+  if (!guestState.affinity[venueId]) {
+    guestState.affinity[venueId] = {
+      visits: 0,
+      lastVisitAt: 0,
+      tipDayKey: getDayKey(now),
+      tipValueToday: 0,
+      tipCountToday: 0,
+    };
+  }
+  const entry = guestState.affinity[venueId];
+  const dayKey = getDayKey(now);
+  if (entry.tipDayKey !== dayKey) {
+    entry.tipDayKey = dayKey;
+    entry.tipValueToday = 0;
+    entry.tipCountToday = 0;
+  }
+  return entry;
+}
+
+function setLastClubOutcome(player, now, outcome) {
+  player.club.guestState.lastActionAt = now;
+  player.club.guestState.lastActionType = outcome.actionId;
+  player.club.guestState.lastVenueId = outcome.venueId;
+  player.club.guestState.lastOutcome = {
+    ...outcome,
+    time: createTimeLabel(now),
   };
 }
 
-export function searchEscortInClubForPlayer(player, venueId, now = Date.now()) {
-  ensurePlayerSocialState(player);
-  if (Number(player?.profile?.jailUntil || 0) > now) {
-    fail("Nie szukasz kontaktow z celi.");
+export function applyClubVisitDeltaToOwnerClub(ownerPlayer, venueId, delta = {}, now = Date.now()) {
+  ensurePlayerSocialState(ownerPlayer);
+  if (!ownerPlayer.club?.owned || ownerPlayer.club.sourceId !== venueId) {
+    return null;
   }
 
-  const venue = findClubVenueById(venueId);
-  if (!venue) {
-    fail("Najpierw wejdz do jakiegos klubu. Dopiero tam szukasz kontaktow.", 404);
-  }
-  if (Number(player.profile?.cash || 0) < CLUB_ESCORT_SEARCH_COST) {
-    fail(`Brakuje $${CLUB_ESCORT_SEARCH_COST} na wejscie i szukanie kontaktow.`);
-  }
-
-  const profile = getClubVenueProfile(venue);
-  const baseChance = clampSocialValue(
-    0.03 +
-      Number(player.profile?.charisma || 0) * 0.004 +
-      Number(player.profile?.dexterity || 0) * 0.003 +
-      profile.escortBonus,
-    0.03,
-    0.26
+  syncClubPassiveState(ownerPlayer.club, now);
+  ownerPlayer.club.traffic = clampSocialValue(
+    Number(ownerPlayer.club.traffic || 0) + Number(delta.trafficGain || 0),
+    0,
+    CLUB_SYSTEM_RULES.nightlyTrafficHardCap
   );
-  const unlockedEscorts = ESCORTS.filter((escort) => escort.respect <= Number(player.profile?.respect || 0));
-  const foundEscort = unlockedEscorts.length > 0 && Math.random() < baseChance;
+  ownerPlayer.club.policePressure = clampSocialValue(
+    Number(ownerPlayer.club.policePressure || 0) + Number(delta.pressureGain || 0),
+    0,
+    100
+  );
+  ownerPlayer.club.lastTrafficAt = now;
 
-  player.profile.cash = Number(player.profile.cash || 0) - CLUB_ESCORT_SEARCH_COST;
-
-  if (foundEscort) {
-    const weightedPool = unlockedEscorts.flatMap((escort) =>
-      Array.from({ length: Math.max(1, 32 - escort.respect) }, () => escort)
-    );
-    const escort = weightedPool[randomBetween(0, weightedPool.length - 1)];
-    ensureEscortOwnedEntry(player, escort);
-
-    return {
-      outcome: "escort",
-      escort,
-      chance: Number(baseChance.toFixed(4)),
-      logMessage: `W ${venue.name} siada kontakt: ${escort.name}. Dragowy klimat podbil szanse wejscia na ${Math.round(baseChance * 100)}%.`,
+  if (ownerPlayer.club.policePressure >= 68) {
+    ownerPlayer.club.recentIncident = {
+      tone: "risk",
+      text: "Przy wejsciu kreci sie patrol. Ruch nadal robi wynik, ale robi sie goraco.",
+      createdAt: now,
+    };
+  } else if (ownerPlayer.club.traffic >= CLUB_SYSTEM_RULES.nightlyTrafficSoftCap) {
+    ownerPlayer.club.recentIncident = {
+      tone: "traffic",
+      text: "Lokal lapie gruby ruch. Dobra noc, ale trzeba pilnowac cisnienia.",
+      createdAt: now,
+    };
+  } else if (Number(delta.pressureGain || 0) < 0) {
+    ownerPlayer.club.recentIncident = {
+      tone: "calm",
+      text: "Sala przycichla. Presja schodzi i drzwi oddychaja.",
+      createdAt: now,
     };
   }
 
-  const eventRoll = Math.random();
-  if (eventRoll < profile.eventChance) {
-    if (eventRoll < profile.drugChance) {
-      const unlockedDrugs = DRUGS.filter((drug) => drug.unlockRespect <= Number(player.profile?.respect || 0));
-      const foundDrug = unlockedDrugs[randomBetween(0, Math.max(0, unlockedDrugs.length - 1))];
-      if (foundDrug) {
-        player.drugInventory[foundDrug.id] = Number(player.drugInventory?.[foundDrug.id] || 0) + 1;
-        return {
-          outcome: "drug",
-          drug: foundDrug,
-          logMessage: `W ${venue.name} wpada probka: ${foundDrug.name}. Lokal ma klimat i towar krazy po stolach.`,
-        };
-      }
-    }
+  return {
+    traffic: ownerPlayer.club.traffic,
+    policePressure: ownerPlayer.club.policePressure,
+  };
+}
 
-    if (eventRoll < profile.contactChance) {
-      const tipCash = Math.floor(180 + Number(venue.popularity || 0) * 14 + Number(venue.mood || 0) * 9);
-      const xpTip = Number(venue.popularity || 0) >= 32 ? 9 : 0;
-      player.profile.cash = Number(player.profile.cash || 0) + tipCash;
-      if (xpTip > 0) {
-        const progression = applyXpProgression(
-          { respect: player.profile.respect, xp: player.profile.xp },
-          xpTip
-        );
-        player.profile.respect = progression.respect;
-        player.profile.xp = progression.xp;
-        player.profile.level = progression.respect;
-      }
-      appendPlayerMessage(player, {
-        from: venue.ownerLabel || "Miasto",
-        subject: `Kontakt z ${venue.name}`,
-        preview: `Lokal podrzuca trop. Wpada $${tipCash} i nowy numer do ludzi z zaplecza.`,
-        time: createTimeLabel(now),
-      });
-      return {
-        outcome: "contact",
-        rewardCash: tipCash,
-        rewardXp: xpTip,
-        logMessage: `${venue.name} podrzuca kontakt. Wpada $${tipCash}${xpTip ? ` i +${xpTip} XP` : ""}.`,
-      };
-    }
+export function performClubActionForPlayer(
+  player,
+  {
+    actionId,
+    venue,
+    now = Date.now(),
+    ownerSelfVisit = false,
+  } = {}
+) {
+  ensurePlayerSocialState(player);
+  if (Number(player?.profile?.jailUntil || 0) > now) {
+    fail("Nie ogarniasz klubu z celi.");
   }
 
-  return {
-    outcome: "miss",
-    logMessage: `Obszedles ${venue.name} i spaliles $${CLUB_ESCORT_SEARCH_COST}. Nic konkretnego dzis nie wpadlo.`,
-  };
+  const targetVenue =
+    venue && typeof venue === "object"
+      ? venue
+      : findClubVenueById(String(venue || player?.club?.visitId || "").trim());
+  if (!targetVenue) {
+    fail("Najpierw wejdz do jakiegos klubu. Dopiero tam ruszasz z akcjami.", 404);
+  }
+
+  const action = getClubVisitorAction(actionId);
+  const guestState = player.club.guestState;
+  const cooldownRemaining = Math.max(0, Number(guestState.lastActionAt || 0) + CLUB_SYSTEM_RULES.actionCooldownMs - now);
+  if (cooldownRemaining > 0) {
+    fail(`Klub jeszcze trzyma Cie na cooldownie przez ${Math.ceil(cooldownRemaining / 1000)}s.`);
+  }
+
+  player.club.visitId = targetVenue.id;
+  syncClubPassiveState(player.club, now);
+
+  const venuePlanId =
+    targetVenue?.nightPlanId ||
+    (player.club.owned && player.club.sourceId === targetVenue.id ? player.club.nightPlanId : getClubNightPlan().id);
+  const profile = getClubVenueProfile(targetVenue, { planId: venuePlanId });
+  const affinity = getVenueAffinity(player, targetVenue.id, now);
+  const nextVisitCount = affinity.visits + 1;
+  const diminishing = getClubVisitDiminishing(nextVisitCount, ownerSelfVisit);
+
+  let result = null;
+  if (action.id === "scout") {
+    const dailyBudgetLeft = Math.max(0, CLUB_SYSTEM_RULES.scoutTipDailyCapPerVenue - Number(affinity.tipValueToday || 0));
+    const tipSlotsLeft = Math.max(0, CLUB_SYSTEM_RULES.scoutTipCountCapPerVenue - Number(affinity.tipCountToday || 0));
+    const rawTip = Math.max(0, Math.floor(profile.scoutTipValue * diminishing));
+    const cashTip =
+      dailyBudgetLeft > 0 && tipSlotsLeft > 0
+        ? Math.max(0, Math.min(rawTip, dailyBudgetLeft, 180))
+        : 0;
+
+    if (cashTip > 0) {
+      player.profile.cash = Number(player.profile.cash || 0) + cashTip;
+      affinity.tipValueToday = Number(affinity.tipValueToday || 0) + cashTip;
+      affinity.tipCountToday = Number(affinity.tipCountToday || 0) + 1;
+      appendPlayerMessage(player, {
+        from: targetVenue.ownerLabel || "Miasto",
+        subject: `Scout: ${targetVenue.name}`,
+        preview: `Sala puszcza dyskretny tip. Wpada $${cashTip} i czystszy obraz sytuacji.`,
+        time: createTimeLabel(now),
+      });
+    }
+
+    result = {
+      actionId: action.id,
+      venueId: targetVenue.id,
+      venueName: targetVenue.name,
+      outcome: cashTip > 0 ? "tip" : "intel",
+      cashTip,
+      leadGain: 0,
+      heatReduced: 0,
+      hpRecovered: 0,
+      ownerDelta: {
+        trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
+        pressureGain: Number((0.9 * profile.pressureScale).toFixed(3)),
+      },
+      logMessage:
+        cashTip > 0
+          ? `${targetVenue.name} rzuca maly tip. Wpada $${cashTip} bez rozwalania ekonomii.`
+          : `${targetVenue.name} daje czysty odczyt sali, ale dzis bez koperty.`,
+    };
+  } else if (action.id === "hunt") {
+    if (Number(player.profile?.cash || 0) < action.costCash) {
+      fail(`Brakuje $${action.costCash} na wejscie i gonienie kontaktow.`);
+    }
+
+    const leadTarget =
+      guestState.leadVenueId === targetVenue.id && guestState.leadEscortId
+        ? findEscortById(guestState.leadEscortId)
+        : getLeadTargetEscortForVenue({
+            playerRespect: player.profile?.respect || 0,
+            venue: targetVenue,
+            planId: venuePlanId,
+          });
+
+    if (!leadTarget) {
+      fail("Na tym progu jeszcze nie ma kogo namierzac w klubie.");
+    }
+
+    if (guestState.leadVenueId !== targetVenue.id || guestState.leadEscortId !== leadTarget.id) {
+      guestState.leadVenueId = targetVenue.id;
+      guestState.leadEscortId = leadTarget.id;
+      guestState.leadProgress = 0;
+    }
+
+    const progressGain = Math.max(
+      12,
+      Math.min(
+        46,
+        Math.round(
+          (profile.huntProgressValue +
+            Number(player.profile?.charisma || 0) * 0.42 +
+            Number(player.profile?.dexterity || 0) * 0.28) *
+            diminishing
+        )
+      )
+    );
+
+    player.profile.cash = Number(player.profile.cash || 0) - action.costCash;
+    guestState.leadProgress = Math.min(guestState.leadRequired, Number(guestState.leadProgress || 0) + progressGain);
+
+    let unlockedEscort = null;
+    if (guestState.leadProgress >= guestState.leadRequired) {
+      unlockedEscort = leadTarget;
+      ensureEscortOwnedEntry(player, unlockedEscort);
+      guestState.leadProgress = 0;
+      guestState.leadVenueId = targetVenue.id;
+      guestState.leadEscortId = leadTarget.id;
+      appendPlayerMessage(player, {
+        from: targetVenue.ownerLabel || "Miasto",
+        subject: `Kontakt z ${targetVenue.name}`,
+        preview: `Lead domkniety. Do siatki wpada ${unlockedEscort.name}.`,
+        time: createTimeLabel(now),
+      });
+    }
+
+    result = {
+      actionId: action.id,
+      venueId: targetVenue.id,
+      venueName: targetVenue.name,
+      outcome: unlockedEscort ? "escort" : "progress",
+      cashTip: 0,
+      leadGain: progressGain,
+      leadTargetId: leadTarget.id,
+      leadTargetName: leadTarget.name,
+      leadProgress: guestState.leadProgress,
+      leadRequired: guestState.leadRequired,
+      escort: unlockedEscort,
+      heatReduced: 0,
+      hpRecovered: 0,
+      ownerDelta: {
+        trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
+        pressureGain: Number((2.2 * profile.pressureScale).toFixed(3)),
+      },
+      logMessage: unlockedEscort
+        ? `${targetVenue.name}: lead meter dobity i wpada ${unlockedEscort.name}.`
+        : `${targetVenue.name}: kontakt ruszyl do przodu o ${progressGain} pkt.`,
+    };
+  } else {
+    const heatReduced = Math.min(
+      Number(player.profile?.heat || 0),
+      Math.max(0, Math.floor(profile.layLowHeat * Math.max(0.7, diminishing + 0.18)))
+    );
+    const hpRecovered = Math.min(
+      Math.max(0, Number(player.profile?.maxHp || 0) - Number(player.profile?.hp || 0)),
+      Math.max(0, Math.floor(profile.layLowHp * Math.max(0.7, diminishing + 0.22)))
+    );
+
+    player.profile.heat = Math.max(0, Number(player.profile.heat || 0) - heatReduced);
+    player.profile.hp = Math.min(
+      Number(player.profile.maxHp || 0),
+      Number(player.profile.hp || 0) + hpRecovered
+    );
+
+    if (ownerSelfVisit && player.club.owned && player.club.sourceId === targetVenue.id) {
+      player.club.policePressure = Math.max(
+        0,
+        Number(player.club.policePressure || 0) - Math.max(2, Math.floor(3 * profile.plan.layLowMultiplier))
+      );
+    }
+
+    result = {
+      actionId: action.id,
+      venueId: targetVenue.id,
+      venueName: targetVenue.name,
+      outcome: heatReduced || hpRecovered ? "reset" : "calm",
+      cashTip: 0,
+      leadGain: 0,
+      heatReduced,
+      hpRecovered,
+      ownerDelta: {
+        trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
+        pressureGain: Number((-1.8 / Math.max(0.85, profile.pressureScale)).toFixed(3)),
+      },
+      logMessage:
+        heatReduced || hpRecovered
+          ? `${targetVenue.name}: znikasz w cieniu. Heat -${heatReduced}, HP +${hpRecovered}.`
+          : `${targetVenue.name}: przeczekales chwile i sala oddycha lzej.`,
+    };
+  }
+
+  affinity.visits = nextVisitCount;
+  affinity.lastVisitAt = now;
+  setLastClubOutcome(player, now, result);
+
+  return result;
+}
+
+export function searchEscortInClubForPlayer(player, venueId, now = Date.now()) {
+  const venue = findClubVenueById(venueId);
+  return performClubActionForPlayer(player, {
+    actionId: "hunt",
+    venue,
+    now,
+    ownerSelfVisit: false,
+  });
 }
 
 export function getKnownClubVenues() {

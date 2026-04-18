@@ -54,6 +54,19 @@ async function request(pathname, { method = "GET", token, body } = {}) {
   return data;
 }
 
+async function expectRequestFailure(pathname, options = {}, pattern) {
+  try {
+    await request(pathname, options);
+  } catch (error) {
+    if (pattern && !pattern.test(String(error.message || ""))) {
+      throw new Error(`Endpoint ${pathname} zwrocil inny blad niz oczekiwano: ${error.message}`);
+    }
+    return;
+  }
+
+  throw new Error(`Endpoint ${pathname} mial zwrocic blad, ale przeszedl.`);
+}
+
 function startServer(dataDir) {
   const child = spawn(
     process.execPath,
@@ -68,6 +81,9 @@ function startServer(dataDir) {
         JWT_SECRET: "smoke-test-secret",
         CORS_ORIGIN: "http://localhost:8090",
         DATA_DIR: dataDir,
+        ALPHA_TEST_STARTING_CASH: "7500000",
+        ALPHA_TEST_STARTING_BANK: "5000000",
+        ALPHA_TEST_STARTING_RESPECT: "30",
       },
       stdio: ["ignore", "pipe", "pipe"],
     }
@@ -173,6 +189,16 @@ async function main() {
       token,
     });
 
+    await request(`/heists/${starterHeist.id}/execute`, {
+      method: "POST",
+      token,
+    });
+
+    await request(`/heists/${starterHeist.id}/execute`, {
+      method: "POST",
+      token,
+    });
+
     await request("/chat/global", {
       method: "POST",
       token,
@@ -185,11 +211,134 @@ async function main() {
       body: { passId: "day" },
     });
 
+    const claimedGymTask = await request("/tasks/claim", {
+      method: "POST",
+      token,
+      body: { taskId: "gym-pass" },
+    });
+
+    if (!claimedGymTask?.result?.rewardCash) {
+      throw new Error("Claim taska gym-pass nie zwrocil nagrody.");
+    }
+
     await request("/player/gym/train", {
       method: "POST",
       token,
       body: { exerciseId: "power" },
     });
+
+    const claimedFirstWaveTask = await request("/tasks/claim", {
+      method: "POST",
+      token,
+      body: { taskId: "first-wave" },
+    });
+
+    if (!claimedFirstWaveTask?.result?.rewardXp) {
+      throw new Error("Claim taska first-wave nie zwrocil XP.");
+    }
+
+    await expectRequestFailure(
+      "/tasks/claim",
+      {
+        method: "POST",
+        token,
+        body: { taskId: "crew" },
+      },
+      /gang|serwerowo/i
+    );
+
+    await expectRequestFailure(
+      "/tasks/claim",
+      {
+        method: "POST",
+        token,
+        body: { taskId: "club" },
+      },
+      /klub/i
+    );
+
+    const boughtBusiness = await request("/businesses/buy", {
+      method: "POST",
+      token,
+      body: { businessId: "tower" },
+    });
+
+    if (!Array.isArray(boughtBusiness?.user?.businessesOwned) || !boughtBusiness.user.businessesOwned.some((entry) => entry.id === "tower")) {
+      throw new Error("Kupno biznesu nie zapisalo ownership na backendzie.");
+    }
+
+    await delay(1300);
+
+    const collectedBusiness = await request("/businesses/collect", {
+      method: "POST",
+      token,
+    });
+
+    if (!Number.isFinite(collectedBusiness?.result?.payout) || collectedBusiness.result.payout <= 0) {
+      throw new Error("Collect biznesu nie zwrocil dodatniego payoutu.");
+    }
+    if (Math.floor(Number(collectedBusiness?.user?.collections?.businessCash || 0)) !== 0) {
+      throw new Error("Collect biznesu nie wyzerowal skrytki.");
+    }
+
+    const boughtFactory = await request("/factories/buy", {
+      method: "POST",
+      token,
+      body: { factoryId: "smokeworks" },
+    });
+
+    if (Number(boughtFactory?.user?.factoriesOwned?.smokeworks || 0) <= 0) {
+      throw new Error("Kupno fabryki nie zapisalo ownership.");
+    }
+
+    await request("/factories/supplies/buy", {
+      method: "POST",
+      token,
+      body: { supplyId: "tobacco", quantity: 2 },
+    });
+
+    const boughtPackaging = await request("/factories/supplies/buy", {
+      method: "POST",
+      token,
+      body: { supplyId: "packaging", quantity: 1 },
+    });
+
+    if (Number(boughtPackaging?.user?.supplies?.tobacco || 0) < 2 || Number(boughtPackaging?.user?.supplies?.packaging || 0) < 1) {
+      throw new Error("Kupno dostaw nie podnioslo stanu supplies.");
+    }
+
+    let producedDrug = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      producedDrug = await request("/factories/produce", {
+        method: "POST",
+        token,
+        body: { drugId: "smokes" },
+      });
+      if (!producedDrug?.result?.busted) {
+        break;
+      }
+
+      await request("/factories/supplies/buy", {
+        method: "POST",
+        token,
+        body: { supplyId: "tobacco", quantity: 2 },
+      });
+      await request("/factories/supplies/buy", {
+        method: "POST",
+        token,
+        body: { supplyId: "packaging", quantity: 1 },
+      });
+    }
+
+    if (producedDrug?.result?.busted) {
+      throw new Error("Produkcja smokes trafila bust 3 razy pod rzad, przez co smoke stalby sie losowy.");
+    }
+    if (Number(producedDrug?.user?.drugInventory?.smokes || 0) <= 0) {
+      throw new Error("Produkcja nie dodala towaru do magazynu.");
+    }
+    if (Number(producedDrug?.user?.stats?.drugBatches || 0) < 1) {
+      throw new Error("Produkcja nie podniosla statystyki drugBatches.");
+    }
 
     await request("/player/profile/avatar", {
       method: "POST",
@@ -310,14 +459,20 @@ async function main() {
       throw new Error("Bounty nie podnioslo nagrody za glowe.");
     }
 
-    const escortSearchResult = await request("/clubs/search-escort", {
+    await request("/clubs/visit", {
       method: "POST",
       token,
-      body: { venueId: "club-1" },
+      body: { mode: "enter", venueId: "club-1" },
     });
 
-    if (!escortSearchResult?.result?.outcome) {
-      throw new Error("Szukania kontaktow w klubie nie rozliczono na backendzie.");
+    const escortSearchResult = await request("/clubs/action", {
+      method: "POST",
+      token,
+      body: { venueId: "club-1", actionId: "scout" },
+    });
+
+    if (escortSearchResult?.result?.actionId !== "scout" || !escortSearchResult?.result?.outcome) {
+      throw new Error("Akcji klubowej nie rozliczono na backendzie.");
     }
 
     const friendsSnapshot = await request("/social/friends", { token });
@@ -413,6 +568,9 @@ async function main() {
       registerWithoutEmail: "ok",
       login: "ok",
       heist: heistResult.result,
+      tasks: "ok",
+      businesses: collectedBusiness.result.payout,
+      factories: Number(producedDrug.user.drugInventory.smokes || 0),
       chat: "ok",
       gym: "ok",
       avatar: "ok",
@@ -422,7 +580,7 @@ async function main() {
       friends: "ok",
       directMessages: "ok",
       bounty: bountyResult.result.increment,
-      clubEscortSearch: escortSearchResult.result.outcome,
+      clubAction: escortSearchResult.result.outcome,
       clientStateAuthority: "ok",
       persistenceAfterRestart: "ok",
       socialPlayers: players.players.length,

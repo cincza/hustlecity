@@ -153,6 +153,61 @@ export async function buyMealOnline(token, itemId) {
   });
 }
 
+export async function claimTaskOnline(token, taskId) {
+  return request("/tasks/claim", {
+    method: "POST",
+    token,
+    body: { taskId },
+  });
+}
+
+export async function buyBusinessOnline(token, businessId) {
+  return request("/businesses/buy", {
+    method: "POST",
+    token,
+    body: { businessId },
+  });
+}
+
+export async function upgradeBusinessOnline(token, businessId, path) {
+  return request("/businesses/upgrade", {
+    method: "POST",
+    token,
+    body: { businessId, path },
+  });
+}
+
+export async function collectBusinessIncomeOnline(token) {
+  return request("/businesses/collect", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function buyFactoryOnline(token, factoryId) {
+  return request("/factories/buy", {
+    method: "POST",
+    token,
+    body: { factoryId },
+  });
+}
+
+export async function buyFactorySupplyOnline(token, supplyId, quantity = 1) {
+  return request("/factories/supplies/buy", {
+    method: "POST",
+    token,
+    body: { supplyId, quantity },
+  });
+}
+
+export async function produceDrugOnline(token, drugId) {
+  return request("/factories/produce", {
+    method: "POST",
+    token,
+    body: { drugId },
+  });
+}
+
 export async function healOnline(token) {
   return request("/player/hospital/heal", {
     method: "POST",
@@ -271,10 +326,22 @@ export async function consumeDrugOnline(token, drugId) {
   });
 }
 
-export async function searchEscortInClubOnline(token, venueId) {
-  return request("/clubs/search-escort", {
+export async function visitClubOnline(token, mode, venueId) {
+  return request("/clubs/visit", {
     method: "POST",
     token,
-    body: { venueId },
+    body: { mode, venueId },
   });
+}
+
+export async function performClubActionOnline(token, venueId, actionId) {
+  return request("/clubs/action", {
+    method: "POST",
+    token,
+    body: { venueId, actionId },
+  });
+}
+
+export async function searchEscortInClubOnline(token, venueId) {
+  return performClubActionOnline(token, venueId, "hunt");
 }

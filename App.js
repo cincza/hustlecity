@@ -21,10 +21,15 @@ import * as ImagePicker from "expo-image-picker";
 import {
   addFriendOnline,
   bribeOutOfJailOnline,
+  buyBusinessOnline,
   buyDrugFromDealerOnline,
+  buyFactoryOnline,
+  buyFactorySupplyOnline,
   buyProductOnline,
   buyGymPassOnline,
   buyMealOnline,
+  claimTaskOnline,
+  collectBusinessIncomeOnline,
   consumeDrugOnline,
   attackPlayerOnline,
   depositOnline,
@@ -44,10 +49,11 @@ import {
   placeBountyOnline,
   playHighRiskOnline,
   playFightClubRoundOnline,
+  performClubActionOnline,
   playSlotOnline,
   previewClubPvpOnline,
   registerUser,
-  searchEscortInClubOnline,
+  produceDrugOnline,
   sellDrugToDealerOnline,
   sellProductOnline,
   sendGlobalChatMessageOnline,
@@ -55,7 +61,9 @@ import {
   startBlackjackOnline,
   standBlackjackOnline,
   trainAtGymOnline,
+  upgradeBusinessOnline,
   updateAvatarOnline,
+  visitClubOnline,
   withdrawOnline,
 } from "./api";
 import {
@@ -84,10 +92,25 @@ import { blockIfOnlineAlpha } from "./src/game/authority";
 import { getGameMode } from "./src/game/modes";
 import { getNextHeistTier } from "./src/game/config/heistTiers";
 import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradePreview, getBusinessUpgradeState } from "./src/game/selectors/businessSelectors";
+import {
+  FACTORIES,
+  SUPPLIERS,
+  createSupplyCounterMap,
+  getDrugPoliceProfile as getSharedDrugPoliceProfile,
+  normalizeBusinessCollections,
+  normalizeBusinessUpgrades,
+  normalizeBusinessesOwned,
+  normalizeFactoriesOwned,
+  normalizeSupplies,
+} from "./shared/empire.js";
 import { applyXpProgression } from "./shared/progression.js";
 import { GYM_EXERCISES, GYM_PASSES, RESTAURANT_ITEMS } from "./shared/playerActions.js";
+import { getTaskStates as getSharedTaskStates } from "./shared/tasks.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
+  CLUB_NIGHT_PLANS,
+  CLUB_SYSTEM_RULES,
+  CLUB_VISITOR_ACTIONS,
   CLUB_MARKET,
   DEALER_START_STOCK,
   DRUGS,
@@ -95,6 +118,16 @@ import {
   FIGHT_CLUB_ENERGY_COST,
   PLAYER_BOUNTY_COST,
   PLAYER_BOUNTY_INCREMENT,
+  createClubGuestState,
+  getClubNightPlan,
+  getClubPressureAfterDecay,
+  getClubPressureLabel,
+  getClubTrafficAfterDecay,
+  getClubTrafficLabel,
+  getClubVenueProfile as getSharedClubVenueProfile,
+  getClubVisitDiminishing,
+  getLeadTargetEscortForVenue,
+  normalizeClubState,
 } from "./shared/socialGameplay.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
@@ -196,36 +229,6 @@ const STREET_DISTRICTS = [
 ];
 
 const PRODUCTS = MARKET_PRODUCTS;
-
-const SUPPLIERS = [
-  { id: "tobacco", name: "Tyton i filtry", unit: "karton", price: 70 },
-  { id: "grain", name: "Zboze i zacier", unit: "worek", price: 80 },
-  { id: "spores", name: "Zarodniki", unit: "zestaw", price: 95 },
-  { id: "herbs", name: "Trawa i nasiona", unit: "paczka", price: 55 },
-  { id: "resin", name: "Zywica i prasowanka", unit: "kostka", price: 120 },
-  { id: "chemicals", name: "Chemia bazowa", unit: "kanister", price: 110 },
-  { id: "pharma", name: "Odczynniki farmaceutyczne", unit: "pakiet", price: 170 },
-  { id: "pills", name: "Puste kapsuly", unit: "rolka", price: 75 },
-  { id: "solvent", name: "Rozpuszczalnik", unit: "baniak", price: 145 },
-  { id: "poppy", name: "Mak i lateks", unit: "skrzynka", price: 210 },
-  { id: "coca", name: "Liscie koki", unit: "belka", price: 260 },
-  { id: "acid", name: "Kwasy laboratoryjne", unit: "pojemnik", price: 290 },
-  { id: "cactus", name: "Kaktusy i ekstrakt", unit: "pakiet", price: 240 },
-  { id: "glass", name: "Szklo laboratoryjne", unit: "skrzynka", price: 190 },
-  { id: "packaging", name: "Pakowanie i woreczki", unit: "karton", price: 60 },
-];
-
-const FACTORIES = [
-  { id: "smokeworks", name: "Fabryka fajek", respect: 8, cost: 80000, text: "Tani, szybki towar na poczatek i pod lokalne bary.", unlocks: ["smokes"] },
-  { id: "distillery", name: "Destylarnia spirytusu", respect: 12, cost: 125000, text: "Spirytus schodzi zawsze, ale wymaga zaplecza i butelek.", unlocks: ["spirit"] },
-  { id: "wetlab", name: "Wet Lab GBL", respect: 16, cost: 240000, text: "Chemia klubowa i szybki zarobek przy dobrym ruchu.", unlocks: ["gbl"] },
-  { id: "greenhouse", name: "Szklarnie botaniczne", respect: 20, cost: 450000, text: "Salvia, grzybki, hasz i marihuana dla stalych klientow.", unlocks: ["salvia", "shrooms", "hash", "weed"] },
-  { id: "powderlab", name: "Laboratorium proszkow", respect: 25, cost: 820000, text: "Amfetamina i rohypnol, czyli mocniejszy towar z wiekszym ryzykiem.", unlocks: ["amphetamine", "rohypnol"] },
-  { id: "poppyworks", name: "Zaklad opium i heroiny", respect: 25, cost: 1250000, text: "Ciezki zarobek, ciezkie ryzyko i bardzo mocny towar.", unlocks: ["opium", "heroin"] },
-  { id: "cartelrefinery", name: "Rafineria kokainy", respect: 25, cost: 1800000, text: "Kokaina daje wielkie pieniadze, ale wymaga solidnego lancucha dostaw.", unlocks: ["cocaine"] },
-  { id: "acidlab", name: "Acid Lab", respect: 25, cost: 2550000, text: "Produkcja LSD pod najbardziej odklejonych klientow miasta.", unlocks: ["lsd"] },
-  { id: "designerlab", name: "Designer Lab", respect: 25, cost: 3600000, text: "Extasy i meskalina dla topowego rynku i najbogatszych ekip.", unlocks: ["ecstasy", "mescaline"] },
-];
 
 const MARKET = PRODUCTS.reduce((acc, item, index) => {
   acc[item.id] = Math.round(item.basePrice * (1 + ((index % 3) - 1) * 0.08));
@@ -578,15 +581,23 @@ const INITIAL = {
     popularity: 0,
     mood: 60,
     policeBase: 0,
+    policePressure: 0,
+    traffic: 0,
+    lastTrafficAt: 0,
+    nightPlanId: getClubNightPlan().id,
+    recentIncident: null,
     note: null,
     lastRunAt: 0,
     stash: createDrugCounterMap(),
+    guestState: createClubGuestState(),
   },
   clubListings: createClubListings(),
-  supplies: SUPPLIERS.reduce((acc, item) => {
-    acc[item.id] = item.id === "tobacco" ? 2 : item.id === "grain" ? 1 : item.id === "herbs" ? 2 : 0;
-    return acc;
-  }, {}),
+  supplies: {
+    ...createSupplyCounterMap(0),
+    tobacco: 2,
+    grain: 1,
+    herbs: 2,
+  },
   activeBoosts: [],
   market: MARKET,
   marketState: Object.fromEntries(
@@ -861,7 +872,12 @@ function createDrugCounterMap(initialValue = 0) {
 }
 
 function createClubListings() {
-  return CLUB_MARKET.map((club) => ({ ...club }));
+  return CLUB_MARKET.map((club) => ({
+    ...club,
+    traffic: 0,
+    policePressure: Math.max(0, (club.policeBase || 0) * 3),
+    nightPlanId: club.nightPlanId || getClubNightPlan().id,
+  }));
 }
 
 function canRunGangHeistRole(role) {
@@ -951,6 +967,9 @@ function syncClubListing(listings, club, ownerLabel) {
           popularity: club.popularity,
           mood: club.mood,
           policeBase: club.policeBase,
+          policePressure: club.policePressure,
+          traffic: club.traffic,
+          nightPlanId: club.nightPlanId,
         }
       : listing
   );
@@ -968,6 +987,9 @@ function syncClubListing(listings, club, ownerLabel) {
       popularity: club.popularity,
       mood: club.mood,
       policeBase: club.policeBase,
+      policePressure: club.policePressure,
+      traffic: club.traffic,
+      nightPlanId: club.nightPlanId,
       note: club.note || "Prywatny lokal postawiony na grubej kasie i ryzyku.",
     },
     ...updated,
@@ -989,6 +1011,9 @@ function getCurrentClubVenue(game) {
       popularity: game.club.popularity,
       mood: game.club.mood,
       policeBase: game.club.policeBase,
+      policePressure: game.club.policePressure,
+      traffic: game.club.traffic,
+      nightPlanId: game.club.nightPlanId,
       note: game.club.note,
     };
   }
@@ -998,66 +1023,79 @@ function getCurrentClubVenue(game) {
 function getClubVenueProfile(game, venue) {
   if (!venue) {
     return {
-      escortBonus: 0,
-      contactChance: 0,
-      drugChance: 0,
-      eventChance: 0,
-      salesMultiplier: 1,
-      raidModifier: 1,
+      plan: getClubNightPlan(),
+      prestige: 0,
+      scoutTipValue: 0,
+      huntProgressValue: 0,
+      layLowHeat: 0,
+      layLowHp: 0,
+      trafficScale: 0,
+      pressureScale: 0,
+      nightIncomeFactor: 0.22,
       label: "Poza lokalem",
     };
   }
 
-  const popularity = venue.popularity || 0;
-  const mood = venue.mood || 0;
-  const respect = venue.respect || 0;
-  const policeBase = venue.policeBase || 0;
-  const prestige = popularity * 0.6 + mood * 0.32 + respect * 0.22 - policeBase * 1.4;
+  const planId =
+    game?.club?.owned && game?.club?.sourceId === venue.id
+      ? game.club.nightPlanId
+      : venue?.nightPlanId;
 
-  const escortBonus = clamp(0.008 + popularity * 0.0012 + mood * 0.0006 - policeBase * 0.0008, 0.008, 0.09);
-  const contactChance = clamp(0.06 + popularity * 0.0022 + mood * 0.0014 - policeBase * 0.001, 0.06, 0.34);
-  const drugChance = clamp(0.05 + popularity * 0.002 + respect * 0.0018 - policeBase * 0.0011, 0.05, 0.32);
-  const eventChance = clamp(0.08 + popularity * 0.0018 + mood * 0.0012, 0.08, 0.36);
-  const salesMultiplier = clamp(1 + popularity / 180 + mood / 260, 1, 1.85);
-  const raidModifier = clamp(1 + policeBase / 40 - mood / 500, 0.92, 1.3);
-
-  const label =
-    prestige >= 78
-      ? "Topowy lokal. VIP-y, kontakty i gruby ruch."
-      : prestige >= 52
-        ? "Mocny klub z dobrym obrotem i kontaktami."
-        : "Sredni lokal. Cos sie dzieje, ale bez szalu.";
-
-  return { escortBonus, contactChance, drugChance, eventChance, salesMultiplier, raidModifier, label };
+  return getSharedClubVenueProfile(venue, { planId });
 }
 
 function getDrugPoliceProfile(drug) {
-  const risk = clamp(0.04 + drug.unlockRespect * 0.0045 + drug.streetPrice / 9000 + drug.overdoseRisk * 0.28, 0.05, 0.48);
-  const heatGain = Math.max(1, Math.round(drug.unlockRespect / 10 + drug.streetPrice / 1200));
-  const label = risk >= 0.32 ? "Bardzo goraco" : risk >= 0.2 ? "Srednie ryzyko" : "Raczej cicho";
-
-  return { risk, heatGain, label };
+  return getSharedDrugPoliceProfile(drug);
 }
 
 function getClubPoliceProfile(game) {
   if (!game.club.owned) {
-    return { pressure: 0, raidChance: 0, totalUnits: 0, label: "Brak lokalu" };
+    return { pressure: 0, raidChance: 0, totalUnits: 0, traffic: 0, trafficLabel: "Brak lokalu", label: "Brak lokalu" };
   }
 
+  const referenceAt = Math.max(0, game.club.lastTrafficAt || game.club.lastRunAt || Date.now());
+  const elapsedMs = Math.max(0, Date.now() - referenceAt);
+  const decayedTraffic = getClubTrafficAfterDecay(game.club.traffic, elapsedMs);
+  const decayedPressure = getClubPressureAfterDecay(game.club.policePressure, elapsedMs);
   const totalUnits = DRUGS.reduce((sum, drug) => sum + (game.club.stash[drug.id] || 0), 0);
   const stashSignal = DRUGS.reduce((sum, drug) => {
     const police = getDrugPoliceProfile(drug);
     return sum + (game.club.stash[drug.id] || 0) * (drug.streetPrice / 220 + police.risk * 12);
   }, 0);
   const pressure = clamp(
-    game.club.policeBase * 3 + totalUnits * 1.8 + stashSignal / 18 + game.club.popularity * 0.45 + game.player.heat * 0.65,
+    game.club.policeBase * 3 +
+      decayedPressure +
+      decayedTraffic * 1.7 +
+      totalUnits * 1.5 +
+      stashSignal / 20 +
+      game.club.popularity * 0.32 +
+      game.player.heat * 0.42,
     0,
     100
   );
-  const raidChance = clamp(0.04 + pressure / 180, 0.05, 0.72);
-  const label = raidChance >= 0.45 ? "Nalot bardzo realny" : raidChance >= 0.28 ? "Gliny cos czuja" : "W granicach rozsadku";
+  const raidChance = clamp(0.05 + pressure / 240 + decayedTraffic / 120, 0.05, 0.46);
+  const label = getClubPressureLabel(pressure);
 
-  return { pressure, raidChance, totalUnits, label };
+  return {
+    pressure,
+    raidChance,
+    totalUnits,
+    traffic: decayedTraffic,
+    trafficLabel: getClubTrafficLabel(decayedTraffic),
+    label,
+  };
+}
+
+function syncClubRuntimeState(club, now = Date.now()) {
+  if (!club || typeof club !== "object") return club;
+  const referenceAt = Math.max(0, club.lastTrafficAt || club.lastRunAt || now);
+  const elapsedMs = Math.max(0, now - referenceAt);
+  return {
+    ...club,
+    traffic: getClubTrafficAfterDecay(club.traffic, elapsedMs),
+    policePressure: getClubPressureAfterDecay(club.policePressure, elapsedMs),
+    lastTrafficAt: now,
+  };
 }
 
 function getSoloHeistOdds(player, effectivePlayer, gang, heist) {
@@ -1085,18 +1123,6 @@ function getGangHeistOdds(player, effectivePlayer, gang, heist) {
 
 function getGangHeistBonusRate(gang) {
   return clamp(gang.members * 0.01 + gang.influence * 0.004, 0, 0.24);
-}
-
-function getTaskStates(game) {
-  const tasks = [
-    { id: "gym-pass", title: "Wejdz na silownie", description: "Kup dowolny karnet na silownie.", completed: hasGymPass(game.player), rewardCash: 500, rewardXp: 6 },
-    { id: "first-wave", title: "Pierwsza fala napadow", description: "Wykonaj 3 napady.", completed: game.stats.heistsDone >= 3, rewardCash: 900, rewardXp: 7 },
-    { id: "crew", title: "Rozbuduj ekipe", description: "Miej przynajmniej 6 ludzi w gangu.", completed: game.gang.members >= 6, rewardCash: 1300, rewardXp: 9 },
-    { id: "lab", title: "Odpal pierwsza partie", description: "Wyprodukuj 2 partie dragow.", completed: game.stats.drugBatches >= 2, rewardCash: 2000, rewardXp: 10 },
-    { id: "club", title: "Otworz klub", description: "Przejmij lub otworz swoj klub.", completed: game.club.owned, rewardCash: 3000, rewardXp: 12 },
-  ];
-
-  return tasks.map((task) => ({ ...task, claimed: game.tasksClaimed.includes(task.id) }));
 }
 
 function ProgressBar({ progress }) {
@@ -1493,8 +1519,14 @@ function AppRuntime() {
     [game.online, game.gang.inviteRespectMin, game.player.name]
   );
   const jailRemaining = game.player.jailUntil ? Math.max(0, game.player.jailUntil - Date.now()) : 0;
-  const taskStates = useMemo(() => getTaskStates(game), [game]);
-  const topTask = taskStates.find((task) => !task.claimed) || taskStates[0];
+  const taskStates = useMemo(
+    () => getSharedTaskStates(game, { mode: gameMode }),
+    [game, gameMode]
+  );
+  const topTask =
+    taskStates.find((task) => !task.claimed && !task.onlineDisabled) ||
+    taskStates.find((task) => !task.onlineDisabled) ||
+    taskStates[0];
   const nextHeistTier = getNextHeistTier(game.player.respect);
   const heistCatalog =
     Array.isArray(game.online?.heists) && game.online.heists.length
@@ -1580,16 +1612,48 @@ function AppRuntime() {
             routes: entry?.routes && typeof entry.routes === "object" ? { ...entry.routes } : {},
           }))
         : prev.escortsOwned,
+      businessesOwned: Array.isArray(serverUser?.businessesOwned)
+        ? normalizeBusinessesOwned(serverUser.businessesOwned)
+        : prev.businessesOwned,
+      businessUpgrades:
+        serverUser?.businessUpgrades && typeof serverUser.businessUpgrades === "object"
+          ? normalizeBusinessUpgrades(serverUser.businessUpgrades)
+          : prev.businessUpgrades,
+      factoriesOwned:
+        serverUser?.factoriesOwned && typeof serverUser.factoriesOwned === "object"
+          ? normalizeFactoriesOwned(serverUser.factoriesOwned)
+          : prev.factoriesOwned,
+      supplies:
+        serverUser?.supplies && typeof serverUser.supplies === "object"
+          ? normalizeSupplies(serverUser.supplies)
+          : prev.supplies,
+      tasksClaimed: Array.isArray(serverUser?.tasksClaimed)
+        ? serverUser.tasksClaimed.filter((taskId) => typeof taskId === "string")
+        : prev.tasksClaimed,
+      collections:
+        serverUser?.collections && typeof serverUser.collections === "object"
+          ? {
+              ...prev.collections,
+              ...normalizeBusinessCollections(serverUser.collections),
+            }
+          : prev.collections,
       club:
         serverUser?.club && typeof serverUser.club === "object"
-          ? {
+          ? normalizeClubState({
               ...prev.club,
               ...serverUser.club,
               stash:
                 serverUser.club?.stash && typeof serverUser.club.stash === "object"
                   ? { ...prev.club.stash, ...serverUser.club.stash }
                   : prev.club.stash,
-            }
+              guestState:
+                serverUser.club?.guestState && typeof serverUser.club.guestState === "object"
+                  ? {
+                      ...(prev.club.guestState || createClubGuestState()),
+                      ...serverUser.club.guestState,
+                    }
+                  : prev.club.guestState,
+            })
           : prev.club,
       online: {
         ...prev.online,
@@ -1822,6 +1886,7 @@ function AppRuntime() {
   }, [sessionToken, apiStatus]);
 
   useEffect(() => {
+    const isOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
     const timer = setInterval(() => {
       setGame((prev) => {
         const now = Date.now();
@@ -1835,13 +1900,14 @@ function AppRuntime() {
         const energyRecovered = Math.floor(energyPool / ENERGY_REGEN_SECONDS);
         const regenRemainder = energyPool % ENERGY_REGEN_SECONDS;
         const passiveMinutes = elapsedSeconds / 60;
-        const businessIncome = getBusinessIncomePerMinute(prev, BUSINESSES);
-        const escortIncome = getEscortIncomePerMinute(prev);
+        const businessIncome = isOnlineAuthority ? 0 : getBusinessIncomePerMinute(prev, BUSINESSES);
+        const escortIncome = isOnlineAuthority ? 0 : getEscortIncomePerMinute(prev);
         const nextCollections = {
           businessCash: Math.min((prev.collections?.businessCash || 0) + businessIncome * passiveMinutes, getPassiveCapAmount(businessIncome)),
           escortCash: Math.min((prev.collections?.escortCash || 0) + escortIncome * passiveMinutes, getPassiveCapAmount(escortIncome)),
           businessCollectedAt: prev.collections?.businessCollectedAt || null,
           escortCollectedAt: prev.collections?.escortCollectedAt || null,
+          businessAccruedAt: prev.collections?.businessAccruedAt || null,
         };
         const logLines = [...prev.log];
 
@@ -1854,15 +1920,18 @@ function AppRuntime() {
           energy: clamp(prev.player.energy + energyRecovered, 0, prev.player.maxEnergy),
           heat: clamp(prev.player.heat - Math.floor(elapsedSeconds / 180), 0, 100),
         };
-        const nextEscortsOwned = prev.escortsOwned.map((entry) => ({
-          ...entry,
-          routes: { ...getEscortRoutes(entry) },
-        }));
+        const nextEscortsOwned = isOnlineAuthority
+          ? prev.escortsOwned
+          : prev.escortsOwned.map((entry) => ({
+              ...entry,
+              routes: { ...getEscortRoutes(entry) },
+            }));
 
         let escortPool = nextCollections.escortCash;
         let streetHeatGain = 0;
 
         nextEscortsOwned.forEach((entry) => {
+          if (isOnlineAuthority) return;
           const escort = ESCORTS.find((item) => item.id === entry.id);
           if (!escort) return;
 
@@ -1902,9 +1971,15 @@ function AppRuntime() {
           entry.working = getEscortWorkingCount(entry);
         });
 
-        const cleanedEscortsOwned = nextEscortsOwned.filter((entry) => entry.count > 0);
-        const nextEscortIncome = getEscortIncomePerMinute({ ...prev, escortsOwned: cleanedEscortsOwned });
-        nextCollections.escortCash = Math.min(escortPool, getPassiveCapAmount(nextEscortIncome));
+        const cleanedEscortsOwned = isOnlineAuthority
+          ? nextEscortsOwned
+          : nextEscortsOwned.filter((entry) => entry.count > 0);
+        const nextEscortIncome = isOnlineAuthority
+          ? 0
+          : getEscortIncomePerMinute({ ...prev, escortsOwned: cleanedEscortsOwned });
+        nextCollections.escortCash = isOnlineAuthority
+          ? prev.collections?.escortCash || 0
+          : Math.min(escortPool, getPassiveCapAmount(nextEscortIncome));
 
         if (nextPlayer.gymPassTier !== "perm" && nextPlayer.gymPassUntil && nextPlayer.gymPassUntil <= now) {
           nextPlayer.gymPassTier = null;
@@ -1943,7 +2018,7 @@ function AppRuntime() {
     }, 5000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [apiStatus, sessionToken]);
 
   useEffect(() => {
     if (!notice?.id) return undefined;
@@ -2572,8 +2647,17 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - business purchase cost, unlock validation and empire scaling should be stored server-side
-  const buyBusiness = (business) => {
+  const buyBusiness = async (business) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyBusinessOnline(sessionToken, business.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Kupowanie biznesow")) return;
     if (game.player.respect < business.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${business.respect}.`);
     if (game.player.cash < business.cost) return pushLog(`Za malo gotowki na ${business.name}.`);
@@ -2594,9 +2678,18 @@ function AppRuntime() {
     });
   };
 
-  const upgradeBusiness = (business, path) => {
+  const upgradeBusiness = async (business, path) => {
     if (!canDoStreetAction()) return;
     const safePath = path === "speed" ? "speed" : "cash";
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await upgradeBusinessOnline(sessionToken, business.id, safePath);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     const owned = game.businessesOwned.find((entry) => entry.id === business.id);
     if (!owned?.count) return pushLog("Najpierw musisz miec ten biznes.");
     const cost = getBusinessUpgradeCost(game, business, safePath);
@@ -2623,7 +2716,16 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - passive business claim must come from server-side accrual and claim cap validation
-  const collectBusinessIncome = () => {
+  const collectBusinessIncome = async () => {
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await collectBusinessIncomeOnline(sessionToken);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Odbior biznesow")) return;
     const payout = Math.floor(game.collections?.businessCash || 0);
     if (payout <= 0) return pushLog("Na razie nie ma co zgarnac z biznesow.");
@@ -2674,96 +2776,387 @@ function AppRuntime() {
     });
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - club traffic, search cooldown and low-chance street trigger logic are still local economy logic
-  const findEscortInClub = async () => {
+  const setClubNightPlan = (planId) => {
+    if (!requireOfflineDemoAuthority("Plan nocy klubu")) return;
+    if (!game.club.owned) return pushLog("Najpierw musisz miec swoj klub.");
+    if (!insideOwnClub) return pushLog("Plan nocy ustawiasz tylko bedac fizycznie u siebie.");
+    const nextPlan = getClubNightPlan(planId);
+    if (game.club.nightPlanId === nextPlan.id) return;
+
+    setGame((prev) => {
+      const nextClub = syncClubRuntimeState({
+        ...prev.club,
+        nightPlanId: nextPlan.id,
+      });
+
+      return {
+        ...prev,
+        club: nextClub,
+        clubListings: syncClubListing(
+          prev.clubListings,
+          nextClub,
+          prev.club.ownerLabel || getPlayerClubOwnerLabel(prev)
+        ),
+        log: [`Plan nocy ustawiony na ${nextPlan.name}. ${nextPlan.summary}`, ...prev.log].slice(0, 16),
+      };
+    });
+
+    showExplicitNotice({
+      tone: "success",
+      title: "PLAN NOCY",
+      message: `${nextPlan.name}. ${nextPlan.summary}`,
+      deltas: null,
+    });
+  };
+
+  // TODO: TO_MIGRATE_TO_SERVER - owner-side traffic -> night payout loop is still local in demo mode,
+  // but visitor utility/progress uses backend authority when online.
+  const runClubVisitorAction = async (actionId) => {
     if (!canDoStreetAction()) return;
-    if (!currentClubVenue) return pushLog("Najpierw wejdz do jakiegos klubu. Dopiero tam szukasz kontaktow.");
-    if (game.player.cash < CLUB_ESCORT_SEARCH_COST) return pushLog(`Brakuje ${formatMoney(CLUB_ESCORT_SEARCH_COST)} na wejscie i szukanie kontaktow.`);
+    if (!currentClubVenue) return pushLog("Najpierw wejdz do jakiegos klubu.");
+
+    const action = CLUB_VISITOR_ACTIONS.find((entry) => entry.id === actionId);
+    if (!action) return pushLog("Nie ma takiej akcji klubowej.");
+
+    const cooldownRemaining = Math.max(
+      0,
+      (game.club.guestState?.lastActionAt || 0) + CLUB_SYSTEM_RULES.actionCooldownMs - Date.now()
+    );
+    if (cooldownRemaining > 0) {
+      return pushLog(`Klub trzyma cooldown jeszcze przez ${formatCooldown(cooldownRemaining)}.`);
+    }
+
+    if (action.costCash > 0 && game.player.cash < action.costCash) {
+      return pushLog(`Brakuje ${formatMoney(action.costCash)} na ${action.name}.`);
+    }
+
+    if (action.id === "hunt") {
+      const leadTarget = getLeadTargetEscortForVenue({
+        playerRespect: game.player.respect,
+        venue: currentClubVenue,
+        planId:
+          game.club.owned && game.club.sourceId === currentClubVenue.id
+            ? game.club.nightPlanId
+            : currentClubVenue.nightPlanId,
+      });
+      if (!leadTarget) {
+        return pushLog("Na tym progu nie ma jeszcze sensownych kontaktow do namierzenia.");
+      }
+    }
 
     if (sessionToken && apiStatus === "online") {
       try {
-        const result = await searchEscortInClubOnline(sessionToken, currentClubVenue.id);
-        mergeServerUser(result.user);
+        const response = await performClubActionOnline(sessionToken, currentClubVenue.id, action.id);
+        mergeServerUser(response.user);
+        const actionResult = response?.result;
+        showExplicitNotice({
+          tone:
+            actionResult?.escort
+              ? "success"
+              : actionResult?.cashTip || actionResult?.heatReduced || actionResult?.hpRecovered
+                ? "success"
+                : "warning",
+          title:
+            action.id === "scout"
+              ? "SCOUT"
+              : action.id === "hunt"
+                ? actionResult?.escort
+                  ? "LEAD DOMKNIETY"
+                  : "LEAD ROSNIE"
+                : "LAY LOW",
+          message: actionResult?.logMessage || `${action.name} rozliczone przez backend.`,
+          deltas: null,
+        });
       } catch (error) {
         pushLog(error.message);
       }
       return;
     }
 
-    if (!requireOfflineDemoAuthority("Szukanie kontaktow w klubie")) return;
+    if (!requireOfflineDemoAuthority(`Akcja klubowa: ${action.name}`)) return;
 
-    const chance = escortFindChance;
-    const unlocked = ESCORTS.filter((escort) => escort.respect <= game.player.respect);
-    const found = Math.random() < chance;
+    let localResult = null;
+    setGame((prev) => {
+      const now = Date.now();
+      const venue = getCurrentClubVenue(prev);
+      if (!venue) return prev;
 
-    if (!found || !unlocked.length) {
-      const eventRoll = Math.random();
-      if (eventRoll < currentClubProfile.eventChance) {
-        if (eventRoll < currentClubProfile.drugChance) {
-          const unlockedDrugs = DRUGS.filter((drug) => drug.unlockRespect <= game.player.respect);
-          const foundDrug = unlockedDrugs[randomBetween(0, Math.max(0, unlockedDrugs.length - 1))];
-          if (foundDrug) {
-            return setGame((prev) => ({
-              ...prev,
-              player: { ...prev.player, cash: prev.player.cash - CLUB_ESCORT_SEARCH_COST },
-              drugInventory: { ...prev.drugInventory, [foundDrug.id]: prev.drugInventory[foundDrug.id] + 1 },
-              log: [`W ${currentClubVenue.name} wpada probka: ${foundDrug.name}. Lokal ma klimat i towar krazy po stolach.`, ...prev.log].slice(0, 16),
-            }));
-          }
+      const ownerSelfVisit = Boolean(prev.club.owned && prev.club.sourceId === venue.id);
+      const venuePlanId = ownerSelfVisit ? prev.club.nightPlanId : venue.nightPlanId;
+      const profile = getClubVenueProfile(
+        {
+          ...prev,
+          club: ownerSelfVisit ? prev.club : { ...prev.club, nightPlanId: venuePlanId },
+        },
+        venue
+      );
+      const nextClub = syncClubRuntimeState(prev.club, now);
+      const guestState = {
+        ...(nextClub.guestState || createClubGuestState()),
+        affinity: { ...((nextClub.guestState && nextClub.guestState.affinity) || {}) },
+      };
+      const dayKey = new Date(now).toISOString().slice(0, 10);
+      const affinityEntry = guestState.affinity[venue.id]
+        ? { ...guestState.affinity[venue.id] }
+        : { visits: 0, lastVisitAt: 0, tipDayKey: dayKey, tipValueToday: 0, tipCountToday: 0 };
+      if (affinityEntry.tipDayKey !== dayKey) {
+        affinityEntry.tipDayKey = dayKey;
+        affinityEntry.tipValueToday = 0;
+        affinityEntry.tipCountToday = 0;
+      }
+
+      const nextVisitCount = (affinityEntry.visits || 0) + 1;
+      const diminishing = getClubVisitDiminishing(nextVisitCount, ownerSelfVisit);
+      const nextOnlineMessages = [...(prev.online?.messages || [])];
+      let escortsOwned = prev.escortsOwned;
+
+      if (action.id === "scout") {
+        const tipBudgetLeft = Math.max(
+          0,
+          CLUB_SYSTEM_RULES.scoutTipDailyCapPerVenue - Number(affinityEntry.tipValueToday || 0)
+        );
+        const tipSlotsLeft = Math.max(
+          0,
+          CLUB_SYSTEM_RULES.scoutTipCountCapPerVenue - Number(affinityEntry.tipCountToday || 0)
+        );
+        const rawTip = Math.max(0, Math.floor(profile.scoutTipValue * diminishing));
+        const cashTip =
+          tipBudgetLeft > 0 && tipSlotsLeft > 0
+            ? Math.max(0, Math.min(rawTip, tipBudgetLeft, 180))
+            : 0;
+
+        if (cashTip > 0) {
+          affinityEntry.tipValueToday += cashTip;
+          affinityEntry.tipCountToday += 1;
+          nextOnlineMessages.unshift({
+            id: `msg-club-scout-${Date.now()}`,
+            from: venue.ownerLabel || "Miasto",
+            subject: `Scout: ${venue.name}`,
+            preview: `Dyskretny tip z sali. Wpada ${formatMoney(cashTip)} i czystszy obraz sytuacji.`,
+            time: nowTimeLabel(),
+          });
         }
 
-        if (eventRoll < currentClubProfile.contactChance) {
-          const tipCash = Math.floor(180 + currentClubVenue.popularity * 14 + currentClubVenue.mood * 9);
-          const xpTip = currentClubVenue.popularity >= 32 ? 9 : 0;
-          return setGame((prev) => ({
-            ...prev,
-            player: applyProgressionToPlayer(
-              {
-                ...prev.player,
-                cash: prev.player.cash - CLUB_ESCORT_SEARCH_COST + tipCash,
-              },
-              xpTip
-            ).player,
-            online: {
-              ...prev.online,
-              messages: [
-                {
-                  id: `msg-club-${Date.now()}`,
-                  from: currentClubVenue.ownerLabel,
-                  subject: `Kontakt z ${currentClubVenue.name}`,
-                  preview: `Lokal podrzuca trop. Wpada ${formatMoney(tipCash)} i nowy numer do ludzi z zaplecza.`,
-                  time: nowTimeLabel(),
-                },
-                ...prev.online.messages,
-              ].slice(0, 12),
-            },
-            log: [`${currentClubVenue.name} podrzuca kontakt. Wpada ${formatMoney(tipCash)}${xpTip ? ` i +${xpTip} XP` : ""}.`, ...prev.log].slice(0, 16),
-          }));
+        localResult = {
+          actionId: action.id,
+          outcome: cashTip > 0 ? "tip" : "intel",
+          cashTip,
+          heatReduced: 0,
+          hpRecovered: 0,
+          leadGain: 0,
+          logMessage:
+            cashTip > 0
+              ? `${venue.name} rzuca maly tip. Wpada ${formatMoney(cashTip)} bez pompowania ekonomii.`
+              : `${venue.name} daje czysty odczyt sali, ale dzis bez koperty.`,
+          ownerDelta: {
+            trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
+            pressureGain: Number((0.9 * profile.pressureScale).toFixed(3)),
+          },
+        };
+      } else if (action.id === "hunt") {
+        const leadTarget =
+          guestState.leadVenueId === venue.id && guestState.leadEscortId
+            ? ESCORTS.find((entry) => entry.id === guestState.leadEscortId)
+            : getLeadTargetEscortForVenue({
+                playerRespect: prev.player.respect,
+                venue,
+                planId: venuePlanId,
+              });
+
+        if (!leadTarget) return prev;
+        if (guestState.leadVenueId !== venue.id || guestState.leadEscortId !== leadTarget.id) {
+          guestState.leadVenueId = venue.id;
+          guestState.leadEscortId = leadTarget.id;
+          guestState.leadProgress = 0;
+        }
+
+        const progressGain = Math.max(
+          12,
+          Math.min(
+            46,
+            Math.round(
+              (profile.huntProgressValue +
+                prev.player.charisma * 0.42 +
+                prev.player.dexterity * 0.28) *
+                diminishing
+            )
+          )
+        );
+
+        guestState.leadProgress = Math.min(
+          guestState.leadRequired || CLUB_SYSTEM_RULES.leadRequired,
+          Number(guestState.leadProgress || 0) + progressGain
+        );
+
+        let unlockedEscort = null;
+        if (guestState.leadProgress >= (guestState.leadRequired || CLUB_SYSTEM_RULES.leadRequired)) {
+          unlockedEscort = leadTarget;
+          const owned = prev.escortsOwned.find((entry) => entry.id === unlockedEscort.id);
+          escortsOwned = owned
+            ? prev.escortsOwned.map((entry) =>
+                entry.id === unlockedEscort.id
+                  ? {
+                      ...entry,
+                      count: entry.count + 1,
+                      working: getEscortWorkingCount(entry),
+                      routes: { ...getEscortRoutes(entry) },
+                    }
+                  : entry
+              )
+            : [...prev.escortsOwned, { id: unlockedEscort.id, count: 1, working: 0, routes: {} }];
+          guestState.leadProgress = 0;
+          nextOnlineMessages.unshift({
+            id: `msg-club-lead-${Date.now()}`,
+            from: venue.ownerLabel || "Miasto",
+            subject: `Kontakt z ${venue.name}`,
+            preview: `Lead domkniety. Do siatki wpada ${unlockedEscort.name}.`,
+            time: nowTimeLabel(),
+          });
+        }
+
+        localResult = {
+          actionId: action.id,
+          outcome: unlockedEscort ? "escort" : "progress",
+          cashTip: 0,
+          heatReduced: 0,
+          hpRecovered: 0,
+          leadGain: progressGain,
+          leadTargetId: leadTarget.id,
+          leadTargetName: leadTarget.name,
+          escort: unlockedEscort,
+          logMessage: unlockedEscort
+            ? `${venue.name}: lead meter dobity i wpada ${leadTarget.name}.`
+            : `${venue.name}: kontakt ruszyl do przodu o ${progressGain} pkt.`,
+          ownerDelta: {
+            trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
+            pressureGain: Number((2.2 * profile.pressureScale).toFixed(3)),
+          },
+        };
+      } else {
+        const heatReduced = Math.min(
+          prev.player.heat,
+          Math.max(0, Math.floor(profile.layLowHeat * Math.max(0.7, diminishing + 0.18)))
+        );
+        const hpRecovered = Math.min(
+          Math.max(0, prev.player.maxHp - prev.player.hp),
+          Math.max(0, Math.floor(profile.layLowHp * Math.max(0.7, diminishing + 0.22)))
+        );
+
+        localResult = {
+          actionId: action.id,
+          outcome: heatReduced || hpRecovered ? "reset" : "calm",
+          cashTip: 0,
+          heatReduced,
+          hpRecovered,
+          leadGain: 0,
+          logMessage:
+            heatReduced || hpRecovered
+              ? `${venue.name}: znikasz w cieniu. Heat -${heatReduced}, HP +${hpRecovered}.`
+              : `${venue.name}: przeczekales chwile i sala oddycha lzej.`,
+          ownerDelta: {
+            trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
+            pressureGain: Number((-1.8 / Math.max(0.85, profile.pressureScale)).toFixed(3)),
+          },
+        };
+      }
+
+      if (!localResult) return prev;
+
+      affinityEntry.visits = nextVisitCount;
+      affinityEntry.lastVisitAt = now;
+      guestState.lastActionAt = now;
+      guestState.lastActionType = action.id;
+      guestState.lastVenueId = venue.id;
+      guestState.lastOutcome = {
+        ...localResult,
+        venueId: venue.id,
+        venueName: venue.name,
+        time: new Date(now).toISOString(),
+      };
+      guestState.affinity[venue.id] = affinityEntry;
+
+      if (ownerSelfVisit) {
+        nextClub.traffic = clamp(
+          Number(nextClub.traffic || 0) + Number(localResult.ownerDelta?.trafficGain || 0),
+          0,
+          CLUB_SYSTEM_RULES.nightlyTrafficHardCap
+        );
+        nextClub.policePressure = clamp(
+          Number(nextClub.policePressure || 0) + Number(localResult.ownerDelta?.pressureGain || 0),
+          0,
+          100
+        );
+        if (localResult.ownerDelta?.pressureGain < 0) {
+          nextClub.recentIncident = {
+            tone: "calm",
+            text: "Sala przycichla. Presja schodzi i drzwi oddychaja.",
+            createdAt: now,
+          };
+        } else if (nextClub.policePressure >= 68) {
+          nextClub.recentIncident = {
+            tone: "risk",
+            text: "Przy wejsciu kreci sie patrol. Ruch robi wynik, ale robi sie goraco.",
+            createdAt: now,
+          };
         }
       }
 
-      return setGame((prev) => ({
-        ...prev,
-        player: { ...prev.player, cash: prev.player.cash - CLUB_ESCORT_SEARCH_COST },
-        log: [`Obszedles ${currentClubVenue.name} i spaliles ${formatMoney(CLUB_ESCORT_SEARCH_COST)}. Nic konkretnego dzis nie wpadlo.`, ...prev.log].slice(0, 16),
-      }));
-    }
+      if (action.id === "laylow") {
+        nextClub.policePressure = clamp(
+          nextClub.policePressure -
+            (ownerSelfVisit ? Math.max(2, Math.floor(3 * profile.plan.layLowMultiplier)) : 0),
+          0,
+          100
+        );
+      }
 
-    const weightedPool = unlocked.flatMap((escort) => Array.from({ length: Math.max(1, 32 - escort.respect) }, () => escort));
-    const escort = weightedPool[randomBetween(0, weightedPool.length - 1)];
-
-    setGame((prev) => {
-      const owned = prev.escortsOwned.find((entry) => entry.id === escort.id);
-      const escortsOwned = owned
-        ? prev.escortsOwned.map((entry) => (entry.id === escort.id ? { ...entry, count: entry.count + 1, working: getEscortWorkingCount(entry), routes: { ...getEscortRoutes(entry) } } : entry))
-        : [...prev.escortsOwned, { id: escort.id, count: 1, working: 0, routes: {} }];
+      nextClub.guestState = guestState;
+      nextClub.visitId = venue.id;
 
       return {
         ...prev,
-        player: { ...prev.player, cash: prev.player.cash - CLUB_ESCORT_SEARCH_COST },
+        player: {
+          ...prev.player,
+          cash: prev.player.cash - action.costCash + (localResult.cashTip || 0),
+          heat: Math.max(0, prev.player.heat - (localResult.heatReduced || 0)),
+          hp: Math.min(prev.player.maxHp, prev.player.hp + (localResult.hpRecovered || 0)),
+        },
         escortsOwned,
-        log: [`W ${currentClubVenue.name} siada kontakt: ${escort.name}. Dragowy klimat podbil szanse wejscia na ${Math.round(chance * 100)}%.`, ...prev.log].slice(0, 16),
+        club: nextClub,
+        clubListings: ownerSelfVisit
+          ? syncClubListing(
+              prev.clubListings,
+              nextClub,
+              prev.club.ownerLabel || getPlayerClubOwnerLabel(prev)
+            )
+          : prev.clubListings,
+        online: {
+          ...prev.online,
+          messages: nextOnlineMessages.slice(0, 20),
+        },
+        log: [localResult.logMessage, ...prev.log].slice(0, 16),
       };
+    });
+
+    if (!localResult) return;
+
+    showExplicitNotice({
+      tone:
+        localResult.escort
+          ? "success"
+          : localResult.cashTip || localResult.heatReduced || localResult.hpRecovered
+            ? "success"
+            : "warning",
+      title:
+        action.id === "scout"
+          ? "SCOUT"
+          : action.id === "hunt"
+            ? localResult.escort
+              ? "LEAD DOMKNIETY"
+              : "LEAD ROSNIE"
+            : "LAY LOW",
+      message: localResult.logMessage,
+      deltas: null,
     });
   };
 
@@ -2836,8 +3229,17 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - factory ownership, slot limits, diminishing returns and maintenance costs must be persisted server-side
-  const buyFactory = (factory) => {
+  const buyFactory = async (factory) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyFactoryOnline(sessionToken, factory.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Kupowanie fabryk")) return;
     if (game.player.respect < factory.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${factory.respect}.`);
     if (game.player.cash < factory.cost) return pushLog(`Brakuje ${formatMoney(factory.cost)} na ${factory.name}.`);
@@ -2852,8 +3254,17 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - wholesale unlock, supplier tiers and component quality requirements should mutate server inventory, not local fallback state
-  const buySupply = (supply) => {
+  const buySupply = async (supply) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyFactorySupplyOnline(sessionToken, supply.id, 1);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Kupowanie dostaw")) return;
     if (game.player.cash < supply.price) return pushLog(`Brakuje gotowki na ${supply.name}.`);
 
@@ -2866,8 +3277,20 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - production recipes, raid risk, maintenance, yield scaling and inventory output are critical economy authority
-  const produceDrug = (drug) => {
+  const produceDrug = async (drug) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await produceDrugOnline(sessionToken, drug.id);
+        mergeServerUser(result.user);
+        if (result?.result?.jailSeconds) {
+          setActiveSection("heists", "prison");
+        }
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Produkcja w fabryce")) return;
     if (!hasFactory(game, drug.factoryId)) return pushLog(`Najpierw musisz miec ${FACTORIES.find((entry) => entry.id === drug.factoryId)?.name}.`);
     if (game.player.respect < drug.unlockRespect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${drug.unlockRespect}.`);
@@ -3039,38 +3462,38 @@ function AppRuntime() {
     if (game.player.respect < listing.respect) return pushLog(`Na ten lokal potrzebujesz ${listing.respect} szacunu.`);
     if (game.player.cash < listing.takeoverCost) return pushLog(`Brakuje ${formatMoney(listing.takeoverCost)} na przejecie ${listing.name}.`);
 
-    setGame((prev) => ({
-      ...prev,
-      player: { ...prev.player, cash: prev.player.cash - listing.takeoverCost },
-      club: {
-        ...prev.club,
-        owned: true,
-        sourceId: listing.id,
-        visitId: listing.id,
-        ownerLabel: clubOwnerLabel,
-        name: listing.name,
-        popularity: listing.popularity,
-        mood: listing.mood,
-        policeBase: listing.policeBase,
-        note: listing.note,
-      },
-      clubListings: syncClubListing(
-        prev.clubListings,
+    setGame((prev) => {
+      const nextClub = syncClubRuntimeState(
         {
           ...prev.club,
           owned: true,
           sourceId: listing.id,
+          visitId: listing.id,
           ownerLabel: clubOwnerLabel,
           name: listing.name,
+          respect: listing.respect,
+          takeoverCost: listing.takeoverCost,
           popularity: listing.popularity,
           mood: listing.mood,
           policeBase: listing.policeBase,
+          policePressure: Number(listing.policePressure || 0),
+          traffic: Number(listing.traffic || 0),
+          nightPlanId: listing.nightPlanId || getClubNightPlan().id,
+          recentIncident: null,
           note: listing.note,
+          guestState: prev.club.guestState || createClubGuestState(),
         },
-        clubOwnerLabel
-      ),
-      log: [`Przejales ${listing.name}. Teraz nocne pieniadze zaczynaja isc do Ciebie.`, ...prev.log].slice(0, 16),
-    }));
+        Date.now()
+      );
+
+      return {
+        ...prev,
+        player: { ...prev.player, cash: prev.player.cash - listing.takeoverCost },
+        club: nextClub,
+        clubListings: syncClubListing(prev.clubListings, nextClub, clubOwnerLabel),
+        log: [`Przejales ${listing.name}. Teraz ruch i nocki zaczynaja pracowac dla Ciebie.`, ...prev.log].slice(0, 16),
+      };
+    });
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - club founding must be validated server-side before production
@@ -3089,42 +3512,59 @@ function AppRuntime() {
     const clubId = `club-player-${Date.now()}`;
     const clubName = `${game.gang.name} Social Club`;
     const ownerLabel = clubOwnerLabel;
-    const newListing = {
-      id: clubId,
-      name: clubName,
-      ownerLabel,
-      respect: 26,
-      takeoverCost: CLUB_FOUNDING_CASH_COST,
-      popularity: 18,
-      mood: 68,
-      policeBase: 13,
-      note: "Nowy lokal postawiony od zera. Wysokie koszty, wysoki potencjal i wieksza uwaga sluzb.",
-    };
-
-    setGame((prev) => ({
-      ...prev,
-      player: {
-        ...prev.player,
-        cash: prev.player.cash - CLUB_FOUNDING_CASH_COST,
-      },
-      club: {
-        ...prev.club,
-        owned: true,
-        sourceId: newListing.id,
-        visitId: newListing.id,
+      const newListing = {
+        id: clubId,
+        name: clubName,
         ownerLabel,
-        name: newListing.name,
-        popularity: newListing.popularity,
-        mood: newListing.mood,
-        policeBase: newListing.policeBase,
-        note: newListing.note,
-      },
-      clubListings: syncClubListing(prev.clubListings, { ...prev.club, ...newListing, owned: true }, ownerLabel),
-      log: [
-        `Wylales gruby hajs i postawiles od zera ${clubName}.`,
-        ...prev.log,
-      ].slice(0, 16),
-    }));
+        respect: 26,
+        takeoverCost: CLUB_FOUNDING_CASH_COST,
+        popularity: 18,
+        mood: 68,
+        policeBase: 13,
+        policePressure: 0,
+        traffic: 0,
+        nightPlanId: getClubNightPlan().id,
+        note: "Nowy lokal postawiony od zera. Wysokie koszty, wysoki potencjal i wieksza uwaga sluzb.",
+      };
+
+    setGame((prev) => {
+      const nextClub = syncClubRuntimeState(
+        {
+          ...prev.club,
+          owned: true,
+          sourceId: newListing.id,
+          visitId: newListing.id,
+          ownerLabel,
+          name: newListing.name,
+          respect: newListing.respect,
+          takeoverCost: newListing.takeoverCost,
+          popularity: newListing.popularity,
+          mood: newListing.mood,
+          policeBase: newListing.policeBase,
+          policePressure: 0,
+          traffic: 0,
+          nightPlanId: newListing.nightPlanId,
+          recentIncident: null,
+          note: newListing.note,
+          guestState: prev.club.guestState || createClubGuestState(),
+        },
+        Date.now()
+      );
+
+      return {
+        ...prev,
+        player: {
+          ...prev.player,
+          cash: prev.player.cash - CLUB_FOUNDING_CASH_COST,
+        },
+        club: nextClub,
+        clubListings: syncClubListing(prev.clubListings, nextClub, ownerLabel),
+        log: [
+          `Wylales gruby hajs i postawiles od zera ${clubName}.`,
+          ...prev.log,
+        ].slice(0, 16),
+      };
+    });
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - club stash is economy state and must not live only on the client
@@ -3150,46 +3590,143 @@ function AppRuntime() {
     if (!insideOwnClub) return pushLog("Musisz siedziec we wlasnym klubie, zeby odpalic noc i pilnowac stolow.");
     if (clubNightRemaining > 0) return pushLog(`Klub juz pracuje. Wroc za ${formatCooldown(clubNightRemaining)}.`);
 
-    const totalUnits = DRUGS.reduce((sum, drug) => sum + game.club.stash[drug.id], 0);
+    const clubSnapshot = syncClubRuntimeState(game.club);
+    const clubVenue = {
+      id: clubSnapshot.sourceId,
+      name: clubSnapshot.name,
+      ownerLabel: clubSnapshot.ownerLabel,
+      respect: clubSnapshot.respect || 0,
+      popularity: clubSnapshot.popularity,
+      mood: clubSnapshot.mood,
+      policeBase: clubSnapshot.policeBase,
+      policePressure: clubSnapshot.policePressure,
+      traffic: clubSnapshot.traffic,
+      nightPlanId: clubSnapshot.nightPlanId,
+      note: clubSnapshot.note,
+    };
+    const profile = getClubVenueProfile({ ...game, club: clubSnapshot }, clubVenue);
+    const totalUnits = DRUGS.reduce((sum, drug) => sum + (clubSnapshot.stash[drug.id] || 0), 0);
     if (!totalUnits) return pushLog("Klub stoi pusty. Dorzuc najpierw towar z fabryk.");
+    const trafficLevel = clamp(Number(clubSnapshot.traffic || 0), 0, CLUB_SYSTEM_RULES.nightlyTrafficHardCap);
+    if (trafficLevel < 1.25) {
+      return pushLog("Za cicho na sali. Najpierw dowiez ruch Scoutem, kontaktami albo realnymi odwiedzinami.");
+    }
 
+    const trafficWeight = clamp(trafficLevel / CLUB_SYSTEM_RULES.nightlyTrafficSoftCap, 0, 1.2);
+    const pressureDrag = Math.max(0, (Math.max(0, clubPolice.pressure - 48) / 36));
+    const effectiveTraffic = Math.max(0, trafficLevel - pressureDrag);
+    const demandBudget = Math.max(
+      0,
+      Math.min(
+        9,
+        Math.floor(effectiveTraffic / 2.6) + (profile.plan.id === "showtime" && effectiveTraffic >= 7 ? 1 : 0)
+      )
+    );
+
+    if (demandBudget <= 0) {
+      return pushLog("Sala zyje, ale presja przydusila noc. Najpierw uspokoj lokal albo zbuduj czystszy ruch.");
+    }
+
+    const workingStock = DRUGS.reduce((acc, drug) => {
+      acc[drug.id] = Number(clubSnapshot.stash[drug.id] || 0);
+      return acc;
+    }, {});
     const soldByDrug = {};
-    let income = 0;
-    let nightSignal = 0;
+    let remainingDemand = demandBudget;
 
-    DRUGS.forEach((drug) => {
-      const stock = game.club.stash[drug.id];
-      const sold = Math.min(stock, Math.max(0, randomBetween(0, Math.min(stock, 2))));
-      const policeProfile = getDrugPoliceProfile(drug);
-      soldByDrug[drug.id] = sold;
-      income += sold * Math.floor(drug.streetPrice * (1.2 + game.club.popularity / 100) * currentClubProfile.salesMultiplier);
-      nightSignal += sold * (drug.streetPrice / 200 + policeProfile.risk * 14);
+    while (remainingDemand > 0) {
+      const candidate = DRUGS
+        .filter((drug) => workingStock[drug.id] > 0)
+        .sort(
+          (left, right) =>
+            workingStock[right.id] * (1 + right.streetPrice / 7000) -
+            workingStock[left.id] * (1 + left.streetPrice / 7000)
+        )[0];
+
+      if (!candidate) break;
+      soldByDrug[candidate.id] = (soldByDrug[candidate.id] || 0) + 1;
+      workingStock[candidate.id] -= 1;
+      remainingDemand -= 1;
+    }
+
+    const soldUnits = Object.values(soldByDrug).reduce((sum, amount) => sum + amount, 0);
+    if (!soldUnits) {
+      return pushLog("Kolejka byla, ale nie zeszlo nic konkretnego ze stashu.");
+    }
+
+    let grossIncome = 0;
+    Object.entries(soldByDrug).forEach(([drugId, amount]) => {
+      const drug = DRUGS.find((entry) => entry.id === drugId);
+      if (!drug || !amount) return;
+      const perUnit = Math.max(
+        80,
+        Math.floor(drug.streetPrice * profile.nightIncomeFactor * (0.58 + trafficWeight * 0.28))
+      );
+      grossIncome += perUnit * amount;
     });
 
-    if (!income) return pushLog("Noc byla slaba. Nikt nie bral konkretnego towaru.");
-
-    const raidChance = clamp(
-      (0.05 + game.club.policeBase * 0.012 + nightSignal / 150 + game.player.heat * 0.002 + game.club.popularity * 0.002) *
-        currentClubProfile.raidModifier,
-      0.05,
-      0.74
+    const projectedPressure = clamp(
+      Number(clubSnapshot.policePressure || 0) +
+        effectiveTraffic * 1.4 +
+        soldUnits * 1.8 +
+        Math.max(0, totalUnits - soldUnits) * 0.18 +
+        game.player.heat * 0.08,
+      0,
+      100
     );
-    const raided = Math.random() < raidChance;
-    const jailSeconds = raided && raidChance >= 0.34 && Math.random() < raidChance * 0.28 ? randomBetween(240, 600) : 0;
+    const incidentChance = clamp(
+      0.03 + Math.max(0, projectedPressure - 58) / 190 + trafficWeight * 0.05,
+      0.03,
+      0.24
+    );
+    const incidentTriggered = Math.random() < incidentChance;
+    const incidentLoss = incidentTriggered ? Math.floor(grossIncome * (0.12 + Math.random() * 0.08)) : 0;
+    const netIncome = Math.max(0, grossIncome - incidentLoss);
+    const soldSummary = Object.entries(soldByDrug)
+      .filter(([, amount]) => amount > 0)
+      .map(([drugId, amount]) => {
+        const drug = DRUGS.find((entry) => entry.id === drugId);
+        return drug ? `${amount}x ${drug.name}` : null;
+      })
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(", ");
+    const nextTraffic = Number((Math.max(0, trafficLevel * 0.34)).toFixed(3));
+    const nextPressure = clamp(
+      Number(clubSnapshot.policePressure || 0) + effectiveTraffic * 0.9 + soldUnits * 0.7 + (incidentTriggered ? 5.5 : 2.1),
+      0,
+      100
+    );
+    const recentIncident = incidentTriggered
+      ? {
+          tone: "risk",
+          text: `Patrol przecial sale i scial ${formatMoney(incidentLoss)} z utargu.`,
+          createdAt: Date.now(),
+        }
+      : {
+          tone: trafficLevel >= 12 ? "buzz" : "calm",
+          text:
+            trafficLevel >= 12
+              ? "Kolejka dowiozla noc, ale lokal robi sie coraz glosniejszy."
+              : "Noc zamknieta czysto. Ruch byl umiarkowany i bez zbednego szumu.",
+          createdAt: Date.now(),
+        };
 
     setGame((prev) => {
-      const nextStash = { ...prev.club.stash };
+      const nextStash = { ...clubSnapshot.stash };
       Object.entries(soldByDrug).forEach(([drugId, amount]) => {
-        nextStash[drugId] -= amount;
+        nextStash[drugId] = Math.max(0, Number(nextStash[drugId] || 0) - Number(amount || 0));
       });
 
-      const raidLoss = raided ? Math.floor(income * (0.4 + Math.random() * 0.2)) : 0;
-      const netIncome = Math.max(0, income - raidLoss);
       const nextClub = {
-        ...prev.club,
-        popularity: clamp(prev.club.popularity + (raided ? -4 : 2), 0, 100),
-        mood: clamp(prev.club.mood + (raided ? -8 : 4), 0, 100),
+        ...clubSnapshot,
+        popularity: clamp(clubSnapshot.popularity + (incidentTriggered ? -1 : trafficLevel >= 9 ? 2 : 1), 0, 100),
+        mood: clamp(clubSnapshot.mood + (incidentTriggered ? -4 : soldUnits >= 4 ? 2 : 1), 0, 100),
+        policePressure: nextPressure,
+        traffic: nextTraffic,
+        lastTrafficAt: Date.now(),
         lastRunAt: Date.now(),
+        recentIncident,
         stash: nextStash,
       };
 
@@ -3198,29 +3735,43 @@ function AppRuntime() {
         player: {
           ...prev.player,
           cash: prev.player.cash + netIncome,
-          heat: clamp(prev.player.heat + (raided ? 12 : 3), 0, 100),
-          jailUntil: jailSeconds ? Date.now() + jailSeconds * 1000 : prev.player.jailUntil,
+          heat: clamp(prev.player.heat + (incidentTriggered ? 4 : 1), 0, 100),
         },
         stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + netIncome },
         club: nextClub,
         clubListings: syncClubListing(prev.clubListings, nextClub, prev.club.ownerLabel || getPlayerClubOwnerLabel(prev)),
         log: [
-          raided
-            ? `Nalot w ${prev.club.name}. Zostaje ${formatMoney(netIncome)}, ale gliny zgarnely ${formatMoney(raidLoss)}.`
-            : `${prev.club.name} zarobil ${formatMoney(netIncome)}. Towar poszedl w ludzi.`,
+          incidentTriggered
+            ? `${prev.club.name}: noc domknieta na ${formatMoney(netIncome)}. Patrol przycial ${formatMoney(incidentLoss)}. Poszlo: ${soldSummary || "skromny miks"}.`
+            : `${prev.club.name}: noc dowiozla ${formatMoney(netIncome)}. Ruch ${Math.round(trafficLevel)} i zeszlo: ${soldSummary || "skromny miks"}.`,
           ...prev.log,
         ].slice(0, 16),
       };
     });
 
-    if (jailSeconds) {
-      setActiveSection("heists", "prison");
-    }
+    showExplicitNotice({
+      tone: incidentTriggered ? "warning" : "success",
+      title: incidentTriggered ? "NOC Z PRESJA" : "NOC DOMKNIETA",
+      message: incidentTriggered
+        ? `${clubSnapshot.name} wyciagnal ${formatMoney(netIncome)}, ale patrol przycial ${formatMoney(incidentLoss)}.`
+        : `${clubSnapshot.name} zamknal noc na ${formatMoney(netIncome)} przy ruchu ${Math.round(trafficLevel)}.`,
+      deltas: null,
+    });
   };
 
-  const enterClubAsGuest = (listing) => {
+  const enterClubAsGuest = async (listing) => {
     if (!canDoStreetAction()) return;
     if (!listing) return pushLog("Nie ma takiego lokalu na mapie miasta.");
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await visitClubOnline(sessionToken, "enter", listing.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
     setGame((prev) => ({
       ...prev,
       club: {
@@ -3228,14 +3779,23 @@ function AppRuntime() {
         visitId: listing.id,
       },
       log: [
-        `Wchodzisz do ${listing.name}. Wlasciciel: ${listing.ownerLabel}. Lokal daje ${Math.round(getClubVenueProfile(prev, listing).eventChance * 100)}% szansy na event klubowy.`,
+        `Wchodzisz do ${listing.name}. Masz teraz Scout, Hunt Contacts i Lay Low.`,
         ...prev.log,
       ].slice(0, 16),
     }));
   };
 
-  const leaveClubAsGuest = () => {
+  const leaveClubAsGuest = async () => {
     if (!currentClubVenue) return pushLog("Nie jestes teraz w zadnym klubie.");
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await visitClubOnline(sessionToken, "leave", currentClubVenue.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
 
     setGame((prev) => ({
       ...prev,
@@ -3254,7 +3814,19 @@ function AppRuntime() {
     if (game.player.cash < 1200) return pushLog("Brakuje kasy na promo lokalu.");
     updateLocalPlayer({ cash: game.player.cash - 1200 }, "Promo odpalone. Klub zaczyna byc glosny na miescie.");
     setGame((prev) => {
-      const nextClub = { ...prev.club, popularity: clamp(prev.club.popularity + 8, 0, 100) };
+      const baseClub = syncClubRuntimeState(prev.club, Date.now());
+      const nextClub = {
+        ...baseClub,
+        popularity: clamp(baseClub.popularity + 6, 0, 100),
+        mood: clamp(baseClub.mood + 3, 0, 100),
+        traffic: clamp(Number(baseClub.traffic || 0) + 1.8, 0, CLUB_SYSTEM_RULES.nightlyTrafficHardCap),
+        policePressure: clamp(Number(baseClub.policePressure || 0) + 1.4, 0, 100),
+        recentIncident: {
+          tone: "buzz",
+          text: "Promo rozkrecilo wejscie i ustawilo lekka kolejke pod lokalem.",
+          createdAt: Date.now(),
+        },
+      };
       return {
         ...prev,
         club: nextClub,
@@ -3629,7 +4201,16 @@ function AppRuntime() {
     setBankAmountDraft(String(amount));
   };
 
-  const claimTask = (task) => {
+  const claimTask = async (task) => {
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await claimTaskOnline(sessionToken, task.id);
+        mergeServerUser(result.user);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Misje i nagrody")) return;
     if (!task.completed || task.claimed) return;
     setGame((prev) => ({
@@ -4512,8 +5093,8 @@ function AppRuntime() {
   const businessCapEta = getCollectionTimeToCap(game.collections?.businessCash || 0, totalBusinessIncome);
   const escortCapEta = getCollectionTimeToCap(game.collections?.escortCash || 0, totalEscortIncome);
   const escortFindChance = currentClubVenue
-    ? clamp(escortBaseFindChance + currentClubProfile.escortBonus, 0.03, 0.26)
-    : escortBaseFindChance;
+    ? clamp(currentClubProfile.huntProgressValue / CLUB_SYSTEM_RULES.leadRequired, 0.12, 0.42)
+    : clamp(escortBaseFindChance * 0.75, 0.05, 0.12);
 
   const renderSoloHeists = () => (
     <>
@@ -5402,7 +5983,9 @@ function AppRuntime() {
     drugs: DRUGS,
     suppliers: SUPPLIERS,
     clubFoundingCashCost: CLUB_FOUNDING_CASH_COST,
-    clubEscortSearchCost: CLUB_ESCORT_SEARCH_COST,
+    clubNightPlans: CLUB_NIGHT_PLANS,
+    clubSystemRules: CLUB_SYSTEM_RULES,
+    clubVisitorActions: CLUB_VISITOR_ACTIONS,
     totalBusinessIncome,
     businessCollectionCap,
     businessCapEta,
@@ -5413,7 +5996,6 @@ function AppRuntime() {
     currentClubProfile,
     clubPolice,
     insideOwnClub,
-    escortFindChance,
     clubNightRemaining,
     helpers: {
       getOwnedEscort,
@@ -5422,8 +6004,10 @@ function AppRuntime() {
       hasFactory,
       getDrugPoliceProfile,
       getClubVenueProfile,
+      getClubNightPlan,
       getBusinessUpgradeState,
       getBusinessUpgradePreview,
+      getLeadTargetEscortForVenue,
     },
     actions: {
       collectBusinessIncome,
@@ -5441,9 +6025,10 @@ function AppRuntime() {
       leaveClubAsGuest,
       openClub,
       foundClub,
+      setClubNightPlan,
       promoteClub,
       runClubNight,
-      findEscortInClub,
+      runClubVisitorAction,
       moveDrugToClub,
     },
   };
@@ -6020,6 +6605,11 @@ const styles = StyleSheet.create({
   listCardMeta: { color: "#999082", fontSize: 12, lineHeight: 18 },
   listCardReward: { color: "#d6a04f", fontSize: 13, fontWeight: "800", maxWidth: "100%", flexShrink: 1, textAlign: "right" },
   listActionsRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", marginTop: 12 },
+  planChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  planChip: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: "#3a2a21", backgroundColor: "#151110" },
+  planChipActive: { borderColor: "#c49539", backgroundColor: "#21170f" },
+  planChipText: { color: "#bcae9a", fontSize: 12, fontWeight: "700" },
+  planChipTextActive: { color: "#f4d37e" },
   oddsRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
   oddsBlock: { flex: 1, minWidth: 132, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "#27282d", backgroundColor: "#101114" },
   oddsLabel: { color: "#948a7d", fontSize: 11, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.8 },

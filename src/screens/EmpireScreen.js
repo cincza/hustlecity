@@ -29,7 +29,9 @@ export function EmpireScreen({
   drugs,
   suppliers,
   clubFoundingCashCost,
-  clubEscortSearchCost,
+  clubNightPlans,
+  clubSystemRules,
+  clubVisitorActions,
   totalBusinessIncome,
   businessCollectionCap,
   businessCapEta,
@@ -40,7 +42,6 @@ export function EmpireScreen({
   currentClubProfile,
   clubPolice,
   insideOwnClub,
-  escortFindChance,
   clubNightRemaining,
   helpers,
   actions,
@@ -85,6 +86,65 @@ export function EmpireScreen({
     { respect: 20, title: "Pelna produkcja", unlocks: factories.filter((factory) => factory.respect === 20) },
     { respect: 25, title: "Top fabryki", unlocks: factories.filter((factory) => factory.respect === 25) },
   ].filter((entry) => entry.unlocks.length);
+  const clubGuestState = safeGame.club?.guestState || {};
+  const activePlanId = currentClubVenue
+    ? safeGame.club.owned && safeGame.club.sourceId === currentClubVenue.id
+      ? safeGame.club.nightPlanId
+      : currentClubVenue.nightPlanId
+    : safeGame.club.nightPlanId;
+  const activeClubPlan =
+    helpers.getClubNightPlan?.(activePlanId) ||
+    clubNightPlans?.find((plan) => plan.id === activePlanId) ||
+    clubNightPlans?.[0] ||
+    null;
+  const leadRequired = Number(clubGuestState.leadRequired || clubSystemRules?.leadRequired || 100);
+  const activeLeadEscort = currentClubVenue
+    ? escorts.find(
+        (escort) =>
+          clubGuestState.leadVenueId === currentClubVenue.id &&
+          escort.id === clubGuestState.leadEscortId
+      ) ||
+      helpers.getLeadTargetEscortForVenue?.({
+        playerRespect: safeGame.player.respect,
+        venue: currentClubVenue,
+        planId: activePlanId,
+      })
+    : null;
+  const leadProgress =
+    currentClubVenue && clubGuestState.leadVenueId === currentClubVenue.id
+      ? Number(clubGuestState.leadProgress || 0)
+      : 0;
+  const leadMeterProgress = activeLeadEscort ? Math.min(1, leadProgress / Math.max(1, leadRequired)) : 0;
+  const lastOutcome =
+    currentClubVenue && clubGuestState.lastOutcome?.venueId === currentClubVenue.id
+      ? clubGuestState.lastOutcome
+      : null;
+  const clubActionCooldownRemaining = Math.max(
+    0,
+    Number(clubGuestState.lastActionAt || 0) + Number(clubSystemRules?.actionCooldownMs || 0) - Date.now()
+  );
+  const displayedTraffic = insideOwnClub ? Number(clubPolice.traffic || 0) : Number(currentClubVenue?.traffic || 0);
+  const trafficLabel = insideOwnClub
+    ? clubPolice.trafficLabel
+    : displayedTraffic >= 22
+      ? "Pelny ruch"
+      : displayedTraffic >= 12
+        ? "Dobry ruch"
+        : displayedTraffic >= 5
+          ? "Cos sie dzieje"
+          : "Cicho";
+  const displayedPressure = insideOwnClub
+    ? Number(clubPolice.pressure || 0)
+    : Number(currentClubVenue?.policePressure || (currentClubVenue?.policeBase || 0) * 3);
+  const pressureLabel = insideOwnClub
+    ? clubPolice.label
+    : displayedPressure >= 72
+      ? "Goraco"
+      : displayedPressure >= 46
+        ? "Pod obserwacja"
+        : displayedPressure >= 24
+          ? "Czuja ruch"
+          : "Spokojnie";
 
   const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
     <SectionCard title={title} subtitle={subtitle}>
@@ -461,16 +521,27 @@ export function EmpireScreen({
     <>
       <SceneArtwork
         eyebrow="Klub"
-        title="Lokal, klientela i zrzut towaru"
-        lines={["Na mapie miasta sa stale kluby, ale topowe ekipy moga tez postawic wlasny lokal za absurdalny hajs.", "Im mocniejszy towar i wiekszy utarg, tym szybciej policja zaczyna czuc smrod interesu."]}
+        title="Lokal, ruch i nocne okazje"
+        lines={["Klub ma dawac utility, leady i cichy ruch zamiast pustego RNG.", "Wlasciciel ustawia ton nocy, a odwiedzajacy maja tylko trzy czytelne ruchy."]}
         accent={["#432417", "#170f0c", "#050505"]}
         source={sceneBackgrounds.clubWide}
       />
       {!currentClubVenue ? (
-        <SectionCard title="Rynek klubow" subtitle="Jeden lokal ma miasto, reszta moze przechodzic w rece ekip. Nowy klub od zera stawia juz tylko boss gangu i to za gruby hajs.">
+        <SectionCard title="Rynek klubow" subtitle="Wchodzisz po utility albo przejmujesz lokal, jesli masz na to szacun i hajs.">
           {safeGame.clubListings.map((listing) => {
             const isOwnedByPlayer = safeGame.club.owned && safeGame.club.sourceId === listing.id;
             const listingProfile = helpers.getClubVenueProfile(safeGame, listing);
+            const listingPlan = helpers.getClubNightPlan?.(listing.nightPlanId) || clubNightPlans?.[0];
+            const listingPressure = Number(listing.policePressure || (listing.policeBase || 0) * 3);
+            const listingPressureLabel =
+              listingPressure >= 72
+                ? "Goraco"
+                : listingPressure >= 46
+                  ? "Pod obserwacja"
+                  : listingPressure >= 24
+                    ? "Czuja ruch"
+                    : "Spokojnie";
+
             return (
               <View key={listing.id} style={styles.listCard}>
                 <View style={styles.listCardHeader}>
@@ -487,7 +558,10 @@ export function EmpireScreen({
                 </View>
                 <Text style={styles.listCardMeta}>{listing.note}</Text>
                 <Text style={styles.listCardMeta}>
-                  Bazowa presja policji: {listing.policeBase}/20 | Eventy {Math.round(listingProfile.eventChance * 100)}% | Kontakty {Math.round(listingProfile.contactChance * 100)}%
+                  Plan nocy: {listingPlan?.name || "Guest List"} | Ruch {Math.round(listing.traffic || 0)} | Presja: {listingPressureLabel}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  Tipy do {formatMoney(listingProfile.scoutTipValue)} | Lead +{listingProfile.huntProgressValue} | Lay Low: -{listingProfile.layLowHeat} heat
                 </Text>
                 <View style={styles.marketButtons}>
                   <Pressable onPress={() => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
@@ -500,7 +574,7 @@ export function EmpireScreen({
                 <View style={styles.inlineRow}>
                   <Text style={styles.costLabel}>
                     {isOwnedByPlayer
-                      ? "Lokal jest Twoj. Wejdz do srodka, zeby odpalic tablice."
+                      ? "Lokal jest Twoj. Wejdz do srodka, zeby odpalic swoj panel."
                       : `Przejecie: ${formatMoney(listing.takeoverCost)}`}
                   </Text>
                 </View>
@@ -519,79 +593,222 @@ export function EmpireScreen({
         </SectionCard>
       ) : null}
 
-      <SectionCard title={currentClubVenue ? `Wnetrze: ${currentClubVenue.name}` : "Aktualny lokal"} subtitle={currentClubVenue ? "Jestes juz w srodku. Tu masz tylko rzeczy zwiazane z tym lokalem." : "Mozesz siedziec u siebie, wejsc do cudzego klubu albo po prostu byc na ulicy."}>
-        <StatLine label="Gdzie jestes" value={currentClubVenue ? currentClubVenue.name : "Poza klubem"} visual={systemVisuals.club} />
-        <StatLine label="Wlasciciel" value={currentClubVenue ? currentClubVenue.ownerLabel : "Brak"} visual={systemVisuals.gang} />
-        <StatLine label="Popularnosc" value={currentClubVenue ? `${currentClubVenue.popularity}%` : "0%"} visual={systemVisuals.club} />
-        <StatLine label="Szansa znalezienia panienki" value={currentClubVenue ? `${Math.round(escortFindChance * 100)}%` : "0%"} visual={systemVisuals.street} />
-        <StatLine label="Szansa eventu klubowego" value={currentClubVenue ? `${Math.round(currentClubProfile.eventChance * 100)}%` : "0%"} visual={systemVisuals.casino} />
-        <StatLine label="Szansa kontaktu / dragu" value={currentClubVenue ? `${Math.round(Math.max(currentClubProfile.contactChance, currentClubProfile.drugChance) * 100)}%` : "0%"} visual={systemVisuals.dealer} />
-        <Text style={styles.listCardMeta}>
-          {currentClubVenue
-            ? safeGame.club.owned && currentClubVenue.id === safeGame.club.sourceId
-              ? "Jestes u siebie. Tu zarzadzasz lokalem, wrzucasz towar i odpalasz nocki."
-              : `Siedzisz w klubie ${currentClubVenue.ownerLabel}. Lokal daje bonusy do eventow, kontaktow, dragow i znalezienia panienki.`
-            : "Najpierw wejdz do jednego z klubow z listy powyzej."}
-        </Text>
-        {currentClubVenue ? <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text> : null}
-        <View style={styles.grid}>
-          <ActionTile
-            title="Szukaj panienki"
-            subtitle={currentClubVenue ? `Wejscie ${formatMoney(clubEscortSearchCost)}. Szukasz teraz w ${currentClubVenue.name}.` : "Najpierw wejdz do jakiegos klubu z listy powyzej."}
-            visual={systemVisuals.street}
-            onPress={actions.findEscortInClub}
-            disabled={!currentClubVenue}
-          />
-          <ActionTile
-            title="Wyjdz z klubu"
-            subtitle={currentClubVenue ? "Wracasz na ulice i tracisz bonusy lokalu." : "Ta opcja dziala tylko, kiedy siedzisz w jakims klubie."}
-            visual={systemVisuals.street}
-            onPress={actions.leaveClubAsGuest}
-            disabled={!currentClubVenue}
-          />
+      <SectionCard
+        title={currentClubVenue ? `Stan lokalu: ${currentClubVenue.name}` : "Stan klubu"}
+        subtitle={currentClubVenue ? "Jeden status card, zero szumu. Widzisz stan, plan nocy i to, co lokal daje teraz." : "Wejdz do lokalu, zeby odpalic trzy akcje klubowe."}
+      >
+        <View style={styles.heroBanner}>
+          <View style={styles.listCardHeader}>
+            <View style={styles.entityHead}>
+              <EntityBadge visual={businessVisuals.club} />
+              <View style={styles.flexOne}>
+                <Text style={styles.heroBannerTitle}>{currentClubVenue ? currentClubVenue.name : "Poza klubem"}</Text>
+                <Text style={styles.heroBannerText}>
+                  {currentClubVenue
+                    ? `${insideOwnClub ? "Twoj lokal" : `Wlasciciel: ${currentClubVenue.ownerLabel}`}. Plan nocy: ${activeClubPlan?.name || "Guest List"}.`
+                    : "Wybierz lokal z listy wyzej, zeby wejsc po utility, leady i cichy ruch."}
+                </Text>
+              </View>
+            </View>
+            {currentClubVenue ? <Tag text={insideOwnClub ? "OWNER" : "GOSC"} warning={!insideOwnClub} /> : null}
+          </View>
+          {currentClubVenue ? (
+            <>
+              <View style={styles.mobileOverviewGrid}>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Popularnosc</Text>
+                  <Text style={styles.mobileOverviewValue}>{Math.round(currentClubVenue.popularity || 0)}%</Text>
+                  <Text style={styles.listCardMeta}>Mood {Math.round(currentClubVenue.mood || 0)}%</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Ruch</Text>
+                  <Text style={styles.mobileOverviewValue}>{Math.round(displayedTraffic)}</Text>
+                  <Text style={styles.listCardMeta}>{trafficLabel}</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Presja</Text>
+                  <Text style={styles.mobileOverviewValue}>{Math.round(displayedPressure)}</Text>
+                  <Text style={styles.listCardMeta}>{pressureLabel}</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Lead</Text>
+                  <Text style={styles.mobileOverviewValueSmall}>
+                    {activeLeadEscort ? `${leadProgress}/${leadRequired}` : "Brak celu"}
+                  </Text>
+                  <Text style={styles.listCardMeta}>{activeLeadEscort ? activeLeadEscort.name : "Odblokuj wyzszy respekt"}</Text>
+                </View>
+              </View>
+              <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text>
+              <Text style={styles.listCardMeta}>{activeClubPlan?.summary}</Text>
+              {insideOwnClub ? (
+                <View style={styles.planChipRow}>
+                  {clubNightPlans.map((plan) => {
+                    const active = safeGame.club.nightPlanId === plan.id;
+                    return (
+                      <Pressable
+                        key={plan.id}
+                        onPress={() => actions.setClubNightPlan(plan.id)}
+                        style={[styles.planChip, active && styles.planChipActive]}
+                      >
+                        <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{plan.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+              {insideOwnClub && safeGame.club.recentIncident?.text ? (
+                <View style={styles.lockedPanel}>
+                  <Text style={styles.lockedPanelText}>{safeGame.club.recentIncident.text}</Text>
+                </View>
+              ) : null}
+            </>
+          ) : null}
         </View>
       </SectionCard>
 
-      {!currentClubVenue || insideOwnClub ? (
-      <SectionCard title="Twoj klub" subtitle="Klub ma byc droga instytucja, ktora dopiero po czasie mieli hajs i glowbol z policja.">
-        {!safeGame.club.owned ? (
-          <Text style={styles.emptyText}>Jeszcze bez lokalu. Najpierw przejmij klub albo postaw nowy.</Text>
-        ) : !insideOwnClub ? (
+      {currentClubVenue ? (
+        <SectionCard
+          title="Akcje w klubie"
+          subtitle={
+            clubActionCooldownRemaining > 0
+              ? `Kolejny ruch za ${formatCooldown(clubActionCooldownRemaining)}.`
+              : "Trzy akcje. Jedna daje tip, jedna pompuje lead, jedna czysci heat."
+          }
+        >
+          <View style={styles.grid}>
+            {clubVisitorActions.map((action) => {
+              const disabled =
+                clubActionCooldownRemaining > 0 ||
+                (action.id === "hunt" && !activeLeadEscort);
+              const subtitle =
+                action.id === "scout"
+                  ? `Tip do ${formatMoney(currentClubProfile.scoutTipValue)}. Maly utility, z capem i diminishing.`
+                  : action.id === "hunt"
+                    ? activeLeadEscort
+                      ? `${activeLeadEscort.name}: +${currentClubProfile.huntProgressValue} lead za ${formatMoney(action.costCash)}.`
+                      : "Na tym progu nie ma jeszcze kontaktu do namierzenia."
+                    : `Heat -${currentClubProfile.layLowHeat} | HP +${currentClubProfile.layLowHp}. Bez grubej nagrody.`;
+
+              return (
+                <ActionTile
+                  key={action.id}
+                  title={action.name}
+                  subtitle={subtitle}
+                  visual={
+                    action.id === "scout"
+                      ? systemVisuals.cash
+                      : action.id === "hunt"
+                        ? systemVisuals.street
+                        : systemVisuals.heat
+                  }
+                  onPress={() => actions.runClubVisitorAction(action.id)}
+                  disabled={disabled}
+                />
+              );
+            })}
+          </View>
+        </SectionCard>
+      ) : null}
+
+      <SectionCard
+        title={currentClubVenue ? "Okazje i wynik" : "Po co tu wchodzic"}
+        subtitle={
+          currentClubVenue
+            ? "Tu widzisz lead meter, ostatni rezultat i lekki owner toolkit."
+            : "Klub daje glownie utility, leady i ruch pod umiarkowany nocny dochod."
+        }
+      >
+        {!currentClubVenue ? (
           <View style={styles.lockedPanel}>
-            <Text style={styles.lockedPanelText}>Masz klub, ale jestes poza nim. Wejdz do swojego lokalu z listy wyzej, zeby zobaczyc tablice, odpalic noc i dotknac stashu.</Text>
+            <Text style={styles.lockedPanelText}>
+              Wejscie do lokalu odblokowuje trzy szybkie akcje. Scout daje maly tip, Hunt Contacts pompuje lead meter, a Lay Low zbija heat i daje chwile oddechu.
+            </Text>
           </View>
         ) : (
           <>
-            <StatLine label="Status" value={`${safeGame.club.name} (${safeGame.club.ownerLabel})`} />
-            <StatLine label="Popularnosc" value={`${safeGame.club.popularity}%`} visual={systemVisuals.club} />
-            <StatLine label="Nastroj lokalu" value={`${safeGame.club.mood}%`} visual={systemVisuals.casino} />
-            <StatLine label="Presja policji" value={`${Math.round(clubPolice.pressure)} / 100`} visual={systemVisuals.heat} />
-            <StatLine label="Ryzyko nalotu" value={`${Math.round(clubPolice.raidChance * 100)}%`} visual={systemVisuals.pvp} />
-            <StatLine label="Mnoznik sprzedazy" value={`x${currentClubProfile.salesMultiplier.toFixed(2)}`} visual={systemVisuals.cash} />
-            <Text style={styles.listCardMeta}>{clubPolice.label}</Text>
-            <View style={styles.grid}>
-              <ActionTile title="Promo" subtitle="Koszt $1200. Popularnosc +8." visual={systemVisuals.club} onPress={actions.promoteClub} />
-              <ActionTile
-                title="Odpal noc"
-                subtitle={clubNightRemaining > 0 ? `Kolejna noc za ${formatCooldown(clubNightRemaining)}.` : `Klub sprzedaje stash. Aktualne ryzyko nalotu: ${Math.round(clubPolice.raidChance * 100)}%.`}
-                visual={systemVisuals.casino}
-                onPress={actions.runClubNight}
-                disabled={clubNightRemaining > 0}
-                danger
-              />
-              <ActionTile
-                title="Szukaj panienki"
-                subtitle={currentClubVenue ? `Wejscie ${formatMoney(clubEscortSearchCost)}. Szukasz teraz w ${currentClubVenue.name}.` : "Najpierw wejdz do jakiegos klubu z listy powyzej."}
-                visual={systemVisuals.street}
-                onPress={actions.findEscortInClub}
-              />
+            <View style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.entityHead}>
+                  <EntityBadge visual={activeLeadEscort ? escortVisuals[activeLeadEscort.id] || escortVisuals.velvet : systemVisuals.street} />
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{activeLeadEscort ? `Lead na ${activeLeadEscort.name}` : "Lead meter czeka"}</Text>
+                    <Text style={styles.listCardMeta}>
+                      {activeLeadEscort
+                        ? `${leadProgress}/${leadRequired} lead | ${formatMoney(activeLeadEscort.cashPerMinute)}/min po domknieciu`
+                        : "Podnies respekt albo zmien lokal, zeby odpalic lepsze kontakty."}
+                    </Text>
+                  </View>
+                </View>
+                <Tag text={activeLeadEscort ? `${Math.round(leadMeterProgress * 100)}%` : "--"} warning={!activeLeadEscort} />
+              </View>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: `${Math.max(4, leadMeterProgress * 100)}%` }]} />
+              </View>
+            </View>
+
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Ostatni wynik</Text>
+              <Text style={styles.listCardMeta}>
+                {lastOutcome
+                  ? lastOutcome.logMessage
+                  : "Po pierwszej akcji zobaczysz tutaj konkret: tip, lead albo chwile spokoju."}
+              </Text>
+              <View style={styles.listActionsRow}>
+                {insideOwnClub ? (
+                  <>
+                    <Pressable onPress={actions.promoteClub} style={styles.inlineButton}>
+                      <Text style={styles.inlineButtonText}>Promo</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={actions.runClubNight}
+                      style={[styles.inlineButton, clubNightRemaining > 0 && styles.tileDisabled]}
+                    >
+                      <Text style={styles.inlineButtonText}>
+                        {clubNightRemaining > 0 ? `Noc za ${formatCooldown(clubNightRemaining)}` : "Odpal noc"}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : null}
+                <Pressable onPress={actions.leaveClubAsGuest} style={styles.inlineButton}>
+                  <Text style={styles.inlineButtonText}>Wyjdz</Text>
+                </Pressable>
+              </View>
+              {insideOwnClub ? (
+                <Text style={styles.listCardMeta}>
+                  Noc skaluje sie z ruchem graczy i traffic meterem. Self visit liczy sie slabiej, a presja policji rosnie subtelnie.
+                </Text>
+              ) : (
+                <Text style={styles.listCardMeta}>
+                  W tym lokalu glowna wartosc to utility i kontakty, nie darmowa gotowka z klikacza.
+                </Text>
+              )}
             </View>
           </>
         )}
       </SectionCard>
+
+      {insideOwnClub ? (
+        <SectionCard title="Stash klubu" subtitle="Szybkie dosypanie towaru przed kolejna noc. Bez rozbudowanej tablicy i bez zbednych klikow.">
+          {drugs.map((drug) => (
+            <View key={drug.id} style={styles.listCard}>
+              <View style={styles.inlineRow}>
+                <View style={styles.entityHead}>
+                  <EntityBadge visual={drugVisuals[drug.id]} />
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{drug.name}</Text>
+                    <Text style={styles.listCardMeta}>Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | W klubie: {safeGame.club.stash[drug.id] || 0}</Text>
+                  </View>
+                </View>
+                <Pressable onPress={() => actions.moveDrugToClub(drug)} style={[styles.inlineButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
+                  <Text style={styles.inlineButtonText}>Wrzuc do klubu</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+        </SectionCard>
       ) : null}
 
-      {!currentClubVenue || insideOwnClub ? (
+      {false ? (
       <SectionCard title="Stash klubu" subtitle="Dorzuc towar z fabryk do klubu. Tu jest glowny loop z dragami.">
         {!safeGame.club.owned ? (
           <Text style={styles.emptyText}>Bez swojego lokalu nie masz gdzie wrzucac towaru.</Text>

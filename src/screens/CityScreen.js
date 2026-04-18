@@ -186,16 +186,22 @@ export function CityScreen({
               <View style={styles.flexOne}>
                 <Text style={styles.listCardTitle}>{task.title}</Text>
                 <Text style={styles.listCardMeta}>{task.description}</Text>
+                {task.onlineDisabled ? <Text style={styles.listCardMeta}>{task.disabledReason}</Text> : null}
               </View>
               <View style={styles.taskMeta}>
-                <Tag text={task.completed ? "Gotowe" : "W toku"} warning={!task.completed} />
+                <Tag
+                  text={task.onlineDisabled ? "Online wkrotce" : task.completed ? "Gotowe" : "W toku"}
+                  warning={task.onlineDisabled || !task.completed}
+                />
                 {task.claimed ? <Tag text="Odebrane" /> : null}
               </View>
             </View>
             <View style={styles.inlineRow}>
               <Text style={styles.costLabel}>{formatMoney(task.rewardCash)} i +{task.rewardXp} XP</Text>
-              <Pressable onPress={() => actions.claimTask(task)} style={[styles.inlineButton, (!task.completed || task.claimed) && styles.tileDisabled]}>
-                <Text style={styles.inlineButtonText}>{task.claimed ? "Odebrane" : "Odbierz"}</Text>
+              <Pressable onPress={() => actions.claimTask(task)} style={[styles.inlineButton, (task.onlineDisabled || !task.completed || task.claimed) && styles.tileDisabled]}>
+                <Text style={styles.inlineButtonText}>
+                  {task.claimed ? "Odebrane" : task.onlineDisabled ? "Czeka" : "Odbierz"}
+                </Text>
               </Pressable>
             </View>
           </View>
