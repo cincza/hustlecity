@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { useRef } from "react";
 import {
+  Alert,
   Animated,
   Image,
   ImageBackground,
@@ -50,6 +51,7 @@ import {
   fetchPrisonChatOnline,
   fetchRankingsOnline,
   fetchSocialPlayers,
+  deleteAdminPlayerAccountOnline,
   grantAdminCashToPlayerOnline,
   healOnline,
   hitBlackjackOnline,
@@ -1640,6 +1642,7 @@ function AppRuntime() {
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
   const [notice, setNotice] = useState(null);
   const [quickActionModal, setQuickActionModal] = useState(null);
+  const [adminDeleteBusyLogin, setAdminDeleteBusyLogin] = useState("");
   const noticeOpacity = useRef(new Animated.Value(0)).current;
   const noticeTranslateY = useRef(new Animated.Value(-12)).current;
   const previousGameRef = useRef(INITIAL);
@@ -5215,6 +5218,45 @@ function AppRuntime() {
     }
   };
 
+  const deleteAdminPlayerAccount = (player) => {
+    const login = String(player?.name || "").trim();
+    if (!sessionToken || apiStatus !== "online") return pushLog("Admin tools dzialaja tylko online.");
+    if (!game.player.isAdmin) return pushLog("To narzedzie jest tylko dla admina.");
+    if (!login) return pushLog("Nie ma loginu do usuniecia.");
+    if (login === adminDeleteBusyLogin) return;
+
+    const confirmDelete = async () => {
+      setAdminDeleteBusyLogin(login);
+      try {
+        const result = await deleteAdminPlayerAccountOnline(sessionToken, login);
+        mergeServerUser(result.user);
+        try {
+          await refreshSocialState(sessionToken);
+        } catch (_error) {}
+        closeWorldPlayerProfile();
+        showExplicitNotice({
+          tone: "success",
+          title: "KONTO USUNIETE",
+          message: result?.result?.message || `Usunieto konto ${login}.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message || "Usuwanie konta nie wyszlo.");
+      } finally {
+        setAdminDeleteBusyLogin((prev) => (prev === login ? "" : prev));
+      }
+    };
+
+    Alert.alert(
+      "Usunac konto?",
+      `Konto ${login} zniknie z gry na stale. Tego nie cofnie nawet admin.`,
+      [
+        { text: "Anuluj", style: "cancel" },
+        { text: "Usun konto", style: "destructive", onPress: confirmDelete },
+      ]
+    );
+  };
+
   const attackWorldPlayer = (player) => {
     if (!player?.id) return pushLog("Nie ma celu do ataku.");
     const targetAttackCooldownRemaining = Math.max(0, Number(game.cooldowns?.playerAttackTargets?.[player.id] || 0) - Date.now());
@@ -6352,6 +6394,21 @@ function AppRuntime() {
                     </Pressable>
                   ))
                 : null}
+              {adminState.isAdmin ? (
+                <Pressable
+                  onPress={() => deleteAdminPlayerAccount(selectedWorldPlayer)}
+                  disabled={adminDeleteBusyLogin === selectedWorldPlayer.name}
+                  style={[
+                    styles.inlineButton,
+                    styles.inlineButtonDanger,
+                    adminDeleteBusyLogin === selectedWorldPlayer.name && styles.tileDisabled,
+                  ]}
+                >
+                  <Text style={[styles.inlineButtonText, styles.inlineButtonDangerText]}>
+                    {adminDeleteBusyLogin === selectedWorldPlayer.name ? "Usuwanie..." : "Usun konto"}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Pressable onPress={closeWorldPlayerProfile} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Wroc do listy</Text>
               </Pressable>
@@ -7418,6 +7475,8 @@ const styles = StyleSheet.create({
   oddsValue: { color: "#f4d37e", fontSize: 18, fontWeight: "800" },
   inlineButton: { alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 2, backgroundColor: "#201712", borderWidth: 1, borderColor: "#5b3529" },
   inlineButtonText: { color: "#f6efe6", fontWeight: "700", fontSize: 13 },
+  inlineButtonDanger: { backgroundColor: "#2a1214", borderColor: "#8a3438" },
+  inlineButtonDangerText: { color: "#ffb8be" },
   inlineRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 },
   gymBatchControls: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12, marginBottom: 10 },
   gymBatchAdjustButton: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "#17181d", borderWidth: 1, borderColor: "#30313a" },

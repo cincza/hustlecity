@@ -250,6 +250,14 @@ export async function grantAdminCashToPlayerOnline(token, targetUserId, amount) 
   });
 }
 
+export async function deleteAdminPlayerAccountOnline(token, login) {
+  return request("/admin/players/delete-account", {
+    method: "POST",
+    token,
+    body: { login },
+  });
+}
+
 export async function addFriendOnline(token, targetUserId) {
   return request(`/social/friends/${encodeURIComponent(targetUserId)}`, {
     method: "POST",
