@@ -190,6 +190,56 @@ const SPECIAL_PROFILE_FLOORS = {
 };
 const VERBOSE_SERVER_LOGS = process.env.VERBOSE_SERVER_LOGS === "1";
 
+function isPrivateIpv4Host(hostname) {
+  if (typeof hostname !== "string" || !hostname) {
+    return false;
+  }
+
+  if (/^10(?:\.\d{1,3}){3}$/i.test(hostname)) {
+    return true;
+  }
+
+  if (/^192\.168(?:\.\d{1,3}){2}$/i.test(hostname)) {
+    return true;
+  }
+
+  const match172 = hostname.match(/^172\.(\d{1,3})(?:\.\d{1,3}){2}$/i);
+  if (match172) {
+    const secondOctet = Number(match172[1]);
+    return Number.isFinite(secondOctet) && secondOctet >= 16 && secondOctet <= 31;
+  }
+
+  return false;
+}
+
+function isImplicitlyAllowedOrigin(origin) {
+  if (typeof origin !== "string" || !origin.trim()) {
+    return false;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return true;
+  }
+
+  if (isPrivateIpv4Host(hostname)) {
+    return true;
+  }
+
+  return hostname.endsWith(".netlify.app");
+}
+
 function asyncHandler(handler) {
   return function wrappedHandler(req, res, next) {
     Promise.resolve(handler(req, res, next)).catch(next);
@@ -199,7 +249,12 @@ function asyncHandler(handler) {
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      if (
+        !origin ||
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        isImplicitlyAllowedOrigin(origin)
+      ) {
         callback(null, true);
         return;
       }
