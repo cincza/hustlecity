@@ -501,6 +501,7 @@ export function EmpireScreen({
         <SectionCard title="Produkcja" subtitle="Kazdy mocniejszy towar daje lepsze staty, ale niesie wieksze ryzyko zgonu po spozyciu.">
           {drugs.map((drug) => {
             const policeProfile = helpers.getDrugPoliceProfile(drug);
+            const productionRespectRequirement = helpers.getDrugProductionRespectRequirement?.(drug) ?? Number(drug.unlockRespect || 0);
             const batchEconomy = getDrugBatchEconomy(drug, suppliers, helpers.getDealerPayoutForDrug);
             const factoryDistrict = districtSummaryById[getFactoryDistrictId(drug.factoryId)] || focusDistrictSummary;
             return (
@@ -530,7 +531,9 @@ export function EmpireScreen({
                   Klubowy potencjal: okolo {formatMoney(batchEconomy.estimatedClubGross)} z batcha. {batchEconomy.recommendation}
                 </Text>
                 <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>Wymagana fabryka: {factories.find((entry) => entry.id === drug.factoryId)?.name}</Text>
+                  <Text style={styles.costLabel}>
+                    Wymagana fabryka: {factories.find((entry) => entry.id === drug.factoryId)?.name} | Start produkcji od {productionRespectRequirement} RES
+                  </Text>
                   <Pressable onPress={() => actions.produceDrug(drug)} style={[styles.inlineButton, !helpers.hasFactory(safeGame, drug.factoryId) && styles.tileDisabled]}>
                     <Text style={styles.inlineButtonText}>Produkuj</Text>
                   </Pressable>

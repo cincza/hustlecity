@@ -253,6 +253,15 @@ export function getFactoryRisk(factory) {
   );
 }
 
+export function getDrugProductionRespectRequirement(drug) {
+  const safeDrug = drug || {};
+  const factory = findFactoryById(safeDrug.factoryId);
+  if (factory) {
+    return Math.max(0, Math.floor(Number(factory.respect || 0)));
+  }
+  return Math.max(0, Math.floor(Number(safeDrug.unlockRespect || 0)));
+}
+
 export function getDrugBatchSupplyCost(drug, suppliers = SUPPLIERS) {
   const supplierPrices = Object.fromEntries((Array.isArray(suppliers) ? suppliers : SUPPLIERS).map((entry) => [entry.id, Number(entry.price || 0)]));
   return Object.entries(drug?.supplies || {}).reduce(

@@ -11,6 +11,7 @@ import {
   findSupplyById,
   getBusinessIncomePerMinute,
   getBusinessUpgradeCost,
+  getDrugProductionRespectRequirement,
   getDrugPoliceProfile,
   normalizeBusinessCollections,
   normalizeBusinessUpgrades,
@@ -521,6 +522,7 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   ensurePlayerEmpireState(player);
 
   const drug = findDrugById(drugId);
+  const productionRespectRequirement = getDrugProductionRespectRequirement(drug);
   if (!drug) {
     fail("Nie ma takiego towaru.");
   }
@@ -530,8 +532,8 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   if (Number(player.factoriesOwned?.[drug.factoryId] || 0) <= 0) {
     fail(`Najpierw musisz miec ${findFactoryById(drug.factoryId)?.name || "wlasciwa fabryke"}.`);
   }
-  if (Number(player.profile?.respect || 0) < Number(drug.unlockRespect || 0)) {
-    fail(`Masz za niski szacunek. Wymagany szacunek: ${drug.unlockRespect}.`);
+  if (Number(player.profile?.respect || 0) < productionRespectRequirement) {
+    fail(`Masz za niski szacunek. Wymagany szacunek: ${productionRespectRequirement}.`);
   }
 
   for (const [supplyId, amount] of Object.entries(drug.supplies || {})) {

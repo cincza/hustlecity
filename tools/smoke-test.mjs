@@ -550,6 +550,59 @@ async function main() {
       throw new Error("Produkcja nie podniosla statystyki drugBatches.");
     }
 
+    const boughtDesignerLab = await request("/factories/buy", {
+      method: "POST",
+      token,
+      body: { factoryId: "designerlab" },
+    });
+
+    if (Number(boughtDesignerLab?.user?.factoriesOwned?.designerlab || 0) <= 0) {
+      throw new Error("Kupno Designer Lab nie zapisalo ownership.");
+    }
+
+    await request("/factories/supplies/buy", {
+      method: "POST",
+      token,
+      body: { supplyId: "pharma", quantity: 2 },
+    });
+    await request("/factories/supplies/buy", {
+      method: "POST",
+      token,
+      body: { supplyId: "chemicals", quantity: 1 },
+    });
+    await request("/factories/supplies/buy", {
+      method: "POST",
+      token,
+      body: { supplyId: "pills", quantity: 1 },
+    });
+    await request("/factories/supplies/buy", {
+      method: "POST",
+      token,
+      body: { supplyId: "packaging", quantity: 1 },
+    });
+
+    const producedDesignerDrug = await request("/factories/produce", {
+      method: "POST",
+      token,
+      body: { drugId: "ecstasy" },
+    });
+
+    if (producedDesignerDrug?.result?.drugId !== "ecstasy") {
+      throw new Error("Produkcja Extasy nie zwrocila wyniku dla towaru z Designer Lab.");
+    }
+    if (Number(producedDesignerDrug?.user?.profile?.respect || 0) >= 50) {
+      throw new Error("Smoke test dla zsynchronizowanej produkcji potrzebuje szacunu ponizej starego progu Extasy.");
+    }
+    if (Number(producedDesignerDrug?.user?.profile?.jailUntil || 0) > Date.now()) {
+      const designerBribe = await request("/player/jail/bribe", {
+        method: "POST",
+        token,
+      });
+      if (Number(designerBribe?.user?.profile?.jailUntil || 0) > Date.now()) {
+        throw new Error("Bribe po produkcji z Designer Lab nie wypuscil gracza z celi.");
+      }
+    }
+
     await request("/player/profile/avatar", {
       method: "POST",
       token,

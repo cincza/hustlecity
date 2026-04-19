@@ -135,6 +135,7 @@ import {
   SUPPLIERS,
   createSupplyCounterMap,
   getDrugPoliceProfile as getSharedDrugPoliceProfile,
+  getDrugProductionRespectRequirement,
   normalizeBusinessCollections,
   normalizeBusinessUpgrades,
   normalizeBusinessesOwned,
@@ -3858,7 +3859,8 @@ function AppRuntime() {
     }
     if (!requireOfflineDemoAuthority("Produkcja w fabryce")) return;
     if (!hasFactory(game, drug.factoryId)) return pushLog(`Najpierw musisz miec ${FACTORIES.find((entry) => entry.id === drug.factoryId)?.name}.`);
-    if (game.player.respect < drug.unlockRespect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${drug.unlockRespect}.`);
+    const productionRespectRequirement = getDrugProductionRespectRequirement(drug);
+    if (game.player.respect < productionRespectRequirement) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${productionRespectRequirement}.`);
 
     for (const [supplyId, amount] of Object.entries(drug.supplies)) {
       if (game.supplies[supplyId] < amount) {
@@ -7579,6 +7581,7 @@ function AppRuntime() {
       getEscortDistrictCount,
       hasFactory,
       getDrugPoliceProfile,
+      getDrugProductionRespectRequirement,
       getDealerPayoutForDrug,
       getClubVenueProfile,
       getClubNightPlan,
