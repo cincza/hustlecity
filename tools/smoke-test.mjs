@@ -354,6 +354,19 @@ async function main() {
       throw new Error("Katalog gangow nie pokazuje nowo zalozonego gangu.");
     }
 
+    const updatedGangSettings = await request("/gang/settings", {
+      method: "POST",
+      token,
+      body: { inviteRespectMin: 30 },
+    });
+
+    if (Number(updatedGangSettings?.user?.gang?.inviteRespectMin || 0) !== 30) {
+      throw new Error("Ustawienia gangu nie zapisaly progu wejscia.");
+    }
+    if (!Array.isArray(updatedGangSettings?.gangs) || !updatedGangSettings.gangs.some((entry) => entry.name === "Smoke Syndicate" && Number(entry.inviteRespectMin || 0) === 30)) {
+      throw new Error("Katalog gangow nie odswiezyl progu wejscia po zmianie ustawien.");
+    }
+
     const focusedGang = await request("/gang/focus", {
       method: "POST",
       token,
@@ -574,7 +587,7 @@ async function main() {
       body: { login: noEmailLoginOne, password },
     });
     const invitedUserMe = await request("/me", { token: invitedUserLogin.token });
-    if (!Array.isArray(invitedUserMe?.user?.gang?.invites) || !invitedUserMe.user.gang.invites.some((entry) => entry.gangName === "Smoke Syndicate")) {
+    if (!Array.isArray(invitedUserMe?.user?.gang?.invites) || !invitedUserMe.user.gang.invites.some((entry) => entry.gangName === "Smoke Syndicate" && Number(entry.inviteRespectMin || 0) === 30)) {
       throw new Error("Zaproszony gracz nie dostal invite do zywego gangu.");
     }
 

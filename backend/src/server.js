@@ -112,6 +112,7 @@ import {
   leaveGangForPlayer,
   setGangFocusForPlayer,
   syncGangDerivedState,
+  updateGangSettingsForPlayer,
 } from "./services/gangProjectService.js";
 import {
   advanceOperationForPlayer,
@@ -127,6 +128,7 @@ import {
 } from "./services/adminActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
+import { clampGangInviteRespectMin, GANG_INVITE_RESPECT_MIN } from "../../shared/gangProjects.js";
 import {
   createAuthMiddleware,
   getBearerToken,
@@ -763,7 +765,9 @@ function buildGangDirectoryEntry(gangName, memberRecords, now = Date.now()) {
     vault,
     ranking: 0,
     description: buildGangDescription(gangName, canonicalGang),
-    inviteRespectMin: Math.max(15, Math.floor(Number(canonicalGang?.inviteRespectMin || 15))),
+    inviteRespectMin: clampGangInviteRespectMin(
+      canonicalGang?.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
+    ),
     focusDistrictId,
     projects:
       canonicalGang?.projects && typeof canonicalGang.projects === "object" && !Array.isArray(canonicalGang.projects)
@@ -838,8 +842,39 @@ function buildGangInviteFromGangEntry(gangEntry, now = Date.now()) {
     leader: gangEntry?.boss || "Boss",
     members: Math.max(1, Math.floor(Number(gangEntry?.members || 1))),
     territory: Math.max(0, Math.floor(Number(gangEntry?.territory || 0))),
-    inviteRespectMin: Math.max(15, Math.floor(Number(gangEntry?.inviteRespectMin || 15))),
+    inviteRespectMin: clampGangInviteRespectMin(
+      gangEntry?.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
+    ),
   };
+}
+
+function syncGangInvitesWithLiveDirectory(invites, gangs) {
+  if (!Array.isArray(invites) || !Array.isArray(gangs)) {
+    return [];
+  }
+
+  const gangsByName = new Map(
+    gangs.map((entry) => [String(entry?.name || "").trim().toLowerCase(), entry]).filter(([name]) => name)
+  );
+
+  return invites
+    .map((invite) => {
+      const gangName = String(invite?.gangName || "").trim();
+      if (!gangName) return null;
+      const liveGang = gangsByName.get(gangName.toLowerCase());
+      if (!liveGang) return null;
+      return {
+        ...invite,
+        gangName: liveGang.name,
+        leader: liveGang.boss || invite.leader || "Boss",
+        members: Math.max(1, Math.floor(Number(liveGang.members || invite.members || 1))),
+        territory: Math.max(0, Math.floor(Number(liveGang.territory || invite.territory || 0))),
+        inviteRespectMin: clampGangInviteRespectMin(
+          liveGang.inviteRespectMin ?? invite.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
+        ),
+      };
+    })
+    .filter(Boolean);
 }
 
 function buildClubVenueFromPlayer(player) {
@@ -1226,10 +1261,15 @@ function publicPlayer(player, now = Date.now()) {
 }
 
 async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
+  const gangs = await buildGangDirectorySnapshot(now);
+  const user = publicPlayer(player, now);
+  if (Array.isArray(user?.gang?.invites)) {
+    user.gang.invites = syncGangInvitesWithLiveDirectory(user.gang.invites, gangs);
+  }
   return {
-    user: publicPlayer(player, now),
+    user,
     clubMarket: await buildClubMarketSnapshot(now),
-    gangs: await buildGangDirectorySnapshot(now),
+    gangs,
     ...extra,
   };
 }
@@ -3321,7 +3361,7 @@ app.post("/gang/invite", auth, asyncHandler(async (req, res) => {
       error.statusCode = 409;
       throw error;
     }
-    if (Number(target?.profile?.respect || 0) < Number(actor.gang.inviteRespectMin || 15)) {
+    if (Number(target?.profile?.respect || 0) < clampGangInviteRespectMin(actor.gang.inviteRespectMin)) {
       const error = new Error("Ten kandydat nie dobija do ustawionego progu szacunu.");
       error.statusCode = 400;
       throw error;
@@ -3381,6 +3421,19 @@ app.post("/gang/invite", auth, asyncHandler(async (req, res) => {
   });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result, target: targetSnapshot }));
+}));
+
+app.post("/gang/settings", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "gang-settings", async () => {
+    await commitPlayerMutation(req, "gang-settings", async (player) => {
+      result = updateGangSettingsForPlayer(player, req.body || {}, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/delete", auth, asyncHandler(async (req, res) => {

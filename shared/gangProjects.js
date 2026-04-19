@@ -3,6 +3,11 @@ import { DISTRICTS } from "./districts.js";
 const clampGangValue = (value, min, max) =>
   Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : min));
 
+export const GANG_INVITE_RESPECT_MIN = 5;
+export const GANG_INVITE_RESPECT_MAX = 200;
+export const clampGangInviteRespectMin = (value) =>
+  clampGangValue(value, GANG_INVITE_RESPECT_MIN, GANG_INVITE_RESPECT_MAX);
+
 export const DEMO_GANG_INVITES = [];
 const LEGACY_DEMO_GANG_INVITE_IDS = new Set(["inv-1", "inv-2"]);
 const LEGACY_DEMO_GANG_NAMES = new Set(["grey saints", "cold avenue", "night vultures", "velvet ash"]);
@@ -135,7 +140,7 @@ export function createGangState(overrides = {}) {
     territory: 0,
     influence: 0,
     vault: 0,
-    inviteRespectMin: 15,
+    inviteRespectMin: GANG_INVITE_RESPECT_MIN,
     createCost: 250000,
     chat: [],
     lastTributeAt: 0,
@@ -185,7 +190,7 @@ export function normalizeGangState(value) {
     territory: joined ? Math.max(0, Math.floor(Number(value.territory || 0))) : 0,
     influence: joined ? Math.max(0, Math.floor(Number(value.influence || 0))) : 0,
     vault: joined ? Math.max(0, Math.floor(Number(value.vault || 0))) : 0,
-    inviteRespectMin: clampGangValue(value.inviteRespectMin, 15, 60),
+    inviteRespectMin: clampGangInviteRespectMin(value.inviteRespectMin),
     createCost: Math.max(0, Math.floor(Number(value.createCost || base.createCost))),
     chat: joined && Array.isArray(value.chat) ? value.chat.slice(0, 20) : [],
     lastTributeAt: Math.max(0, Math.floor(Number(value.lastTributeAt || 0))),

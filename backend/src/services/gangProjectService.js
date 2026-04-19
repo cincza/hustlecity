@@ -1,6 +1,8 @@
 import {
+  clampGangInviteRespectMin,
   createGangState,
   ensureGangWeeklyGoal,
+  GANG_INVITE_RESPECT_MIN,
   getGangProjectById,
   getGangProjectCost,
   getGangProjectEffects,
@@ -108,8 +110,11 @@ export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot
   if (gangSnapshot && String(gangSnapshot?.name || "").trim().toLowerCase() !== gangName.toLowerCase()) {
     fail("Zaproszenie nie pasuje do aktywnego gangu.");
   }
-  if (Number(player?.profile?.respect || 0) < Number(safeInvite.inviteRespectMin || 15)) {
-    fail(`Ten gang bierze od ${safeInvite.inviteRespectMin || 15} szacunu.`);
+  const requiredRespect = clampGangInviteRespectMin(
+    gangSnapshot?.inviteRespectMin ?? safeInvite.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
+  );
+  if (Number(player?.profile?.respect || 0) < requiredRespect) {
+    fail(`Ten gang bierze od ${requiredRespect} szacunu.`);
   }
 
   const previousInvites = Array.isArray(player.gang?.invites) ? player.gang.invites : [];
@@ -143,7 +148,7 @@ export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot
       influence: Math.max(0, Number(gangSnapshot?.influence || 0)),
       vault: Math.max(0, Number(gangSnapshot?.vault || 3200 + Math.max(0, Number(safeInvite.members || 0)) * 180)),
       gearScore: Math.max(58, Math.floor(Number(gangSnapshot?.members || safeInvite.members || 1) * 4 + 42)),
-      inviteRespectMin: Math.max(15, Number(gangSnapshot?.inviteRespectMin || safeInvite.inviteRespectMin || 15)),
+      inviteRespectMin: requiredRespect,
       focusDistrictId: gangSnapshot?.focusDistrictId,
       projects:
         gangSnapshot?.projects && typeof gangSnapshot.projects === "object" && !Array.isArray(gangSnapshot.projects)
@@ -181,6 +186,37 @@ export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot
   return {
     gangName,
     logMessage: `Dolaczasz do ${gangName}. Otwieraja sie projekty i walka o teren.`,
+  };
+}
+
+export function updateGangSettingsForPlayer(player, settings = {}, now = Date.now()) {
+  ensurePlayerGangState(player, now);
+  if (!player.gang.joined) {
+    fail("Najpierw wejdz do gangu.");
+  }
+  if (player.gang.role !== "Boss") {
+    fail("Tylko boss ustawia zasady gangu.", 403);
+  }
+
+  const inviteRespectMin = clampGangInviteRespectMin(
+    settings?.inviteRespectMin ?? player.gang.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
+  );
+
+  player.gang.inviteRespectMin = inviteRespectMin;
+  player.gang.chat = [
+    {
+      id: `gang-settings-${now}`,
+      author: "System",
+      text: `Boss ustawia prog wejscia na ${inviteRespectMin} RES.`,
+      time: new Date(now).toISOString(),
+    },
+    ...(Array.isArray(player.gang.chat) ? player.gang.chat : []),
+  ].slice(0, 20);
+  player.gang = ensureGangWeeklyGoal(player.gang, now);
+
+  return {
+    inviteRespectMin,
+    logMessage: `Prog wejscia do gangu ustawiony na ${inviteRespectMin} RES.`,
   };
 }
 

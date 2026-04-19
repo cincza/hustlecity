@@ -494,6 +494,14 @@ export async function invitePlayerToGangOnline(token, targetUserId) {
   });
 }
 
+export async function updateGangSettingsOnline(token, settings) {
+  return request("/gang/settings", {
+    method: "POST",
+    token,
+    body: settings,
+  });
+}
+
 export async function deleteGangOnline(token) {
   return request("/gang/delete", {
     method: "POST",

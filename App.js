@@ -85,6 +85,7 @@ import {
   sendDirectMessageOnline,
   setClubPlanOnline,
   setGangFocusOnline,
+  updateGangSettingsOnline,
   startOperationOnline,
   startBlackjackOnline,
   standBlackjackOnline,
@@ -144,7 +145,10 @@ import {
   normalizeCityState,
 } from "./shared/districts.js";
 import {
+  clampGangInviteRespectMin,
   createGangState,
+  GANG_INVITE_RESPECT_MAX,
+  GANG_INVITE_RESPECT_MIN,
   getGangProjectCost,
   getGangProjectEffects,
   getGangProjectLevel,
@@ -197,6 +201,13 @@ import {
   getOwnedEscort,
   STREET_DISTRICTS,
 } from "./shared/street.js";
+const GANG_INVITE_THRESHOLD_PRESETS = [
+  GANG_INVITE_RESPECT_MIN,
+  30,
+  50,
+  100,
+  GANG_INVITE_RESPECT_MAX,
+].filter((value, index, values) => values.indexOf(value) === index);
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
 const PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.sameTargetRepeatCooldownSeconds || 0) * 1000;
@@ -811,7 +822,7 @@ const normalizeGangDirectoryEntry = (entry, index = 0) => ({
   influence: Number.isFinite(entry?.influence) ? entry.influence : 0,
   vault: Number.isFinite(entry?.vault) ? entry.vault : 0,
   description: entry?.description || "Gang trzyma ekipe i probuje przepchnac wplywy po miescie.",
-  inviteRespectMin: Number.isFinite(entry?.inviteRespectMin) ? entry.inviteRespectMin : 15,
+  inviteRespectMin: Number.isFinite(entry?.inviteRespectMin) ? entry.inviteRespectMin : GANG_INVITE_RESPECT_MIN,
   focusDistrictId: entry?.focusDistrictId || "oldtown",
   projects:
     entry?.projects && typeof entry.projects === "object" && !Array.isArray(entry.projects)
@@ -1649,6 +1660,7 @@ function AppRuntime() {
   const [notice, setNotice] = useState(null);
   const [quickActionModal, setQuickActionModal] = useState(null);
   const [adminDeleteBusyLogin, setAdminDeleteBusyLogin] = useState("");
+  const [gangSettingsBusy, setGangSettingsBusy] = useState(false);
   const noticeOpacity = useRef(new Animated.Value(0)).current;
   const noticeTranslateY = useRef(new Animated.Value(-12)).current;
   const previousGameRef = useRef(INITIAL);
@@ -4913,17 +4925,52 @@ function AppRuntime() {
     }));
   };
 
-  const changeGangInviteThreshold = (delta) => {
-    if (!requireOfflineDemoAuthority("Progi zaproszen gangu")) return;
+  const updateGangInviteThreshold = async (nextThreshold) => {
     if (!game.gang.joined) return;
     if (game.gang.role !== "Boss") return pushLog("Tylko boss ustawia prog zaproszen.");
+
+    const targetThreshold = clampGangInviteRespectMin(nextThreshold);
+    if (targetThreshold === game.gang.inviteRespectMin) return;
+
+    if (sessionToken && apiStatus === "online") {
+      setGangSettingsBusy(true);
+      try {
+        const result = await updateGangSettingsOnline(sessionToken, {
+          inviteRespectMin: targetThreshold,
+        });
+        mergeServerUser(result.user, result);
+        refreshSocialState(sessionToken).catch(() => {});
+        pushLog(result?.result?.logMessage || `Prog wejscia do gangu ustawiony na ${targetThreshold} RES.`);
+      } catch (error) {
+        pushLog(error.message);
+      } finally {
+        setGangSettingsBusy(false);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Ustawienia gangu")) return;
     setGame((prev) => ({
       ...prev,
-      gang: {
+      gang: normalizeGangState({
         ...prev.gang,
-        inviteRespectMin: clamp(prev.gang.inviteRespectMin + delta, 15, 60),
-      },
+        inviteRespectMin: targetThreshold,
+        chat: [
+          {
+            id: `gang-settings-${Date.now()}`,
+            author: "System",
+            text: `Boss ustawia prog wejscia na ${targetThreshold} RES.`,
+            time: nowTimeLabel(),
+          },
+          ...(prev.gang.chat || []),
+        ].slice(0, 20),
+      }),
     }));
+    pushLog(`Prog wejscia do gangu ustawiony na ${targetThreshold} RES.`);
+  };
+
+  const changeGangInviteThreshold = (delta) => {
+    updateGangInviteThreshold((game.gang.inviteRespectMin || GANG_INVITE_RESPECT_MIN) + delta);
   };
 
   const inviteCandidate = (candidateId) => {
@@ -6224,6 +6271,7 @@ function AppRuntime() {
                 <StatLine label="Teren" value={`${selectedGangProfile.territory}`} />
                 <StatLine label="Wplywy" value={`${selectedGangProfile.influence}`} />
                 <StatLine label="Skarbiec" value={formatMoney(selectedGangProfile.vault)} />
+                <StatLine label="Wejscie od" value={`${selectedGangProfile.inviteRespectMin} RES`} />
                 <StatLine label="Szacun ekipy" value={`${selectedGangProfile.respect}`} />
               </View>
             </View>
@@ -6362,7 +6410,7 @@ function AppRuntime() {
                       <EntityBadge visual={getGangVisual(gang.name)} />
                       <View style={styles.flexOne}>
                         <Text style={styles.listCardTitle}>{gang.name}</Text>
-                        <Text style={styles.listCardMeta}>Boss: {gang.boss} | Ludzie: {gang.members} | Wplywy: {gang.influence}</Text>
+                        <Text style={styles.listCardMeta}>Boss: {gang.boss} | Ludzie: {gang.members} | Wejscie: {gang.inviteRespectMin} RES | Wplywy: {gang.influence}</Text>
                       </View>
                     </View>
                     <View style={styles.listActionsRow}>
@@ -6391,6 +6439,7 @@ function AppRuntime() {
             <StatLine label="Rola" value={game.gang.role} />
             <StatLine label="Ludzie" value={`${game.gang.members}/${game.gang.maxMembers}`} />
             <StatLine label="Skarbiec" value={formatMoney(game.gang.vault)} />
+            <StatLine label="Wejscie od" value={`${game.gang.inviteRespectMin} RES`} />
             <StatLine label="Bonus do napadow gangu" value={`+${Math.round(getGangHeistBonusRate(game.gang) * 100)}% hajsu`} />
             <StatLine label="Ludzie w celi" value={game.gang.jailedCrew ? `${game.gang.jailedCrew} (${formatDuration(crewLockdownRemaining)})` : "0"} />
             {game.gang.role === "Boss" ? (
@@ -6401,6 +6450,45 @@ function AppRuntime() {
               </View>
             ) : null}
           </SectionCard>
+
+          {game.gang.role === "Boss" ? (
+            <SectionCard title="Ustawienia gangu" subtitle="Boss ustawia prog wejscia do ekipy.">
+              <Text style={styles.listCardMeta}>Nowe zaproszenia i dolaczanie leca po tym progu.</Text>
+              <View style={styles.listActionsRow}>
+                <Pressable
+                  onPress={() => changeGangInviteThreshold(-5)}
+                  style={[
+                    styles.inlineButton,
+                    (gangSettingsBusy || game.gang.inviteRespectMin <= GANG_INVITE_RESPECT_MIN) && styles.tileDisabled,
+                  ]}
+                >
+                  <Text style={styles.inlineButtonText}>-5 RES</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => changeGangInviteThreshold(5)}
+                  style={[
+                    styles.inlineButton,
+                    (gangSettingsBusy || game.gang.inviteRespectMin >= GANG_INVITE_RESPECT_MAX) && styles.tileDisabled,
+                  ]}
+                >
+                  <Text style={styles.inlineButtonText}>+5 RES</Text>
+                </Pressable>
+                {GANG_INVITE_THRESHOLD_PRESETS.map((threshold) => (
+                  <Pressable
+                    key={`gang-threshold-${threshold}`}
+                    onPress={() => updateGangInviteThreshold(threshold)}
+                    style={[
+                      styles.inlineButton,
+                      game.gang.inviteRespectMin === threshold && styles.tileDisabled,
+                      gangSettingsBusy && styles.tileDisabled,
+                    ]}
+                  >
+                    <Text style={styles.inlineButtonText}>{threshold} RES</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Skarbiec" subtitle="Wrzucone tu pieniadze wzmacniaja zaplecze ekipy.">
             <View style={styles.inlineRow}>
@@ -6454,7 +6542,7 @@ function AppRuntime() {
               </View>
             ))}
           </SectionCard>
-          <SectionCard title="Gracze do zaproszenia" subtitle="Na liscie sa tylko prawdziwi gracze z online, bez gangu i z odpowiednim szacunem.">
+          <SectionCard title="Gracze do zaproszenia" subtitle={`Na liscie sa tylko gracze bez gangu, ktorzy lapia sie na prog ${game.gang.inviteRespectMin} RES.`}>
             {gangInviteTargets.length ? gangInviteTargets.map((candidate) => (
               <View key={candidate.id} style={styles.listCard}>
                 <View style={styles.inlineRow}>
