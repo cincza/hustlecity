@@ -40,12 +40,14 @@ import {
   contributeGangOnline,
   consumeDrugOnline,
   createGangOnline,
+  deleteGangOnline,
   attackPlayerOnline,
   depositOnline,
   executeOperationPlanOnline,
   executeHeistOnline,
   fetchFriendListOnline,
   fetchCasinoMeta,
+  fetchGangDirectoryOnline,
   fetchGlobalChatOnline,
   fetchHeistsOnline,
   fetchMarket,
@@ -62,6 +64,7 @@ import {
   fortifyClubOnline,
   loginUser,
   investGangProjectOnline,
+  invitePlayerToGangOnline,
   joinGangOnline,
   leaveGangOnline,
   placeBountyOnline,
@@ -454,74 +457,6 @@ const PRODUCT_VISUALS = {
   crystal: { icon: "diamond-stone", code: "CR", colors: ["#5a80ad", "#13203a"], image: require("./assets/drug-icons/gbl.png") },
 };
 
-const WORLD_PLAYERS = [
-  { id: "wp-1", name: "Mako", gang: "Grey Saints", respect: 31, cash: 86400, attack: 28, defense: 24, dexterity: 22, charisma: 14, bounty: 3200, online: true, heists: 72, casino: 8 },
-  { id: "wp-2", name: "Dice", gang: "Cold Avenue", respect: 26, cash: 54300, attack: 22, defense: 18, dexterity: 19, charisma: 15, bounty: 1800, online: false, heists: 49, casino: 11 },
-  { id: "wp-3", name: "Yuri", gang: "No gang", respect: 18, cash: 21900, attack: 14, defense: 13, dexterity: 17, charisma: 10, bounty: 900, online: true, heists: 28, casino: 2 },
-  { id: "wp-4", name: "Twitch", gang: "Night Vultures", respect: 37, cash: 127000, attack: 26, defense: 21, dexterity: 29, charisma: 12, bounty: 4600, online: true, heists: 91, casino: 19 },
-  { id: "wp-5", name: "Loco", gang: "No gang", respect: 15, cash: 16700, attack: 16, defense: 12, dexterity: 13, charisma: 8, bounty: 700, online: true, heists: 22, casino: 1 },
-  { id: "wp-6", name: "Vera", gang: "Velvet Ash", respect: 42, cash: 188000, attack: 25, defense: 24, dexterity: 31, charisma: 23, bounty: 6100, online: false, heists: 110, casino: 27 },
-];
-
-const WORLD_GANGS = [
-  {
-    id: "gang-grey-saints",
-    name: "Grey Saints",
-    boss: "Mako",
-    viceBoss: "Ash",
-    trusted: 4,
-    members: 9,
-    respect: 31,
-    ranking: 2,
-    territory: 2,
-    influence: 16,
-    vault: 48200,
-    description: "Stara ekipa od haraczu, klubow i napadow na hurtownie.",
-  },
-  {
-    id: "gang-cold-avenue",
-    name: "Cold Avenue",
-    boss: "Dice",
-    viceBoss: "Razor",
-    trusted: 3,
-    members: 6,
-    respect: 26,
-    ranking: 5,
-    territory: 1,
-    influence: 11,
-    vault: 27300,
-    description: "Mniejsza, ale bardzo ruchliwa grupa od szybkich akcji i handlu.",
-  },
-  {
-    id: "gang-night-vultures",
-    name: "Night Vultures",
-    boss: "Twitch",
-    viceBoss: "Marv",
-    trusted: 5,
-    members: 11,
-    respect: 37,
-    ranking: 1,
-    territory: 3,
-    influence: 21,
-    vault: 76100,
-    description: "Ekipa od grubych napadow i nocnego biznesu, bardzo agresywna na miescie.",
-  },
-  {
-    id: "gang-velvet-ash",
-    name: "Velvet Ash",
-    boss: "Vera",
-    viceBoss: "Noir",
-    trusted: 4,
-    members: 8,
-    respect: 42,
-    ranking: 3,
-    territory: 2,
-    influence: 18,
-    vault: 92600,
-    description: "Gang mocno wkrecony w VIP kluby, eskorte i najdrozszy towar.",
-  },
-];
-
 const TAB_DEFINITIONS = [
   {
     id: "city",
@@ -701,6 +636,7 @@ const INITIAL = {
     roster: [],
     selectedPlayerId: null,
     selectedGangId: null,
+    gangs: [],
     heists: [],
     rankings: {
       byRespect: [],
@@ -850,6 +786,83 @@ const normalizeOnlineFriendEntry = (entry) => ({
   online: Boolean(entry?.online),
   respect: Number.isFinite(entry?.respect) ? entry.respect : 0,
 });
+
+const normalizeGangMemberEntry = (entry, index = 0) => ({
+  id: entry?.id || `gang-member-${index}`,
+  name: entry?.name || "Gracz",
+  role: entry?.role || "Czlonek",
+  trusted: Boolean(entry?.trusted),
+  respect: Number.isFinite(entry?.respect) ? entry.respect : 0,
+  online: Boolean(entry?.online),
+});
+
+const normalizeGangDirectoryEntry = (entry, index = 0) => ({
+  id: entry?.id || `gang-sync-${index}`,
+  name: entry?.name || "Gang",
+  boss: entry?.boss || "Boss",
+  bossUserId: entry?.bossUserId || null,
+  viceBoss: entry?.viceBoss || "-",
+  viceBossUserId: entry?.viceBossUserId || null,
+  trusted: Number.isFinite(entry?.trusted) ? entry.trusted : 0,
+  members: Number.isFinite(entry?.members) ? entry.members : 0,
+  respect: Number.isFinite(entry?.respect) ? entry.respect : 0,
+  ranking: Number.isFinite(entry?.ranking) ? entry.ranking : index + 1,
+  territory: Number.isFinite(entry?.territory) ? entry.territory : 0,
+  influence: Number.isFinite(entry?.influence) ? entry.influence : 0,
+  vault: Number.isFinite(entry?.vault) ? entry.vault : 0,
+  description: entry?.description || "Gang trzyma ekipe i probuje przepchnac wplywy po miescie.",
+  inviteRespectMin: Number.isFinite(entry?.inviteRespectMin) ? entry.inviteRespectMin : 15,
+  focusDistrictId: entry?.focusDistrictId || "oldtown",
+  projects:
+    entry?.projects && typeof entry.projects === "object" && !Array.isArray(entry.projects)
+      ? { ...entry.projects }
+      : {},
+  weeklyGoal:
+    entry?.weeklyGoal && typeof entry.weeklyGoal === "object" && !Array.isArray(entry.weeklyGoal)
+      ? { ...entry.weeklyGoal }
+      : null,
+  weeklyProgress:
+    entry?.weeklyProgress && typeof entry.weeklyProgress === "object" && !Array.isArray(entry.weeklyProgress)
+      ? { ...entry.weeklyProgress }
+      : {},
+  weeklyGoalClaimedAt: Number.isFinite(entry?.weeklyGoalClaimedAt) ? entry.weeklyGoalClaimedAt : null,
+  membersList: Array.isArray(entry?.membersList) ? entry.membersList.map(normalizeGangMemberEntry) : [],
+  eventLog: Array.isArray(entry?.eventLog) ? normalizeChatFeedEntries(entry.eventLog) : [],
+});
+
+const normalizeGangDirectorySnapshot = (entries = []) =>
+  Array.isArray(entries) ? entries.map(normalizeGangDirectoryEntry) : [];
+
+const applyGangDirectoryState = (gangState, liveGang) => {
+  if (!gangState?.joined || !liveGang || liveGang.name !== gangState.name) {
+    return gangState;
+  }
+  return normalizeGangState({
+    ...gangState,
+    members: liveGang.members,
+    territory: liveGang.territory,
+    influence: liveGang.influence,
+    vault: liveGang.vault,
+    inviteRespectMin: liveGang.inviteRespectMin,
+    focusDistrictId: liveGang.focusDistrictId || gangState.focusDistrictId,
+    projects:
+      liveGang.projects && typeof liveGang.projects === "object" && !Array.isArray(liveGang.projects)
+        ? { ...liveGang.projects }
+        : gangState.projects,
+    weeklyGoal:
+      liveGang.weeklyGoal && typeof liveGang.weeklyGoal === "object" && !Array.isArray(liveGang.weeklyGoal)
+        ? { ...liveGang.weeklyGoal }
+        : gangState.weeklyGoal,
+    weeklyProgress:
+      liveGang.weeklyProgress && typeof liveGang.weeklyProgress === "object" && !Array.isArray(liveGang.weeklyProgress)
+        ? { ...liveGang.weeklyProgress }
+        : gangState.weeklyProgress,
+    weeklyGoalClaimedAt:
+      liveGang.weeklyGoalClaimedAt ?? gangState.weeklyGoalClaimedAt ?? null,
+    membersList: liveGang.membersList?.length ? liveGang.membersList : gangState.membersList,
+    chat: liveGang.eventLog?.length ? liveGang.eventLog : gangState.chat,
+  });
+};
 
 const normalizeRankingsSnapshot = (snapshot) => ({
   byRespect: Array.isArray(snapshot?.byRespect) ? snapshot.byRespect.map(normalizeOnlinePlayerEntry) : [],
@@ -1033,74 +1046,43 @@ function canRunGangHeistRole(role) {
 
 function getGangProfileByName(game, gangName) {
   if (!gangName || gangName === "No gang") return null;
+  const liveGang = (game.online?.gangs || []).find((entry) => entry.name === gangName);
+  if (liveGang) {
+    return {
+      ...liveGang,
+      self: Boolean(game.gang.joined && game.gang.name === liveGang.name),
+    };
+  }
+
   if (game.gang.joined && game.gang.name === gangName) {
     return {
       id: "self-gang",
       name: game.gang.name,
       boss: game.gang.membersList.find((member) => member.role === "Boss")?.name || game.player.name,
+      bossUserId: null,
       viceBoss: game.gang.membersList.find((member) => member.role === "Vice Boss")?.name || "-",
+      viceBossUserId: null,
       trusted: game.gang.membersList.filter((member) => member.role === "Zaufany").length,
       members: game.gang.members,
       respect: game.player.respect,
-      ranking: 4,
+      ranking: 0,
       territory: game.gang.territory,
       influence: game.gang.influence,
       vault: game.gang.vault,
       description: "Twoja aktualna organizacja. Tu zarzadzasz ludzmi, zaufaniem i grubymi robotami.",
+      inviteRespectMin: game.gang.inviteRespectMin,
+      focusDistrictId: game.gang.focusDistrictId,
+      projects: { ...(game.gang.projects || {}) },
+      weeklyGoal: game.gang.weeklyGoal || null,
+      weeklyProgress: { ...(game.gang.weeklyProgress || {}) },
+      weeklyGoalClaimedAt: game.gang.weeklyGoalClaimedAt || null,
       membersList: game.gang.membersList,
-      eventLog: game.gang.chat,
+      eventLog: normalizeChatFeedEntries(game.gang.chat || []),
       self: true,
     };
   }
 
-  const gang = WORLD_GANGS.find((entry) => entry.name === gangName);
-  if (!gang) return null;
-
-  const rosterMembers = WORLD_PLAYERS.filter((player) => player.gang === gangName).map((player) => ({
-    id: `member-${player.id}`,
-    name: player.name,
-    role: player.name === gang.boss ? "Boss" : player.name === gang.viceBoss ? "Vice Boss" : player.respect >= gang.respect - 8 ? "Zaufany" : "Czlonek",
-    trusted: player.name === gang.boss || player.name === gang.viceBoss || player.respect >= gang.respect - 8,
-    respect: player.respect,
-    online: player.online,
-  }));
-  const existingNames = new Set(rosterMembers.map((member) => member.name));
-
-  if (!existingNames.has(gang.boss)) {
-    rosterMembers.unshift({ id: `member-boss-${gang.id}`, name: gang.boss, role: "Boss", trusted: true, respect: gang.respect + 6, online: true });
-  }
-  if (gang.viceBoss && !existingNames.has(gang.viceBoss)) {
-    rosterMembers.push({ id: `member-vb-${gang.id}`, name: gang.viceBoss, role: "Vice Boss", trusted: true, respect: Math.max(12, gang.respect - 2), online: true });
-  }
-
-  const fillerNames = ["Shade", "Kilo", "Moss", "Tara", "Vex", "Nails", "Iris", "Rook", "Glen", "Hex"];
-  let fillerIndex = 0;
-  while (rosterMembers.length < gang.members) {
-    const fillerName = `${fillerNames[fillerIndex % fillerNames.length]} ${fillerIndex + 1}`;
-    rosterMembers.push({
-      id: `member-fill-${gang.id}-${fillerIndex}`,
-      name: fillerName,
-      role: fillerIndex < gang.trusted ? "Zaufany" : "Czlonek",
-      trusted: fillerIndex < gang.trusted,
-      respect: Math.max(8, gang.respect - 12 + fillerIndex * 2),
-      online: fillerIndex % 2 === 0,
-    });
-    fillerIndex += 1;
-  }
-
-  const eventLog = [
-    { id: `event-${gang.id}-1`, author: "System", text: `${gang.name} trzyma ${gang.territory} dzielnice i skarbiec ${formatMoney(gang.vault)}.`, time: "00:14" },
-    { id: `event-${gang.id}-2`, author: gang.boss, text: "Miasto musi czuc, kto tu rozdaje karty po zmroku.", time: "23:51" },
-    { id: `event-${gang.id}-3`, author: "System", text: `Ostatnie ruchy wskazuja na ${gang.influence} pkt wplywu i ranking #${gang.ranking}.`, time: "22:40" },
-    { id: `event-${gang.id}-4`, author: gang.viceBoss, text: "Sklad jest gotowy do kolejnej roboty, ale tylko z zaufanymi na froncie.", time: "21:19" },
-  ];
-
-  return {
-    ...gang,
-    membersList: rosterMembers.slice(0, gang.members),
-    eventLog,
-    self: false,
-  };
+  return null;
 }
 
 function syncClubListing(listings, club, ownerLabel) {
@@ -1818,6 +1800,9 @@ function AppRuntime() {
       Array.isArray(marketPayload?.clubMarket) || Array.isArray(marketPayload?.clubs)
         ? normalizeClubListingsSnapshot(marketPayload?.clubMarket || marketPayload?.clubs)
         : null;
+    const nextGangDirectory = Array.isArray(marketPayload?.gangs)
+      ? normalizeGangDirectorySnapshot(marketPayload.gangs)
+      : null;
 
     setGame((prev) => {
       const nextClubState =
@@ -1838,6 +1823,24 @@ function AppRuntime() {
                   : prev.club.guestState,
             })
           : null;
+
+      const mergedGang =
+        serverUser?.gang && typeof serverUser.gang === "object"
+          ? normalizeGangState({
+              ...prev.gang,
+              ...serverUser.gang,
+            })
+          : prev.gang;
+      const liveGang =
+        nextGangDirectory?.find((entry) => entry.name === mergedGang?.name) ||
+        prev.online?.gangs?.find((entry) => entry.name === mergedGang?.name) ||
+        null;
+      const syncedGang = applyGangDirectoryState(mergedGang, liveGang);
+      const selectedGangId = prev.online?.selectedGangId || null;
+      const nextSelectedGangId =
+        selectedGangId && nextGangDirectory
+          ? (nextGangDirectory.some((entry) => entry.name === selectedGangId) ? selectedGangId : null)
+          : selectedGangId;
 
       return ({
       ...prev,
@@ -1962,13 +1965,7 @@ function AppRuntime() {
               serverUser.club?.ownerLabel || safeProfile.name || prev.player.name
             )
           : prev.clubListings),
-      gang:
-        serverUser?.gang && typeof serverUser.gang === "object"
-          ? normalizeGangState({
-              ...prev.gang,
-              ...serverUser.gang,
-            })
-          : prev.gang,
+      gang: syncedGang,
       city:
         serverUser?.city && typeof serverUser.city === "object"
           ? normalizeCityState(serverUser.city)
@@ -1979,6 +1976,8 @@ function AppRuntime() {
           : prev.operations,
       online: {
         ...prev.online,
+        gangs: nextGangDirectory || prev.online.gangs,
+        selectedGangId: nextSelectedGangId,
         friends: nextFriends || prev.online.friends,
         messages: nextMessages || prev.online.messages,
       },
@@ -2029,12 +2028,13 @@ function AppRuntime() {
 
   const refreshSocialState = async (token = sessionToken) => {
     if (!token) return;
-    const [playersResult, rankingsResult, chatResult, friendsResult, messagesResult] = await Promise.allSettled([
+    const [playersResult, rankingsResult, chatResult, friendsResult, messagesResult, gangsResult] = await Promise.allSettled([
       fetchSocialPlayers(token),
       fetchRankingsOnline(token),
       fetchGlobalChatOnline(token),
       fetchFriendListOnline(token),
       fetchMessageListOnline(token),
+      fetchGangDirectoryOnline(token),
     ]);
 
     const playersSnapshot = playersResult.status === "fulfilled" ? playersResult.value : null;
@@ -2042,14 +2042,36 @@ function AppRuntime() {
     const chatSnapshot = chatResult.status === "fulfilled" ? chatResult.value : null;
     const friendsSnapshot = friendsResult.status === "fulfilled" ? friendsResult.value : null;
     const messagesSnapshot = messagesResult.status === "fulfilled" ? messagesResult.value : null;
+    const gangsSnapshot = gangsResult.status === "fulfilled" ? gangsResult.value : null;
+    const normalizedGangs = Array.isArray(gangsSnapshot?.gangs)
+      ? normalizeGangDirectorySnapshot(gangsSnapshot.gangs)
+      : null;
 
     setGame((prev) => ({
       ...prev,
+      gang:
+        normalizedGangs
+          ? applyGangDirectoryState(
+              prev.gang,
+              normalizedGangs.find((entry) => entry.name === prev.gang.name) || null
+            )
+          : prev.gang,
       online: {
         ...prev.online,
         roster: Array.isArray(playersSnapshot?.players)
           ? playersSnapshot.players.map(normalizeOnlinePlayerEntry)
           : prev.online.roster,
+        gangs: normalizedGangs || prev.online.gangs,
+        selectedGangId:
+          normalizedGangs && prev.online.selectedGangId
+            ? (
+                normalizedGangs.some(
+                  (entry) => entry.name === prev.online.selectedGangId
+                )
+                  ? prev.online.selectedGangId
+                  : null
+              )
+            : prev.online.selectedGangId,
         rankings: rankingsSnapshot
           ? normalizeRankingsSnapshot(rankingsSnapshot)
           : prev.online.rankings,
@@ -2070,7 +2092,7 @@ function AppRuntime() {
     if (!token) return null;
     const me = await fetchMe(token);
     if (!me?.user?.profile) return null;
-    mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket });
+    mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket, gangs: me.gangs });
     return me;
   };
 
@@ -2108,7 +2130,7 @@ function AppRuntime() {
       if (!me?.user?.profile) {
         throw new Error("Backend nie zwrocil profilu gracza.");
       }
-        mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket });
+        mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket, gangs: me.gangs });
       didHydrateSessionRef.current = true;
       try {
         const casinoMeta = await fetchCasinoMeta(token);
@@ -4563,7 +4585,10 @@ function AppRuntime() {
 
     if (sessionToken) {
       contributeGangOnline(sessionToken, amount)
-        .then((result) => mergeServerUser(result.user))
+        .then((result) => {
+          mergeServerUser(result.user, result);
+          refreshSocialState(sessionToken).catch(() => {});
+        })
         .catch((error) => pushLog(error.message));
       return;
     }
@@ -4589,7 +4614,8 @@ function AppRuntime() {
     if (sessionToken) {
       try {
         const result = await setGangFocusOnline(sessionToken, district.id);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, result);
+        refreshSocialState(sessionToken).catch(() => {});
       } catch (error) {
         pushLog(error.message);
       }
@@ -4612,7 +4638,8 @@ function AppRuntime() {
     if (sessionToken) {
       try {
         const result = await investGangProjectOnline(sessionToken, project.id);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, result);
+        refreshSocialState(sessionToken).catch(() => {});
       } catch (error) {
         pushLog(error.message);
       }
@@ -4642,7 +4669,8 @@ function AppRuntime() {
     if (sessionToken) {
       try {
         const result = await claimGangGoalOnline(sessionToken);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, result);
+        refreshSocialState(sessionToken).catch(() => {});
       } catch (error) {
         pushLog(error.message);
       }
@@ -4768,7 +4796,10 @@ function AppRuntime() {
 
     if (sessionToken) {
       createGangOnline(sessionToken, cleanName)
-        .then((result) => mergeServerUser(result.user))
+        .then((result) => {
+          mergeServerUser(result.user, result);
+          refreshSocialState(sessionToken).catch(() => {});
+        })
         .catch((error) => pushLog(error.message));
       return;
     }
@@ -4809,7 +4840,10 @@ function AppRuntime() {
 
     if (sessionToken) {
       joinGangOnline(sessionToken, invite)
-        .then((result) => mergeServerUser(result.user))
+        .then((result) => {
+          mergeServerUser(result.user, result);
+          refreshSocialState(sessionToken).catch(() => {});
+        })
         .catch((error) => pushLog(error.message));
       return;
     }
@@ -4849,7 +4883,10 @@ function AppRuntime() {
 
     if (sessionToken) {
       leaveGangOnline(sessionToken)
-        .then((result) => mergeServerUser(result.user))
+        .then((result) => {
+          mergeServerUser(result.user, result);
+          refreshSocialState(sessionToken).catch(() => {});
+        })
         .catch((error) => pushLog(error.message));
       return;
     }
@@ -4890,13 +4927,25 @@ function AppRuntime() {
   };
 
   const inviteCandidate = (candidateId) => {
-    if (!requireOfflineDemoAuthority("Zaproszenia do gangu")) return;
     if (!game.gang.joined) return;
     if (game.gang.role !== "Boss") return pushLog("Tylko boss moze wysylac zaproszenia.");
     const candidate = (game.online?.roster || []).find((entry) => entry.id === candidateId);
     if (!candidate) return;
     if (candidate.gang !== "No gang") return pushLog("Ten gracz jest juz w gangu.");
     if (candidate.respect < game.gang.inviteRespectMin) return pushLog("Ten kandydat nie dobija do ustawionego progu szacunu.");
+
+    if (sessionToken && apiStatus === "online") {
+      invitePlayerToGangOnline(sessionToken, candidateId)
+        .then((result) => {
+          mergeServerUser(result.user, result);
+          refreshSocialState(sessionToken).catch(() => {});
+          pushLog(result?.result?.message || `Zaproszenie wyslane do ${candidate.name}.`);
+        })
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Zaproszenia do gangu")) return;
 
     setGame((prev) => ({
       ...prev,
@@ -4913,6 +4962,40 @@ function AppRuntime() {
       },
       log: [`Zaproszenie wyslane do ${candidate.name}.`, ...prev.log].slice(0, 16),
     }));
+  };
+
+  const deleteGang = () => {
+    if (!game.gang.joined) return pushLog("Nie masz gangu do usuniecia.");
+    if (game.gang.role !== "Boss") return pushLog("Gang usuwa tylko boss.");
+    if (!sessionToken || apiStatus !== "online") return pushLog("Usuwanie gangu dziala tylko online.");
+
+    Alert.alert(
+      "Usun gang",
+      `Na pewno chcesz usunac ${game.gang.name}? To wywali sklad i zaproszenia tego gangu.`,
+      [
+        { text: "Anuluj", style: "cancel" },
+        {
+          text: "Usun",
+          style: "destructive",
+          onPress: () => {
+            deleteGangOnline(sessionToken)
+              .then((result) => {
+                mergeServerUser(result.user, result);
+                refreshSocialState(sessionToken).catch(() => {});
+                setGame((prev) => ({
+                  ...prev,
+                  online: {
+                    ...prev.online,
+                    selectedGangId: prev.online.selectedGangId === game.gang.name ? null : prev.online.selectedGangId,
+                  },
+                }));
+                pushLog(result?.result?.message || "Gang zostal usuniety.");
+              })
+              .catch((error) => pushLog(error.message));
+          },
+        },
+      ]
+    );
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - local bank fallback should be deleted before alpha; all
@@ -6151,6 +6234,11 @@ function AppRuntime() {
                   <Text style={styles.inlineButtonText}>Napisz do bossa</Text>
                 </Pressable>
               ) : null}
+              {selectedGangProfile.self && game.gang.role === "Boss" ? (
+                <Pressable onPress={deleteGang} style={[styles.inlineButton, styles.inlineButtonDanger]}>
+                  <Text style={[styles.inlineButtonText, styles.inlineButtonDangerText]}>Usun gang</Text>
+                </Pressable>
+              ) : null}
               {!selectedGangProfile.self ? (
                 <Pressable onPress={() => attackGangProfile(selectedGangProfile)} style={styles.inlineButton}>
                   <Text style={styles.inlineButtonText}>Atak na gang</Text>
@@ -6247,7 +6335,7 @@ function AppRuntime() {
             <Text style={styles.listCardMeta}>Masz przy sobie: {formatMoney(game.player.cash)}</Text>
           </View>
           <SectionCard title="Zaproszenia" subtitle="Wejscie od progu szacunu.">
-            {game.gang.invites.map((invite) => (
+            {game.gang.invites.length ? game.gang.invites.map((invite) => (
               <View key={invite.id} style={styles.listCard}>
                 <View style={styles.inlineRow}>
                   <View style={styles.entityHead}>
@@ -6262,7 +6350,35 @@ function AppRuntime() {
                   </Pressable>
                 </View>
               </View>
-            ))}
+            )) : <Text style={styles.emptyText}>Brak aktywnych zaproszen do prawdziwych gangow.</Text>}
+          </SectionCard>
+          <SectionCard title="Lista gangow" subtitle="Zywe gangi z miasta, bez testowych fantomow.">
+            {game.online.gangs.length ? game.online.gangs.map((gang) => {
+              const matchingInvite = game.gang.invites.find((invite) => invite.gangName === gang.name);
+              return (
+                <View key={gang.id} style={styles.listCard}>
+                  <View style={styles.inlineRow}>
+                    <View style={styles.entityHead}>
+                      <EntityBadge visual={getGangVisual(gang.name)} />
+                      <View style={styles.flexOne}>
+                        <Text style={styles.listCardTitle}>{gang.name}</Text>
+                        <Text style={styles.listCardMeta}>Boss: {gang.boss} | Ludzie: {gang.members} | Wplywy: {gang.influence}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.listActionsRow}>
+                      <Pressable onPress={() => openGangProfile(gang.name)} style={styles.inlineButton}>
+                        <Text style={styles.inlineButtonText}>Profil</Text>
+                      </Pressable>
+                      {matchingInvite ? (
+                        <Pressable onPress={() => joinGang(matchingInvite.id)} style={[styles.inlineButton, game.player.respect < matchingInvite.inviteRespectMin && styles.tileDisabled]}>
+                          <Text style={styles.inlineButtonText}>Dolacz</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
+              );
+            }) : <Text style={styles.emptyText}>Na razie nie ma jeszcze zadnych zywych gangow na miescie.</Text>}
           </SectionCard>
         </>
       ) : (
@@ -6277,6 +6393,13 @@ function AppRuntime() {
             <StatLine label="Skarbiec" value={formatMoney(game.gang.vault)} />
             <StatLine label="Bonus do napadow gangu" value={`+${Math.round(getGangHeistBonusRate(game.gang) * 100)}% hajsu`} />
             <StatLine label="Ludzie w celi" value={game.gang.jailedCrew ? `${game.gang.jailedCrew} (${formatDuration(crewLockdownRemaining)})` : "0"} />
+            {game.gang.role === "Boss" ? (
+              <View style={styles.listActionsRow}>
+                <Pressable onPress={deleteGang} style={[styles.inlineButton, styles.inlineButtonDanger]}>
+                  <Text style={[styles.inlineButtonText, styles.inlineButtonDangerText]}>Usun gang</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </SectionCard>
 
           <SectionCard title="Skarbiec" subtitle="Wrzucone tu pieniadze wzmacniaja zaplecze ekipy.">
@@ -6507,6 +6630,17 @@ function AppRuntime() {
               <Pressable onPress={() => openGangProfile(selectedWorldPlayer.gang)} style={[styles.inlineButton, selectedWorldPlayer.gang === "No gang" && styles.tileDisabled]}>
                 <Text style={styles.inlineButtonText}>Profil gangu</Text>
               </Pressable>
+              {game.gang.joined && game.gang.role === "Boss" && selectedWorldPlayer.gang === "No gang" ? (
+                <Pressable
+                  onPress={() => inviteCandidate(selectedWorldPlayer.id)}
+                  style={[
+                    styles.inlineButton,
+                    selectedWorldPlayer.respect < game.gang.inviteRespectMin && styles.tileDisabled,
+                  ]}
+                >
+                  <Text style={styles.inlineButtonText}>Zapros do gangu</Text>
+                </Pressable>
+              ) : null}
               <Pressable onPress={() => openMessageComposer(selectedWorldPlayer)} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Napisz wiadomosc</Text>
               </Pressable>

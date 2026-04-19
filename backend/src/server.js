@@ -150,7 +150,7 @@ import {
 } from "../../shared/socialGameplay.js";
 import { createBusinessCollections, createSupplyCounterMap } from "../../shared/empire.js";
 import { normalizeEscortsOwned } from "../../shared/street.js";
-import { createCityState, getDistrictSummaries } from "../../shared/districts.js";
+import { createCityState, findDistrictById, getDistrictSummaries } from "../../shared/districts.js";
 import { createGangState } from "../../shared/gangProjects.js";
 import { createOperationsState, getOperationById, OPERATION_CATALOG } from "../../shared/operations.js";
 import {
@@ -212,11 +212,6 @@ const ADMIN_USERNAMES = new Set(
     .map((entry) => String(entry || "").trim().toLowerCase())
     .filter(Boolean)
 );
-const SPECIAL_PROFILE_FLOORS = {
-  [ADMIN_ACCOUNT.username]: {
-    ...ADMIN_PROFILE_FLOORS,
-  },
-};
 const VERBOSE_SERVER_LOGS = process.env.VERBOSE_SERVER_LOGS === "1";
 
 function isPrivateIpv4Host(hostname) {
@@ -592,35 +587,8 @@ function ensureAlphaTestGrant(player, authUser = null) {
     changed = true;
   }
 
-  const usernameLower = normalizePlayerLogin(
-    authUser?.username || player.username || player.profile?.name || ""
-  );
-  const specialFloors = usernameLower ? SPECIAL_PROFILE_FLOORS[usernameLower] : null;
-
-  if (specialFloors) {
-    if (Number(player.profile?.cash || 0) < specialFloors.cash) {
-      player.profile.cash = specialFloors.cash;
-      changed = true;
-    }
-    if (Number(player.profile?.bank || 0) < specialFloors.bank) {
-      player.profile.bank = specialFloors.bank;
-      changed = true;
-    }
-    if (Number(player.profile?.respect || 0) < specialFloors.respect) {
-      player.profile.respect = specialFloors.respect;
-      changed = true;
-    }
-    if (Number(player.profile?.level || 0) < specialFloors.level) {
-      player.profile.level = specialFloors.level;
-      changed = true;
-    }
-    if (changed) {
-      pushLog(player, "Specjalny bankroll testowy wbity do profilu.");
-    }
-  }
-
   if (isAdminUsername(authUser?.username || player.username || player.profile?.name)) {
-    changed = applyAdminProfileFloors(player) || changed;
+    changed = applyAdminProfileFloors(player, { includeEconomy: false }) || changed;
   }
 
   return changed;
@@ -704,6 +672,174 @@ async function buildSocialSnapshot(now = Date.now()) {
     time: new Date(entry.createdAt).toISOString(),
   }));
   return { roster, globalChat };
+}
+
+function slugifyGangName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function getGangRoleWeight(role) {
+  switch (String(role || "").trim()) {
+    case "Boss":
+      return 0;
+    case "Vice Boss":
+      return 1;
+    case "Zaufany":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function isGangTrustedRole(role) {
+  return getGangRoleWeight(role) <= 2;
+}
+
+function buildGangDescription(gangName, canonicalGang) {
+  const district = findDistrictById(canonicalGang?.focusDistrictId || "");
+  if (district) {
+    return `${gangName} trzyma fokus na ${district.name} i cisnie o teren bez rozbijania calego miasta.`;
+  }
+  return `${gangName} trzyma ekipe, skarbiec i szybkie wejscia pod kolejne akcje.`;
+}
+
+function buildGangDirectoryEntry(gangName, memberRecords, now = Date.now()) {
+  const members = memberRecords
+    .map((userRecord) => {
+      const player = userRecord?.playerData;
+      if (!player) return null;
+      syncPlayerState(player, now);
+      const profile = player.profile || {};
+      const role = String(player.gang?.role || "Czlonek").trim() || "Czlonek";
+      return {
+        id: userRecord._id,
+        name: profile.name || userRecord.username || "Gracz",
+        role,
+        trusted: isGangTrustedRole(role),
+        respect: Math.max(0, Math.floor(Number(profile.respect || 0))),
+        online: isUserOnline(userRecord._id, now),
+        userRecord,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const roleDelta = getGangRoleWeight(left.role) - getGangRoleWeight(right.role);
+      if (roleDelta !== 0) return roleDelta;
+      if (right.respect !== left.respect) return right.respect - left.respect;
+      return left.name.localeCompare(right.name, "pl");
+    });
+
+  if (!members.length) {
+    return null;
+  }
+
+  const bossMember = members.find((member) => member.role === "Boss") || members[0];
+  const viceBossMember = members.find((member) => member.role === "Vice Boss") || null;
+  const canonicalGang = bossMember.userRecord?.playerData?.gang || members[0].userRecord?.playerData?.gang || createGangState();
+  const territory = Math.max(0, Math.floor(Number(canonicalGang?.territory || 0)));
+  const influence = Math.max(0, Math.floor(Number(canonicalGang?.influence || 0)));
+  const vault = Math.max(0, Math.floor(Number(canonicalGang?.vault || 0)));
+  const respectPeak = members.reduce((best, member) => Math.max(best, Number(member.respect || 0)), 0);
+  const trustedCount = members.filter((member) => member.role === "Zaufany").length;
+  const focusDistrictId = String(canonicalGang?.focusDistrictId || "").trim() || "oldtown";
+
+  return {
+    id: `gang-${slugifyGangName(gangName) || bossMember.id}`,
+    name: gangName,
+    boss: bossMember.name,
+    bossUserId: bossMember.id,
+    viceBoss: viceBossMember?.name || "-",
+    viceBossUserId: viceBossMember?.id || null,
+    trusted: trustedCount,
+    members: members.length,
+    respect: respectPeak,
+    territory,
+    influence,
+    vault,
+    ranking: 0,
+    description: buildGangDescription(gangName, canonicalGang),
+    inviteRespectMin: Math.max(15, Math.floor(Number(canonicalGang?.inviteRespectMin || 15))),
+    focusDistrictId,
+    projects:
+      canonicalGang?.projects && typeof canonicalGang.projects === "object" && !Array.isArray(canonicalGang.projects)
+        ? { ...canonicalGang.projects }
+        : {},
+    weeklyGoal:
+      canonicalGang?.weeklyGoal && typeof canonicalGang.weeklyGoal === "object" && !Array.isArray(canonicalGang.weeklyGoal)
+        ? { ...canonicalGang.weeklyGoal }
+        : null,
+    weeklyProgress:
+      canonicalGang?.weeklyProgress && typeof canonicalGang.weeklyProgress === "object" && !Array.isArray(canonicalGang.weeklyProgress)
+        ? { ...canonicalGang.weeklyProgress }
+        : {},
+    weeklyGoalClaimedAt: Number.isFinite(canonicalGang?.weeklyGoalClaimedAt) ? canonicalGang.weeklyGoalClaimedAt : null,
+    membersList: members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      role: member.role,
+      trusted: member.trusted,
+      respect: member.respect,
+      online: member.online,
+    })),
+    eventLog: Array.isArray(canonicalGang?.chat) && canonicalGang.chat.length
+      ? canonicalGang.chat.slice(0, 20)
+      : [
+          {
+            id: `gang-log-${slugifyGangName(gangName)}-${now}`,
+            author: "System",
+            text: `${gangName} trzyma ${members.length} ludzi i ${influence} wplywu.`,
+            time: new Date(now).toISOString(),
+          },
+        ],
+  };
+}
+
+async function buildGangDirectorySnapshot(now = Date.now()) {
+  const users = await listUsers();
+  const groups = new Map();
+
+  users.forEach((userRecord) => {
+    const player = userRecord?.playerData;
+    const gangName = String(player?.gang?.name || "").trim();
+    if (!player?.gang?.joined || !gangName) return;
+    const key = gangName.toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, { gangName, members: [] });
+    }
+    groups.get(key).members.push(userRecord);
+  });
+
+  const gangs = [...groups.values()]
+    .map((entry) => buildGangDirectoryEntry(entry.gangName, entry.members, now))
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (right.influence !== left.influence) return right.influence - left.influence;
+      if (right.territory !== left.territory) return right.territory - left.territory;
+      if (right.members !== left.members) return right.members - left.members;
+      return left.name.localeCompare(right.name, "pl");
+    })
+    .map((gang, index) => ({
+      ...gang,
+      ranking: index + 1,
+    }));
+
+  return gangs;
+}
+
+function buildGangInviteFromGangEntry(gangEntry, now = Date.now()) {
+  return {
+    id: `gang-invite-${slugifyGangName(gangEntry?.name)}-${now}`,
+    gangName: gangEntry?.name || "Gang",
+    leader: gangEntry?.boss || "Boss",
+    members: Math.max(1, Math.floor(Number(gangEntry?.members || 1))),
+    territory: Math.max(0, Math.floor(Number(gangEntry?.territory || 0))),
+    inviteRespectMin: Math.max(15, Math.floor(Number(gangEntry?.inviteRespectMin || 15))),
+  };
 }
 
 function buildClubVenueFromPlayer(player) {
@@ -1093,6 +1229,7 @@ async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
   return {
     user: publicPlayer(player, now),
     clubMarket: await buildClubMarketSnapshot(now),
+    gangs: await buildGangDirectorySnapshot(now),
     ...extra,
   };
 }
@@ -3066,32 +3203,61 @@ app.post("/clubs/fortify", auth, asyncHandler(async (req, res) => {
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
+app.get("/gangs", auth, asyncHandler(async (_req, res) => {
+  const now = Date.now();
+  res.json({
+    gangs: await buildGangDirectorySnapshot(now),
+  });
+}));
+
 app.post("/gang/create", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const gangName = String(req.body?.gangName || req.body?.name || "").trim();
   let result = null;
   await withPlayerActionLock(req, "gang-create", async () => {
     await commitPlayerMutation(req, "gang-create", async (player) => {
-      result = createGangForPlayer(player, gangName, now);
+      const existingGangNames = (await buildGangDirectorySnapshot(now)).map((gang) => gang.name);
+      result = createGangForPlayer(player, gangName, now, { existingGangNames });
       pushLog(player, result.logMessage);
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/join", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
-  const invite = req.body?.invite || req.body || {};
+  const invitePayload = req.body?.invite || req.body || {};
   let result = null;
   await withPlayerActionLock(req, "gang-join", async () => {
     await commitPlayerMutation(req, "gang-join", async (player) => {
-      result = joinGangForPlayer(player, invite, now);
+      ensurePlayerGangState(player, now);
+      const inviteId = String(invitePayload?.id || "").trim();
+      const liveInvite =
+        (Array.isArray(player.gang?.invites) ? player.gang.invites : []).find((entry) => {
+          if (!entry) return false;
+          if (inviteId) return String(entry.id || "").trim() === inviteId;
+          return String(entry.gangName || "").trim().toLowerCase() === String(invitePayload?.gangName || "").trim().toLowerCase();
+        }) || null;
+      if (!liveInvite) {
+        const error = new Error("Zaproszenie wygaslo albo juz go nie ma.");
+        error.statusCode = 404;
+        throw error;
+      }
+      const liveGang = (await buildGangDirectorySnapshot(now)).find(
+        (entry) => entry.name.toLowerCase() === String(liveInvite.gangName || "").trim().toLowerCase()
+      );
+      if (!liveGang) {
+        const error = new Error("Tego gangu nie ma juz na miescie.");
+        error.statusCode = 404;
+        throw error;
+      }
+      result = joinGangForPlayer(player, liveInvite, now, liveGang);
       pushLog(player, result.logMessage);
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/leave", auth, asyncHandler(async (req, res) => {
@@ -3104,7 +3270,228 @@ app.post("/gang/leave", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/gang/invite", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const targetUserId = String(req.body?.targetUserId || "").trim();
+  if (!targetUserId) {
+    res.status(400).json({ error: "targetUserId is required" });
+    return;
+  }
+  if (targetUserId === req.user.id) {
+    res.status(400).json({ error: "Siebie nie zapraszasz do wlasnego gangu." });
+    return;
+  }
+
+  let result = null;
+  let targetSnapshot = null;
+  await withUserMutationLocks([req.user.id, targetUserId], `gang-invite:${targetUserId}`, async () => {
+    const [actorRecord, targetRecord] = await Promise.all([
+      findUserById(req.user.id),
+      findUserById(targetUserId),
+    ]);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const actor = actorRecord.playerData;
+    const target = targetRecord.playerData;
+    syncPlayerState(actor, now);
+    syncPlayerState(target, now);
+    ensurePlayerGangState(actor, now);
+    ensurePlayerGangState(target, now);
+
+    if (!actor.gang.joined) {
+      const error = new Error("Najpierw musisz byc w gangu.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (actor.gang.role !== "Boss") {
+      const error = new Error("Tylko boss moze wysylac zaproszenia.");
+      error.statusCode = 403;
+      throw error;
+    }
+    if (target.gang.joined) {
+      const error = new Error("Ten gracz jest juz w gangu.");
+      error.statusCode = 409;
+      throw error;
+    }
+    if (Number(target?.profile?.respect || 0) < Number(actor.gang.inviteRespectMin || 15)) {
+      const error = new Error("Ten kandydat nie dobija do ustawionego progu szacunu.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const liveGang = (await buildGangDirectorySnapshot(now)).find(
+      (entry) => entry.name.toLowerCase() === String(actor.gang.name || "").trim().toLowerCase()
+    );
+    if (!liveGang) {
+      const error = new Error("Twojego gangu nie widac teraz na miescie.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const alreadyInvited = (Array.isArray(target.gang.invites) ? target.gang.invites : []).some(
+      (entry) => String(entry?.gangName || "").trim().toLowerCase() === liveGang.name.toLowerCase()
+    );
+    if (alreadyInvited) {
+      const error = new Error("Ten gracz ma juz Twoje zaproszenie.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const invite = buildGangInviteFromGangEntry(liveGang, now);
+    target.gang.invites = [invite, ...(Array.isArray(target.gang.invites) ? target.gang.invites : [])].slice(0, 12);
+    actor.gang.chat = [
+      {
+        id: `gang-invite-${targetUserId}-${now}`,
+        author: "System",
+        text: `Wyslano zaproszenie do ${target.profile?.name || targetRecord.username || "gracza"}.`,
+        time: new Date(now).toISOString(),
+      },
+      ...(actor.gang.chat || []),
+    ].slice(0, 20);
+    appendPlayerMessage(target, {
+      from: actor.profile?.name || actorRecord.username || "Boss",
+      subject: "Zaproszenie do gangu",
+      preview: `${liveGang.name} chce Cie w ekipie. Wejscie od ${liveGang.inviteRespectMin} szacunu.`,
+      time: new Date(now).toISOString(),
+    });
+    pushLog(actor, `Zaproszenie wyslane do ${target.profile?.name || targetRecord.username || "gracza"}.`);
+    pushLog(target, `${liveGang.name} wysyla Ci zaproszenie do gangu.`);
+
+    const [updatedActorRecord, updatedTargetRecord] = await Promise.all([
+      persistPlayerForUser(actorRecord._id, actor),
+      persistPlayerForUser(targetRecord._id, target),
+    ]);
+
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+    targetSnapshot = buildDirectoryEntry(updatedTargetRecord || targetRecord, now);
+    result = {
+      gangName: liveGang.name,
+      targetUserId,
+      message: `Zaproszenie do ${targetSnapshot.name} poszlo z gangu ${liveGang.name}.`,
+    };
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, { result, target: targetSnapshot }));
+}));
+
+app.post("/gang/delete", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const actorPreview = await findUserById(req.user.id);
+  if (!actorPreview?.playerData) {
+    res.status(401).json({ error: "Authenticated player not found" });
+    return;
+  }
+
+  syncPlayerState(actorPreview.playerData, now);
+  ensurePlayerGangState(actorPreview.playerData, now);
+  if (!actorPreview.playerData.gang?.joined || !actorPreview.playerData.gang?.name) {
+    res.status(400).json({ error: "Nie masz gangu do usuniecia." });
+    return;
+  }
+  if (actorPreview.playerData.gang.role !== "Boss") {
+    res.status(403).json({ error: "Gang usuwa tylko boss." });
+    return;
+  }
+
+  const gangName = String(actorPreview.playerData.gang.name || "").trim();
+  const users = await listUsers();
+  const affectedUsers = users.filter((userRecord) => {
+    const player = userRecord?.playerData;
+    const sameGang =
+      player?.gang?.joined &&
+      String(player.gang.name || "").trim().toLowerCase() === gangName.toLowerCase();
+    const hasInvite = Array.isArray(player?.gang?.invites)
+      ? player.gang.invites.some(
+          (invite) => String(invite?.gangName || "").trim().toLowerCase() === gangName.toLowerCase()
+        )
+      : false;
+    return sameGang || hasInvite;
+  });
+  const affectedUserIds = affectedUsers.map((userRecord) => userRecord._id);
+
+  let result = null;
+  await withUserMutationLocks(affectedUserIds.length ? affectedUserIds : [req.user.id], `gang-delete:${gangName.toLowerCase()}`, async () => {
+    const refreshedUsers = await Promise.all(affectedUserIds.map((userId) => findUserById(userId)));
+    const memberRecords = refreshedUsers.filter(
+      (userRecord) =>
+        userRecord?.playerData?.gang?.joined &&
+        String(userRecord.playerData.gang.name || "").trim().toLowerCase() === gangName.toLowerCase()
+    );
+    const inviteRecords = refreshedUsers.filter(
+      (userRecord) =>
+        !(
+          userRecord?.playerData?.gang?.joined &&
+          String(userRecord.playerData.gang.name || "").trim().toLowerCase() === gangName.toLowerCase()
+        ) &&
+        Array.isArray(userRecord?.playerData?.gang?.invites) &&
+        userRecord.playerData.gang.invites.some(
+          (invite) => String(invite?.gangName || "").trim().toLowerCase() === gangName.toLowerCase()
+        )
+    );
+    const actorRecord = refreshedUsers.find((userRecord) => userRecord?._id === req.user.id);
+
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+    syncPlayerState(actorRecord.playerData, now);
+    ensurePlayerGangState(actorRecord.playerData, now);
+    if (actorRecord.playerData.gang.role !== "Boss") {
+      const error = new Error("Gang usuwa tylko boss.");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    for (const userRecord of memberRecords) {
+      const player = userRecord.playerData;
+      syncPlayerState(player, now);
+      ensurePlayerGangState(player, now);
+      const keptInvites = (Array.isArray(player.gang.invites) ? player.gang.invites : []).filter(
+        (invite) => String(invite?.gangName || "").trim().toLowerCase() !== gangName.toLowerCase()
+      );
+      player.gang = createGangState({ invites: keptInvites });
+      pushLog(player, `Gang ${gangName} zostal rozwiazany.`);
+    }
+
+    for (const userRecord of inviteRecords) {
+      const player = userRecord.playerData;
+      syncPlayerState(player, now);
+      ensurePlayerGangState(player, now);
+      player.gang.invites = (Array.isArray(player.gang.invites) ? player.gang.invites : []).filter(
+        (invite) => String(invite?.gangName || "").trim().toLowerCase() !== gangName.toLowerCase()
+      );
+      pushLog(player, `Zaproszenie do ${gangName} wygasa, bo gang juz nie istnieje.`);
+    }
+
+    const persistedRecords = await Promise.all(
+      refreshedUsers
+        .filter((userRecord) => userRecord?.playerData)
+        .map((userRecord) => persistPlayerForUser(userRecord._id, userRecord.playerData))
+    );
+    const updatedActorRecord =
+      persistedRecords.find((userRecord) => userRecord?._id === req.user.id) ||
+      actorRecord;
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actorRecord.playerData;
+    result = {
+      gangName,
+      removedMembers: memberRecords.length,
+      removedInvites: inviteRecords.length,
+      message: `Gang ${gangName} zostal usuniety z miasta.`,
+    };
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/tribute", auth, asyncHandler(async (req, res) => {
@@ -3118,7 +3505,7 @@ app.post("/gang/tribute", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/focus", auth, asyncHandler(async (req, res) => {
@@ -3132,7 +3519,7 @@ app.post("/gang/focus", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/projects/invest", auth, asyncHandler(async (req, res) => {
@@ -3146,7 +3533,7 @@ app.post("/gang/projects/invest", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/goals/claim", auth, asyncHandler(async (req, res) => {
@@ -3160,7 +3547,7 @@ app.post("/gang/goals/claim", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.get("/operations", auth, asyncHandler(async (req, res) => {

@@ -482,6 +482,25 @@ export async function leaveGangOnline(token) {
   });
 }
 
+export async function fetchGangDirectoryOnline(token) {
+  return request("/gangs", { token });
+}
+
+export async function invitePlayerToGangOnline(token, targetUserId) {
+  return request("/gang/invite", {
+    method: "POST",
+    token,
+    body: { targetUserId },
+  });
+}
+
+export async function deleteGangOnline(token) {
+  return request("/gang/delete", {
+    method: "POST",
+    token,
+  });
+}
+
 export async function contributeGangOnline(token, amount) {
   return request("/gang/tribute", {
     method: "POST",

@@ -19,13 +19,12 @@ function ensurePlayerProfile(player) {
   return player.profile;
 }
 
-export function applyAdminProfileFloors(player) {
+export function applyAdminProfileFloors(player, options = {}) {
   const profile = ensurePlayerProfile(player);
   let changed = false;
+  const includeEconomy = options.includeEconomy !== false;
 
   const maxFloorFields = [
-    "cash",
-    "bank",
     "respect",
     "level",
     "attack",
@@ -36,6 +35,11 @@ export function applyAdminProfileFloors(player) {
     "maxEnergy",
     "premiumTokens",
   ];
+
+  if (includeEconomy) {
+    maxFloorFields.unshift("bank");
+    maxFloorFields.unshift("cash");
+  }
 
   for (const field of maxFloorFields) {
     const nextValue = Number(ADMIN_PROFILE_FLOORS[field] || 0);

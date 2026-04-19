@@ -3,10 +3,14 @@ import { DISTRICTS } from "./districts.js";
 const clampGangValue = (value, min, max) =>
   Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : min));
 
-export const DEMO_GANG_INVITES = [
-  { id: "inv-1", gangName: "Grey Saints", leader: "Mako", members: 9, territory: 2, inviteRespectMin: 15 },
-  { id: "inv-2", gangName: "Cold Avenue", leader: "Dice", members: 6, territory: 1, inviteRespectMin: 18 },
-];
+export const DEMO_GANG_INVITES = [];
+const LEGACY_DEMO_GANG_INVITE_IDS = new Set(["inv-1", "inv-2"]);
+const LEGACY_DEMO_GANG_NAMES = new Set(["grey saints", "cold avenue", "night vultures", "velvet ash"]);
+
+export function isLegacyDemoGangName(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized ? LEGACY_DEMO_GANG_NAMES.has(normalized) : false;
+}
 
 export const GANG_PROJECTS = [
   {
@@ -164,29 +168,41 @@ export function normalizeGangState(value) {
           ...value.weeklyGoal,
           focusDistrictId:
             DISTRICTS.find((district) => district.id === value.weeklyGoal.focusDistrictId)?.id ||
-            focusDistrict.id,
+          focusDistrict.id,
         }
       : createGangWeeklyGoal(focusDistrict.id);
+  const normalizedGangName =
+    typeof value.name === "string" && value.name.trim() ? value.name.trim() : null;
+  const legacyDemoGang = isLegacyDemoGangName(normalizedGangName);
+  const joined = Boolean(value.joined) && !legacyDemoGang;
 
   return {
-    joined: Boolean(value.joined),
-    role: typeof value.role === "string" && value.role.trim() ? value.role.trim() : null,
-    name: typeof value.name === "string" && value.name.trim() ? value.name.trim() : null,
-    members: Math.max(0, Math.floor(Number(value.members || 0))),
+    joined,
+    role: joined && typeof value.role === "string" && value.role.trim() ? value.role.trim() : null,
+    name: joined ? normalizedGangName : null,
+    members: joined ? Math.max(0, Math.floor(Number(value.members || 0))) : 0,
     maxMembers: Math.max(1, Math.floor(Number(value.maxMembers || base.maxMembers))),
-    territory: Math.max(0, Math.floor(Number(value.territory || 0))),
-    influence: Math.max(0, Math.floor(Number(value.influence || 0))),
-    vault: Math.max(0, Math.floor(Number(value.vault || 0))),
+    territory: joined ? Math.max(0, Math.floor(Number(value.territory || 0))) : 0,
+    influence: joined ? Math.max(0, Math.floor(Number(value.influence || 0))) : 0,
+    vault: joined ? Math.max(0, Math.floor(Number(value.vault || 0))) : 0,
     inviteRespectMin: clampGangValue(value.inviteRespectMin, 15, 60),
     createCost: Math.max(0, Math.floor(Number(value.createCost || base.createCost))),
-    chat: Array.isArray(value.chat) ? value.chat.slice(0, 20) : [],
+    chat: joined && Array.isArray(value.chat) ? value.chat.slice(0, 20) : [],
     lastTributeAt: Math.max(0, Math.floor(Number(value.lastTributeAt || 0))),
-    gearScore: Math.max(0, Math.floor(Number(value.gearScore || base.gearScore))),
-    jailedCrew: Math.max(0, Math.floor(Number(value.jailedCrew || 0))),
-    crewLockdownUntil: Math.max(0, Math.floor(Number(value.crewLockdownUntil || 0))),
-    membersList: Array.isArray(value.membersList) ? value.membersList.slice(0, 32) : [],
+    gearScore: joined ? Math.max(0, Math.floor(Number(value.gearScore || base.gearScore))) : base.gearScore,
+    jailedCrew: joined ? Math.max(0, Math.floor(Number(value.jailedCrew || 0))) : 0,
+    crewLockdownUntil: joined ? Math.max(0, Math.floor(Number(value.crewLockdownUntil || 0))) : 0,
+    membersList: joined && Array.isArray(value.membersList) ? value.membersList.slice(0, 32) : [],
     invites: Array.isArray(value.invites)
-      ? value.invites.filter((invite) => invite && typeof invite.id === "string")
+      ? value.invites.filter((invite) => {
+          if (!invite || typeof invite.id !== "string") return false;
+          const inviteId = String(invite.id || "").trim();
+          const gangName = String(invite.gangName || "").trim().toLowerCase();
+          if (!inviteId) return false;
+          if (LEGACY_DEMO_GANG_INVITE_IDS.has(inviteId)) return false;
+          if (gangName && LEGACY_DEMO_GANG_NAMES.has(gangName)) return false;
+          return true;
+        })
       : base.invites,
     focusDistrictId: focusDistrict.id,
     projects:

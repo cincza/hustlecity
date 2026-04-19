@@ -35,7 +35,7 @@ export function syncGangDerivedState(player, now = Date.now()) {
   return player.gang;
 }
 
-export function createGangForPlayer(player, gangName, now = Date.now()) {
+export function createGangForPlayer(player, gangName, now = Date.now(), options = {}) {
   ensurePlayerGangState(player, now);
   if (player.gang.joined) {
     fail("Najpierw opusc obecny gang.");
@@ -50,6 +50,14 @@ export function createGangForPlayer(player, gangName, now = Date.now()) {
   const cleanName = String(gangName || "").trim();
   if (cleanName.length < 3) {
     fail("Nazwa gangu jest za krotka.");
+  }
+  const existingGangNames = Array.isArray(options?.existingGangNames)
+    ? options.existingGangNames
+        .map((entry) => String(entry || "").trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  if (existingGangNames.includes(cleanName.toLowerCase())) {
+    fail("Taki gang jest juz na miescie.");
   }
   if (Number(player?.profile?.cash || 0) < Number(player.gang.createCost || 0)) {
     fail(`Zalozenie gangu kosztuje ${player.gang.createCost}$.`);
@@ -83,7 +91,7 @@ export function createGangForPlayer(player, gangName, now = Date.now()) {
   };
 }
 
-export function joinGangForPlayer(player, invite, now = Date.now()) {
+export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot = null) {
   ensurePlayerGangState(player, now);
   if (player.gang.joined) {
     fail("Najpierw opusc obecny gang.");
@@ -97,8 +105,32 @@ export function joinGangForPlayer(player, invite, now = Date.now()) {
   if (!gangName) {
     fail("Brakuje nazwy gangu.");
   }
+  if (gangSnapshot && String(gangSnapshot?.name || "").trim().toLowerCase() !== gangName.toLowerCase()) {
+    fail("Zaproszenie nie pasuje do aktywnego gangu.");
+  }
   if (Number(player?.profile?.respect || 0) < Number(safeInvite.inviteRespectMin || 15)) {
     fail(`Ten gang bierze od ${safeInvite.inviteRespectMin || 15} szacunu.`);
+  }
+
+  const previousInvites = Array.isArray(player.gang?.invites) ? player.gang.invites : [];
+  const rosterFromGang = Array.isArray(gangSnapshot?.membersList)
+    ? gangSnapshot.membersList
+        .filter((member) => member && typeof member.name === "string" && member.name.trim())
+        .map((member) => ({
+          id: member.id,
+          name: member.name,
+          role: member.role || "Czlonek",
+          trusted: Boolean(member.trusted),
+        }))
+    : [];
+  const selfName = player.profile?.name || "Gracz";
+  if (!rosterFromGang.some((member) => member.name === selfName)) {
+    rosterFromGang.push({
+      id: "gm-self",
+      name: selfName,
+      role: "Czlonek",
+      trusted: false,
+    });
   }
 
   player.gang = ensureGangWeeklyGoal(
@@ -106,13 +138,27 @@ export function joinGangForPlayer(player, invite, now = Date.now()) {
       joined: true,
       role: "Czlonek",
       name: gangName,
-      members: Math.max(2, Number(safeInvite.members || 1) + 1),
-      vault: 3200 + Math.max(0, Number(safeInvite.members || 0)) * 180,
-      gearScore: 58,
-      membersList: [
-        { id: "gm-boss", name: safeInvite.leader || "Boss", role: "Boss", trusted: true },
-        { id: "gm-self", name: player.profile?.name || "Gracz", role: "Czlonek", trusted: false },
-      ],
+      members: Math.max(2, Number(gangSnapshot?.members || safeInvite.members || 1) + 1),
+      territory: Math.max(0, Number(gangSnapshot?.territory || safeInvite.territory || 0)),
+      influence: Math.max(0, Number(gangSnapshot?.influence || 0)),
+      vault: Math.max(0, Number(gangSnapshot?.vault || 3200 + Math.max(0, Number(safeInvite.members || 0)) * 180)),
+      gearScore: Math.max(58, Math.floor(Number(gangSnapshot?.members || safeInvite.members || 1) * 4 + 42)),
+      inviteRespectMin: Math.max(15, Number(gangSnapshot?.inviteRespectMin || safeInvite.inviteRespectMin || 15)),
+      focusDistrictId: gangSnapshot?.focusDistrictId,
+      projects:
+        gangSnapshot?.projects && typeof gangSnapshot.projects === "object" && !Array.isArray(gangSnapshot.projects)
+          ? { ...gangSnapshot.projects }
+          : {},
+      weeklyGoal:
+        gangSnapshot?.weeklyGoal && typeof gangSnapshot.weeklyGoal === "object" && !Array.isArray(gangSnapshot.weeklyGoal)
+          ? { ...gangSnapshot.weeklyGoal }
+          : undefined,
+      weeklyProgress:
+        gangSnapshot?.weeklyProgress && typeof gangSnapshot.weeklyProgress === "object" && !Array.isArray(gangSnapshot.weeklyProgress)
+          ? { ...gangSnapshot.weeklyProgress }
+          : undefined,
+      weeklyGoalClaimedAt: gangSnapshot?.weeklyGoalClaimedAt ?? null,
+      membersList: rosterFromGang,
       chat: [
         {
           id: `gang-${now}`,
@@ -120,7 +166,14 @@ export function joinGangForPlayer(player, invite, now = Date.now()) {
           text: `${player.profile?.name || "Gracz"} dolacza do ${gangName}.`,
           time: new Date(now).toISOString(),
         },
-      ],
+        ...(Array.isArray(gangSnapshot?.eventLog) ? gangSnapshot.eventLog.slice(0, 8) : []),
+      ].slice(0, 20),
+      invites: previousInvites.filter((entry) => {
+        const inviteId = String(entry?.id || "").trim();
+        const inviteGangName = String(entry?.gangName || "").trim().toLowerCase();
+        if (inviteId && inviteId === String(safeInvite.id || "").trim()) return false;
+        return inviteGangName !== gangName.toLowerCase();
+      }),
     }),
     now
   );

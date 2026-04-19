@@ -350,6 +350,9 @@ async function main() {
     if (!createdGang?.user?.gang?.joined || createdGang.user.gang.name !== "Smoke Syndicate") {
       throw new Error("Tworzenie gangu nie zapisalo nowego stanu backendowego.");
     }
+    if (!Array.isArray(createdGang?.gangs) || !createdGang.gangs.some((entry) => entry.name === "Smoke Syndicate")) {
+      throw new Error("Katalog gangow nie pokazuje nowo zalozonego gangu.");
+    }
 
     const focusedGang = await request("/gang/focus", {
       method: "POST",
@@ -553,6 +556,26 @@ async function main() {
     const secondAttackTarget = players.players.find((entry) => entry.name === noEmailLoginOne);
     if (!firstAttackTarget?.id || !secondAttackTarget?.id) {
       throw new Error("Nie znaleziono celow do testu ataku gracza.");
+    }
+
+    const gangInviteResult = await request("/gang/invite", {
+      method: "POST",
+      token,
+      body: { targetUserId: secondAttackTarget.id },
+    });
+
+    if (!gangInviteResult?.result?.message) {
+      throw new Error("Zaproszenie do gangu nie zwrocilo komunikatu backendowego.");
+    }
+
+    await delay(AUTH_LOGIN_DELAY_MS);
+    const invitedUserLogin = await request("/auth/login", {
+      method: "POST",
+      body: { login: noEmailLoginOne, password },
+    });
+    const invitedUserMe = await request("/me", { token: invitedUserLogin.token });
+    if (!Array.isArray(invitedUserMe?.user?.gang?.invites) || !invitedUserMe.user.gang.invites.some((entry) => entry.gangName === "Smoke Syndicate")) {
+      throw new Error("Zaproszony gracz nie dostal invite do zywego gangu.");
     }
 
     const attackResult = await request(`/social/players/${firstAttackTarget.id}/attack`, {
@@ -1030,6 +1053,25 @@ async function main() {
       throw new Error("Chat wiezienia nie przetrwal restartu backendu.");
     }
 
+    const deletedGang = await request("/gang/delete", {
+      method: "POST",
+      token: relogin.token,
+    });
+
+    if (deletedGang?.user?.gang?.joined) {
+      throw new Error("Usuniecie gangu nie wyczyscilo stanu bossa.");
+    }
+
+    const gangsAfterDelete = await request("/gangs", { token: relogin.token });
+    if (Array.isArray(gangsAfterDelete?.gangs) && gangsAfterDelete.gangs.some((entry) => entry.name === "Smoke Syndicate")) {
+      throw new Error("Usuniety gang dalej widnieje w katalogu gangow.");
+    }
+
+    const freeUserAfterDelete = await request("/me", { token: freeUserLogin.token });
+    if (Array.isArray(freeUserAfterDelete?.user?.gang?.invites) && freeUserAfterDelete.user.gang.invites.some((entry) => entry.gangName === "Smoke Syndicate")) {
+      throw new Error("Usuniecie gangu nie wyczyscilo invite u zaproszonego gracza.");
+    }
+
     const summary = {
       register: "ok",
       registerWithoutEmail: "ok",
@@ -1049,6 +1091,8 @@ async function main() {
       bounty: bountyResult.result.increment,
       clubAction: escortSearchResult.result.outcome,
       gang: "ok",
+      gangInvite: "ok",
+      gangDelete: "ok",
       districts: districtsAfterClub.districts.length,
         gangProject: investedGangProject.result.level,
         adminGrant: "ok",
