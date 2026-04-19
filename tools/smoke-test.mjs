@@ -690,6 +690,12 @@ async function main() {
     if (!claimedClub?.user?.club?.owned || claimedClub.user.club.sourceId !== "club-2") {
       throw new Error("Przejecie klubu nie zapisalo ownership na backendzie.");
     }
+    const claimedClubMarketEntry = Array.isArray(claimedClub?.clubMarket)
+      ? claimedClub.clubMarket.find((entry) => entry.id === "club-2")
+      : null;
+    if (!claimedClubMarketEntry || claimedClubMarketEntry.ownerLabel !== login) {
+      throw new Error("Rynek klubow nie odswiezyl wlasciciela po przejeciu lokalu.");
+    }
 
     const claimedClubTask = await request("/tasks/claim", {
       method: "POST",
@@ -718,6 +724,19 @@ async function main() {
 
     if (Number(fortifiedClub?.user?.club?.securityLevel || 0) < 1) {
       throw new Error("Fortyfikacja klubu nie podniosla security level.");
+    }
+
+    const clubStashMove = await request("/clubs/stash/move", {
+      method: "POST",
+      token,
+      body: { drugId: "smokes", quantity: 2 },
+    });
+
+    if (Number(clubStashMove?.result?.quantity || 0) !== 2) {
+      throw new Error("Przerzut towaru do stashu klubu nie zwrocil prawidlowej ilosci.");
+    }
+    if (Number(clubStashMove?.user?.club?.stash?.smokes || 0) < 2) {
+      throw new Error("Stash klubu nie przyjal towaru po stronie backendu.");
     }
 
     const clubNight = await request("/clubs/night", {

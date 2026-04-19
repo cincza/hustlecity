@@ -412,6 +412,14 @@ export async function fortifyClubOnline(token) {
   });
 }
 
+export async function moveDrugToClubOnline(token, drugId, quantity = 1) {
+  return request("/clubs/stash/move", {
+    method: "POST",
+    token,
+    body: { drugId, quantity },
+  });
+}
+
 export async function createGangOnline(token, gangName) {
   return request("/gang/create", {
     method: "POST",

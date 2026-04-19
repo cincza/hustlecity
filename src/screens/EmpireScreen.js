@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 
 export function EmpireScreen({
   section,
@@ -106,6 +106,9 @@ export function EmpireScreen({
     { respect: 25, title: "Top fabryki", unlocks: factories.filter((factory) => factory.respect === 25) },
   ].filter((entry) => entry.unlocks.length);
   const clubGuestState = safeGame.club?.guestState || {};
+  const [clubTradeDraft, setClubTradeDraft] = React.useState("1");
+  const parsedClubTradeQuantity = Number.parseInt(String(clubTradeDraft || "").replace(/[^\d]/g, ""), 10);
+  const clubTradeQuantity = Math.max(1, Number.isFinite(parsedClubTradeQuantity) ? parsedClubTradeQuantity : 1);
   const activePlanId = currentClubVenue
     ? safeGame.club.owned && safeGame.club.sourceId === currentClubVenue.id
       ? safeGame.club.nightPlanId
@@ -164,6 +167,12 @@ export function EmpireScreen({
         : displayedPressure >= 24
           ? "Czuja ruch"
           : "Spokojnie";
+  const clubTradeDrugs = drugs.filter((drug) => safeGame.player.respect >= Number(drug.unlockRespect || 0));
+  const clubStashDrugs = drugs.filter(
+    (drug) => Number(safeGame.drugInventory?.[drug.id] || 0) > 0 || Number(safeGame.club?.stash?.[drug.id] || 0) > 0
+  );
+  const getDealerPayoutValue = (drug) =>
+    helpers.getDealerPayoutForDrug?.(drug) || Math.max(20, Math.floor(Number(drug?.streetPrice || 0) * 0.72));
 
   const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
     <SectionCard title={title} subtitle={subtitle}>
@@ -823,24 +832,107 @@ export function EmpireScreen({
         )}
       </SectionCard>
 
-      {insideOwnClub ? (
-        <SectionCard title="Stash klubu" subtitle="Szybkie dosypanie towaru przed kolejna noc.">
-          {drugs.map((drug) => (
-            <View key={drug.id} style={styles.listCard}>
-              <View style={styles.inlineRow}>
-                <View style={styles.entityHead}>
-                  <EntityBadge visual={drugVisuals[drug.id]} />
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{drug.name}</Text>
-                    <Text style={styles.listCardMeta}>Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | W klubie: {safeGame.club.stash[drug.id] || 0}</Text>
-                  </View>
-                </View>
-                <Pressable onPress={() => actions.moveDrugToClub(drug)} style={[styles.inlineButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
-                  <Text style={styles.inlineButtonText}>Wrzuc do klubu</Text>
-                </Pressable>
+      {currentClubVenue ? (
+        <SectionCard
+          title="Towar w klubie"
+          subtitle={insideOwnClub ? "Kupujesz, sprzedajesz i dorzucasz stash bez wychodzenia z lokalu." : "Handel masz pod reka, nawet jako gosc."}
+        >
+          <View style={styles.listCard}>
+            <View style={styles.entityHead}>
+              <EntityBadge visual={systemVisuals.dealer} />
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Ilosc transakcji</Text>
+                <Text style={styles.listCardMeta}>
+                  {insideOwnClub ? "Ta sama ilosc dziala do handlu i do wrzutki na stash." : "Kupujesz i sprzedajesz bez wychodzenia z sali."}
+                </Text>
               </View>
             </View>
-          ))}
+            <TextInput
+              value={clubTradeDraft}
+              onChangeText={(text) => setClubTradeDraft(text.replace(/[^\d]/g, ""))}
+              placeholder="Np. 5"
+              placeholderTextColor="#6c6c6c"
+              keyboardType="numeric"
+              style={styles.chatInput}
+            />
+          </View>
+          {clubTradeDrugs.length ? (
+            clubTradeDrugs.map((drug) => {
+              const stock = Number(safeGame.dealerInventory?.[drug.id] || 0);
+              const ownCount = Number(safeGame.drugInventory?.[drug.id] || 0);
+              const stashCount = Number(safeGame.club?.stash?.[drug.id] || 0);
+              const buyTotal = Number(drug.streetPrice || 0) * clubTradeQuantity;
+              const sellTotal = getDealerPayoutValue(drug) * clubTradeQuantity;
+              const buyDisabled = stock < clubTradeQuantity || Number(safeGame.player.cash || 0) < buyTotal;
+              const sellDisabled = ownCount < clubTradeQuantity;
+
+              return (
+                <View key={`club-trade-${drug.id}`} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.entityHead}>
+                      <EntityBadge visual={drugVisuals[drug.id]} />
+                      <View style={styles.flexOne}>
+                        <Text style={styles.listCardTitle}>{drug.name}</Text>
+                        <Text style={styles.listCardMeta}>
+                          U dilera: {stock} | Przy Tobie: {ownCount} | W klubie: {stashCount}
+                        </Text>
+                      </View>
+                    </View>
+                    <Tag text={`Partia ${drug.batchSize}`} />
+                  </View>
+                  <Text style={styles.listCardMeta}>
+                    Cena {formatMoney(drug.streetPrice)} | Skup {formatMoney(getDealerPayoutValue(drug))}
+                  </Text>
+                  <View style={styles.marketButtons}>
+                    <Pressable
+                      onPress={() => actions.buyDrugFromDealer(drug, clubTradeDraft)}
+                      style={[styles.marketButton, buyDisabled && styles.tileDisabled]}
+                    >
+                      <Text style={styles.marketButtonText}>{`Kup za ${formatMoney(buyTotal)}`}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => actions.sellDrugToDealer(drug, clubTradeDraft)}
+                      style={[styles.marketButton, sellDisabled && styles.tileDisabled]}
+                    >
+                      <Text style={styles.marketButtonText}>{`Sprzedaj za ${formatMoney(sellTotal)}`}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.emptyText}>Na tym progu nie masz jeszcze odblokowanego towaru do handlu.</Text>
+          )}
+        </SectionCard>
+      ) : null}
+
+      {insideOwnClub ? (
+        <SectionCard title="Stash klubu" subtitle={`Wrzucasz x${clubTradeQuantity} do zaplecza przed kolejna noca.`}>
+          {clubStashDrugs.length ? (
+            clubStashDrugs.map((drug) => (
+              <View key={drug.id} style={styles.listCard}>
+                <View style={styles.inlineRow}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={drugVisuals[drug.id]} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{drug.name}</Text>
+                      <Text style={styles.listCardMeta}>
+                        Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | W klubie: {safeGame.club.stash[drug.id] || 0}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={() => actions.moveDrugToClub(drug, clubTradeDraft)}
+                    style={[styles.inlineButton, Number(safeGame.drugInventory[drug.id] || 0) < clubTradeQuantity && styles.tileDisabled]}
+                  >
+                    <Text style={styles.inlineButtonText}>{`Wrzuc x${clubTradeQuantity}`}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Nie masz teraz nic do dorzucenia na stash. Kup towar w klubie albo dowiez go z fabryk.</Text>
+          )}
         </SectionCard>
       ) : null}
 

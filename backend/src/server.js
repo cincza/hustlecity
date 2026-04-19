@@ -90,6 +90,7 @@ import {
   applyOperationDistrictOutcome,
   ensurePlayerCityState,
   fortifyClubForPlayer,
+  moveDrugToClubForPlayer,
   resolveClubDistrictId,
   runClubNightForPlayer,
   setClubNightPlanForPlayer,
@@ -128,6 +129,7 @@ import {
 } from "./middleware/auth.js";
 import { logError, logInfo, logWarn } from "./utils/logger.js";
 import {
+  CLUB_MARKET,
   createClubState,
   createDealerInventory,
   createDrugCounterMap,
@@ -777,6 +779,46 @@ function resolveClubVenueSnapshot(venueId, { ownerRecord = null, fallbackPlayer 
   };
 }
 
+async function buildClubMarketSnapshot(now = Date.now()) {
+  const users = await listUsers();
+  const ownedVenueById = new Map();
+
+  for (const userRecord of users) {
+    const player = userRecord?.playerData;
+    if (!player?.club?.owned || !player.club?.sourceId) continue;
+    syncPlayerState(player, now);
+    ownedVenueById.set(String(player.club.sourceId).trim(), buildClubVenueFromPlayer(player));
+  }
+
+  const baseListings = CLUB_MARKET.map((venue) => {
+    const ownedVenue = ownedVenueById.get(String(venue.id).trim());
+    if (ownedVenue) {
+      return {
+        ...venue,
+        ...ownedVenue,
+        id: venue.id,
+      };
+    }
+
+    return {
+      ...venue,
+      nightPlanId: venue.nightPlanId || getClubNightPlan().id,
+      traffic: 0,
+      policePressure: Math.max(0, Number(venue.policeBase || 0) * 3),
+      securityLevel: 0,
+      defenseReadiness: 44,
+      threatLevel: 0,
+    };
+  });
+
+  const staticVenueIds = new Set(CLUB_MARKET.map((venue) => String(venue.id).trim()));
+  const extraOwnedVenues = [...ownedVenueById.values()].filter(
+    (venue) => venue?.id && !staticVenueIds.has(String(venue.id).trim())
+  );
+
+  return [...baseListings, ...extraOwnedVenues];
+}
+
 async function buildFriendEntries(player, now = Date.now()) {
   ensurePlayerExtendedState(player);
   if (!player.online.friends.length) {
@@ -1046,6 +1088,14 @@ function publicPlayer(player, now = Date.now()) {
     admin: buildAdminPublicState(isAdmin),
     log: player.log,
     clientState: player.clientState || null,
+  };
+}
+
+async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
+  return {
+    user: publicPlayer(player, now),
+    clubMarket: await buildClubMarketSnapshot(now),
+    ...extra,
   };
 }
 
@@ -1445,7 +1495,7 @@ app.get("/me", auth, asyncHandler(async (req, res) => {
   await persistPlayerForUser(req.user.id, req.player);
   const marketView = getMarketPublicView(state.market, getActiveUserCount());
   res.json({
-    user: publicPlayer(req.player),
+    ...(await buildPlayerEnvelope(req.player)),
     market: marketView.prices,
     marketState: marketView.products,
     heists: HEIST_DEFINITIONS,
@@ -2663,9 +2713,7 @@ app.post("/clubs/visit", auth, asyncHandler(async (req, res) => {
     });
   });
 
-  res.json({
-    user: publicPlayer(req.player, now),
-  });
+  res.json(await buildPlayerEnvelope(req.player, now));
 }));
 
 app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
@@ -2745,10 +2793,7 @@ app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
     outcome: result?.outcome || "unknown",
   });
 
-  res.json({
-    user: publicPlayer(req.player, now),
-    result,
-  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
@@ -2818,10 +2863,7 @@ app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
     outcome: result?.outcome || "unknown",
   });
 
-  res.json({
-    user: publicPlayer(req.player, now),
-    result,
-  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.get("/districts", auth, asyncHandler(async (req, res) => {
@@ -2855,7 +2897,7 @@ app.post("/clubs/claim", auth, asyncHandler(async (req, res) => {
     });
   });
 
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/clubs/plan", auth, asyncHandler(async (req, res) => {
@@ -2869,7 +2911,39 @@ app.post("/clubs/plan", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/clubs/stash/move", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const drugId = String(req.body?.drugId || "").trim();
+  const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
+    min: 1,
+    max: BACKEND_RULES.validation.maxMarketQuantity,
+    field: "quantity",
+  });
+  if (parsedQuantity.error) {
+    res.status(400).json({ error: parsedQuantity.error });
+    return;
+  }
+
+  let result = null;
+  await withPlayerActionLock(req, "clubs-stash-move", async () => {
+    await commitPlayerMutation(req, "clubs-stash-move", async (player) => {
+      result = moveDrugToClubForPlayer(player, drugId, parsedQuantity.value, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("clubs", "stash-move", {
+    userId: req.user.id,
+    drugId,
+    quantity: result?.quantity || parsedQuantity.value,
+    stashCount: result?.stashCount || 0,
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/clubs/night", auth, asyncHandler(async (req, res) => {
@@ -2882,7 +2956,7 @@ app.post("/clubs/night", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/clubs/fortify", auth, asyncHandler(async (req, res) => {
@@ -2895,7 +2969,7 @@ app.post("/clubs/fortify", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
-  res.json({ user: publicPlayer(req.player, now), result });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/create", auth, asyncHandler(async (req, res) => {

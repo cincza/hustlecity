@@ -68,6 +68,7 @@ import {
   playSlotOnline,
   previewClubPvpOnline,
   registerUser,
+  moveDrugToClubOnline,
   produceDrugOnline,
   runClubNightOnline,
   sellDrugToDealerOnline,
@@ -1165,6 +1166,39 @@ function syncClubListing(listings, club, ownerLabel) {
   ];
 }
 
+function normalizeClubListingsSnapshot(listings) {
+  const baseListings = createClubListings();
+  const baseById = new Map(baseListings.map((listing) => [String(listing.id), listing]));
+  const dynamicById = new Map();
+
+  if (Array.isArray(listings)) {
+    listings.forEach((entry) => {
+      if (!entry || typeof entry !== "object") return;
+      const id = String(entry.id || "").trim();
+      if (!id) return;
+      const base = baseById.get(id) || {};
+      dynamicById.set(id, {
+        ...base,
+        ...entry,
+        id,
+        traffic: Math.max(0, Number(entry.traffic ?? base.traffic ?? 0)),
+        policePressure: Math.max(0, Number(entry.policePressure ?? base.policePressure ?? 0)),
+        nightPlanId: entry.nightPlanId || base.nightPlanId || getClubNightPlan().id,
+        securityLevel: Math.max(0, Number(entry.securityLevel ?? base.securityLevel ?? 0)),
+        defenseReadiness: Math.max(0, Number(entry.defenseReadiness ?? base.defenseReadiness ?? 44)),
+        threatLevel: Math.max(0, Number(entry.threatLevel ?? base.threatLevel ?? 0)),
+      });
+    });
+  }
+
+  const mergedStatic = baseListings.map((listing) => dynamicById.get(String(listing.id)) || listing);
+  const extraListings = [...dynamicById.values()].filter(
+    (listing) => !baseById.has(String(listing.id))
+  );
+
+  return [...mergedStatic, ...extraListings];
+}
+
 function getCurrentClubVenue(game) {
   if (!game.club.visitId) return null;
 
@@ -1795,8 +1829,32 @@ function AppRuntime() {
     const nextMessages = Array.isArray(serverUser?.online?.messages)
       ? serverUser.online.messages.map(normalizeOnlineMessageEntry)
       : null;
+    const nextClubListings =
+      Array.isArray(marketPayload?.clubMarket) || Array.isArray(marketPayload?.clubs)
+        ? normalizeClubListingsSnapshot(marketPayload?.clubMarket || marketPayload?.clubs)
+        : null;
 
-    setGame((prev) => ({
+    setGame((prev) => {
+      const nextClubState =
+        serverUser?.club && typeof serverUser.club === "object"
+          ? normalizeClubState({
+              ...prev.club,
+              ...serverUser.club,
+              stash:
+                serverUser.club?.stash && typeof serverUser.club.stash === "object"
+                  ? { ...prev.club.stash, ...serverUser.club.stash }
+                  : prev.club.stash,
+              guestState:
+                serverUser.club?.guestState && typeof serverUser.club.guestState === "object"
+                  ? {
+                      ...(prev.club.guestState || createClubGuestState()),
+                      ...serverUser.club.guestState,
+                    }
+                  : prev.club.guestState,
+            })
+          : null;
+
+      return ({
       ...prev,
       player: {
         ...prev.player,
@@ -1909,46 +1967,16 @@ function AppRuntime() {
               ),
             }
           : prev.cooldowns,
-      club:
-        serverUser?.club && typeof serverUser.club === "object"
-          ? normalizeClubState({
-              ...prev.club,
-              ...serverUser.club,
-              stash:
-                serverUser.club?.stash && typeof serverUser.club.stash === "object"
-                  ? { ...prev.club.stash, ...serverUser.club.stash }
-                  : prev.club.stash,
-              guestState:
-                serverUser.club?.guestState && typeof serverUser.club.guestState === "object"
-                  ? {
-                      ...(prev.club.guestState || createClubGuestState()),
-                      ...serverUser.club.guestState,
-                    }
-                  : prev.club.guestState,
-            })
-          : prev.club,
+      club: nextClubState || prev.club,
       clubListings:
-        serverUser?.club && typeof serverUser.club === "object"
+        nextClubListings ||
+        (nextClubState
           ? syncClubListing(
               prev.clubListings,
-              normalizeClubState({
-                ...prev.club,
-                ...serverUser.club,
-                stash:
-                  serverUser.club?.stash && typeof serverUser.club.stash === "object"
-                    ? { ...prev.club.stash, ...serverUser.club.stash }
-                    : prev.club.stash,
-                guestState:
-                  serverUser.club?.guestState && typeof serverUser.club.guestState === "object"
-                    ? {
-                        ...(prev.club.guestState || createClubGuestState()),
-                        ...serverUser.club.guestState,
-                      }
-                    : prev.club.guestState,
-              }),
+              nextClubState,
               serverUser.club?.ownerLabel || safeProfile.name || prev.player.name
             )
-          : prev.clubListings,
+          : prev.clubListings),
       gang:
         serverUser?.gang && typeof serverUser.gang === "object"
           ? normalizeGangState({
@@ -1971,7 +1999,8 @@ function AppRuntime() {
       },
       log: Array.isArray(serverUser?.log) && serverUser.log.length ? serverUser.log : prev.log,
       ...normalizeMarketPayload(marketPayload, prev.market, prev.marketState, prev.marketMeta),
-      }));
+      });
+    });
     };
 
   const refreshMarketState = async (token = sessionToken) => {
@@ -2056,7 +2085,7 @@ function AppRuntime() {
     if (!token) return null;
     const me = await fetchMe(token);
     if (!me?.user?.profile) return null;
-    mergeServerUser(me.user, { prices: me.market, products: me.marketState });
+    mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket });
     return me;
   };
 
@@ -2094,7 +2123,7 @@ function AppRuntime() {
       if (!me?.user?.profile) {
         throw new Error("Backend nie zwrocil profilu gracza.");
       }
-      mergeServerUser(me.user, { prices: me.market, products: me.marketState });
+        mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket });
       didHydrateSessionRef.current = true;
       try {
         const casinoMeta = await fetchCasinoMeta(token);
@@ -2650,10 +2679,10 @@ function AppRuntime() {
   const setAvatar = async (avatarId) => {
     const avatar = getAvatarById(avatarId, avatarOptions);
     if (sessionToken && apiStatus === "online") {
-      try {
-        const result = await updateAvatarOnline(sessionToken, avatarId);
-        mergeServerUser(result.user);
-        return;
+        try {
+          const result = await updateAvatarOnline(sessionToken, avatarId);
+          mergeServerUser(result.user, { clubMarket: result.clubMarket });
+          return;
       } catch (error) {
         pushLog(error.message || "Nie udalo sie zapisac avatara.");
         return;
@@ -3205,13 +3234,13 @@ function AppRuntime() {
     const nextPlan = getClubNightPlan(planId);
     if (game.club.nightPlanId === nextPlan.id) return;
 
-    if (sessionToken) {
-      setClubPlanOnline(sessionToken, nextPlan.id)
-        .then((result) => {
-          mergeServerUser(result.user);
-          showExplicitNotice({
-            tone: "success",
-            title: "PLAN NOCY",
+      if (sessionToken) {
+        setClubPlanOnline(sessionToken, nextPlan.id)
+          .then((result) => {
+            mergeServerUser(result.user, { clubMarket: result.clubMarket });
+            showExplicitNotice({
+              tone: "success",
+              title: "PLAN NOCY",
             message: result?.result?.logMessage || `${nextPlan.name}. ${nextPlan.summary}`,
             deltas: null,
           });
@@ -3286,7 +3315,7 @@ function AppRuntime() {
     if (sessionToken && apiStatus === "online") {
       try {
         const response = await performClubActionOnline(sessionToken, currentClubVenue.id, action.id);
-        mergeServerUser(response.user);
+        mergeServerUser(response.user, { clubMarket: response.clubMarket });
         const actionResult = response?.result;
         showExplicitNotice({
           tone:
@@ -3906,7 +3935,7 @@ function AppRuntime() {
     if (sessionToken) {
       try {
         const result = await claimClubOnline(sessionToken, listing.id);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
         return;
       } catch (error) {
         pushLog(error.message);
@@ -4024,17 +4053,42 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - club stash is economy state and must not live only on the client
-  const moveDrugToClub = (drug) => {
-    if (!requireOfflineDemoAuthority("Stash klubu")) return;
+  const moveDrugToClub = async (drug, quantityOverride) => {
     if (!game.club.owned) return pushLog("Najpierw musisz miec klub.");
     if (!insideOwnClub) return pushLog("Musisz fizycznie wejsc do swojego klubu, zeby wrzucic towar na stash.");
-    if (game.drugInventory[drug.id] <= 0) return pushLog(`Nie masz na stanie ${drug.name}.`);
+
+    const parsedQuantity = Number.parseInt(String(quantityOverride ?? 1).replace(/[^\d]/g, ""), 10);
+    const quantity = Math.max(1, Number.isFinite(parsedQuantity) ? parsedQuantity : 1);
+    if ((game.drugInventory?.[drug.id] || 0) < quantity) {
+      return pushLog(`Nie masz tyle ${drug.name} przy sobie.`);
+    }
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await moveDrugToClubOnline(sessionToken, drug.id, quantity);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
+        showExplicitNotice({
+          tone: "success",
+          title: "STASH KLUBU",
+          message: result?.result?.logMessage || `Do stashu wpada ${quantity}x ${drug.name}.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Stash klubu")) return;
 
     setGame((prev) => ({
       ...prev,
-      drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - 1 },
-      club: { ...prev.club, stash: { ...prev.club.stash, [drug.id]: prev.club.stash[drug.id] + 1 } },
-      log: [`Przerzucono 1 szt. ${drug.name} do klubu.`, ...prev.log].slice(0, 16),
+      drugInventory: { ...prev.drugInventory, [drug.id]: Math.max(0, Number(prev.drugInventory[drug.id] || 0) - quantity) },
+      club: {
+        ...prev.club,
+        stash: { ...prev.club.stash, [drug.id]: Number(prev.club.stash?.[drug.id] || 0) + quantity },
+      },
+      log: [`Przerzucono ${quantity}x ${drug.name} do klubu.`, ...prev.log].slice(0, 16),
     }));
   };
 
@@ -4048,7 +4102,7 @@ function AppRuntime() {
     if (sessionToken) {
       runClubNightOnline(sessionToken)
         .then((result) => {
-          mergeServerUser(result.user);
+          mergeServerUser(result.user, { clubMarket: result.clubMarket });
           showExplicitNotice({
             tone: "success",
             title: "NOC KLUBU",
@@ -4080,15 +4134,12 @@ function AppRuntime() {
     const totalUnits = DRUGS.reduce((sum, drug) => sum + (clubSnapshot.stash[drug.id] || 0), 0);
     if (!totalUnits) return pushLog("Klub stoi pusty. Dorzuc najpierw towar z fabryk.");
     const trafficLevel = clamp(Number(clubSnapshot.traffic || 0), 0, CLUB_SYSTEM_RULES.nightlyTrafficHardCap);
-    if (trafficLevel < 1.25) {
-      return pushLog("Za cicho na sali. Najpierw dowiez ruch Scoutem, kontaktami albo realnymi odwiedzinami.");
-    }
-
     const trafficWeight = clamp(trafficLevel / CLUB_SYSTEM_RULES.nightlyTrafficSoftCap, 0, 1.2);
     const pressureDrag = Math.max(0, (Math.max(0, clubPolice.pressure - 48) / 36));
     const effectiveTraffic = Math.max(0, trafficLevel - pressureDrag);
+    const starterFloorDemand = totalUnits > 0 ? 1 : 0;
     const demandBudget = Math.max(
-      0,
+      starterFloorDemand,
       Math.min(
         9,
         Math.floor(effectiveTraffic / 2.6) + (profile.plan.id === "showtime" && effectiveTraffic >= 7 ? 1 : 0)
@@ -4096,7 +4147,7 @@ function AppRuntime() {
     );
 
     if (demandBudget <= 0) {
-      return pushLog("Sala zyje, ale presja przydusila noc. Najpierw uspokoj lokal albo zbuduj czystszy ruch.");
+      return pushLog("Presja zabila noc. Uspokoj dzielnice albo podbij ruch w lokalu.");
     }
 
     const workingStock = DRUGS.reduce((acc, drug) => {
@@ -4154,6 +4205,7 @@ function AppRuntime() {
     const incidentTriggered = Math.random() < incidentChance;
     const incidentLoss = incidentTriggered ? Math.floor(grossIncome * (0.12 + Math.random() * 0.08)) : 0;
     const netIncome = Math.max(0, grossIncome - incidentLoss);
+    const quietNight = trafficLevel < 1.25;
     const soldSummary = Object.entries(soldByDrug)
       .filter(([, amount]) => amount > 0)
       .map(([drugId, amount]) => {
@@ -4176,9 +4228,11 @@ function AppRuntime() {
           createdAt: Date.now(),
         }
       : {
-          tone: trafficLevel >= 12 ? "buzz" : "calm",
+          tone: quietNight ? "calm" : trafficLevel >= 12 ? "buzz" : "calm",
           text:
-            trafficLevel >= 12
+            quietNight
+              ? "Lokal przepchnal cicha noc i rozruszal zaplecze bez szumu."
+              : trafficLevel >= 12
               ? "Kolejka dowiozla noc, ale lokal robi sie coraz glosniejszy."
               : "Noc zamknieta czysto. Ruch byl umiarkowany i bez zbednego szumu.",
           createdAt: Date.now(),
@@ -4215,7 +4269,9 @@ function AppRuntime() {
         log: [
           incidentTriggered
             ? `${prev.club.name}: noc domknieta na ${formatMoney(netIncome)}. Patrol przycial ${formatMoney(incidentLoss)}. Poszlo: ${soldSummary || "skromny miks"}.`
-            : `${prev.club.name}: noc dowiozla ${formatMoney(netIncome)}. Ruch ${Math.round(trafficLevel)} i zeszlo: ${soldSummary || "skromny miks"}.`,
+            : quietNight
+              ? `${prev.club.name}: cicha noc domknieta na ${formatMoney(netIncome)}. Poszlo: ${soldSummary || "skromny miks"}.`
+              : `${prev.club.name}: noc dowiozla ${formatMoney(netIncome)}. Ruch ${Math.round(trafficLevel)} i zeszlo: ${soldSummary || "skromny miks"}.`,
           ...prev.log,
         ].slice(0, 16),
       };
@@ -4226,7 +4282,9 @@ function AppRuntime() {
       title: incidentTriggered ? "NOC Z PRESJA" : "NOC DOMKNIETA",
       message: incidentTriggered
         ? `${clubSnapshot.name} wyciagnal ${formatMoney(netIncome)}, ale patrol przycial ${formatMoney(incidentLoss)}.`
-        : `${clubSnapshot.name} zamknal noc na ${formatMoney(netIncome)} przy ruchu ${Math.round(trafficLevel)}.`,
+        : quietNight
+          ? `${clubSnapshot.name} zamknal cicha noc na ${formatMoney(netIncome)}.`
+          : `${clubSnapshot.name} zamknal noc na ${formatMoney(netIncome)} przy ruchu ${Math.round(trafficLevel)}.`,
       deltas: null,
     });
   };
@@ -4239,7 +4297,7 @@ function AppRuntime() {
     if (sessionToken) {
       try {
         const result = await fortifyClubOnline(sessionToken);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
         showExplicitNotice({
           tone: "success",
           title: "OCHRONA",
@@ -4274,7 +4332,7 @@ function AppRuntime() {
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await visitClubOnline(sessionToken, "enter", listing.id);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
       } catch (error) {
         pushLog(error.message);
       }
@@ -4299,7 +4357,7 @@ function AppRuntime() {
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await visitClubOnline(sessionToken, "leave", currentClubVenue.id);
-        mergeServerUser(result.user);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
       } catch (error) {
         pushLog(error.message);
       }
@@ -6899,6 +6957,7 @@ function AppRuntime() {
       getEscortDistrictCount,
       hasFactory,
       getDrugPoliceProfile,
+      getDealerPayoutForDrug,
       getClubVenueProfile,
       getClubNightPlan,
       getBusinessUpgradeState,
@@ -6926,6 +6985,8 @@ function AppRuntime() {
       promoteClub,
       runClubNight,
       runClubVisitorAction,
+      buyDrugFromDealer,
+      sellDrugToDealer,
       moveDrugToClub,
     },
   };

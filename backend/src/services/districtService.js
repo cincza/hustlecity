@@ -8,7 +8,14 @@ import {
   normalizeCityState,
   syncCityState,
 } from "../../../shared/districts.js";
-import { CLUB_MARKET, getClubNightPlan } from "../../../shared/socialGameplay.js";
+import {
+  CLUB_MARKET,
+  CLUB_SYSTEM_RULES,
+  DRUGS,
+  findDrugById,
+  getClubNightPlan,
+  getClubVenueProfile,
+} from "../../../shared/socialGameplay.js";
 import { ensureGangWeeklyGoal, getGangProjectEffects, incrementGangGoalProgress } from "../../../shared/gangProjects.js";
 
 function fail(message, statusCode = 400) {
@@ -316,6 +323,41 @@ export function setClubNightPlanForPlayer(player, planId, now = Date.now()) {
   };
 }
 
+export function moveDrugToClubForPlayer(player, drugId, quantity = 1, now = Date.now()) {
+  syncCityStateForPlayer(player, now);
+  if (!player?.club?.owned) {
+    fail("Najpierw musisz miec swoj lokal.");
+  }
+  if (!player.club.visitId || player.club.visitId !== player.club.sourceId) {
+    fail("Musisz siedziec we wlasnym klubie, zeby wrzucic towar na stash.");
+  }
+
+  const drug = findDrugById(drugId);
+  const safeQuantity = Math.max(1, Math.floor(Number(quantity || 1)));
+  if (!drug) {
+    fail("Nie ma takiego towaru.", 404);
+  }
+  if (Number(player?.drugInventory?.[drug.id] || 0) < safeQuantity) {
+    fail(`Nie masz tyle ${drug.name} przy sobie.`);
+  }
+
+  player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - safeQuantity);
+  player.club.stash[drug.id] = Number(player.club.stash?.[drug.id] || 0) + safeQuantity;
+  player.club.recentIncident = {
+    tone: "supply",
+    text: `Na zaplecze wpada ${safeQuantity}x ${drug.name}.`,
+    createdAt: now,
+  };
+
+  return {
+    drugId: drug.id,
+    quantity: safeQuantity,
+    inventoryCount: Number(player.drugInventory?.[drug.id] || 0),
+    stashCount: Number(player.club.stash?.[drug.id] || 0),
+    logMessage: `Do stashu wpada ${safeQuantity}x ${drug.name}.`,
+  };
+}
+
 export function runClubNightForPlayer(player, now = Date.now()) {
   syncCityStateForPlayer(player, now);
   if (!player?.club?.owned) {
@@ -334,54 +376,163 @@ export function runClubNightForPlayer(player, now = Date.now()) {
   const district = getDistrictModifierSummary(player.city, resolveClubDistrictId(player, player.club.sourceId));
   const plan = getClubNightPlan(player.club.nightPlanId);
   const traffic = Math.max(0, Number(player.club.traffic || 0));
-  const defenseDrag = Math.max(0, Number(player.club.threatLevel || 0) - Number(player.club.defenseReadiness || 0) * 0.65);
-  const baseNet = 140 + Number(player.club.popularity || 0) * 3.4 + Number(player.club.mood || 0) * 2.4;
-  const trafficNet = traffic * 27 * Number(district.pressureState.trafficMultiplier || 1);
-  const planMultiplier = plan.id === "showtime" ? 1.08 : plan.id === "guestlist" ? 1.03 : 0.86;
-  const pressureDrag =
-    district.pressureState.id === "lockdown"
-      ? 0.64
-      : district.pressureState.id === "crackdown"
-        ? 0.8
-        : district.pressureState.id === "watched"
-          ? 0.95
-          : 1.01;
-  const payout = Math.max(90, Math.round((baseNet + trafficNet - defenseDrag * 10) * planMultiplier * pressureDrag));
+  const totalUnits = DRUGS.reduce((sum, drug) => sum + Number(player.club?.stash?.[drug.id] || 0), 0);
+  if (!totalUnits) {
+    fail("Klub stoi pusty. Dorzuc najpierw towar na stash.");
+  }
+  const trafficWeight = clampNumber(traffic / CLUB_SYSTEM_RULES.nightlyTrafficSoftCap, 0, 1.2);
+  const pressureDrag = Math.max(0, (Math.max(0, Number(district.pressure || 0) - 48) / 36));
+  const effectiveTraffic = Math.max(0, traffic - pressureDrag);
+  const starterFloorDemand = totalUnits > 0 ? 1 : 0;
+  const demandBudget = Math.max(
+    starterFloorDemand,
+    Math.min(
+      9,
+      Math.floor(effectiveTraffic / 2.6) + (plan.id === "showtime" && effectiveTraffic >= 7 ? 1 : 0)
+    )
+  );
+
+  if (demandBudget <= 0) {
+    fail("Presja zabila noc. Uspokoj dzielnice albo podbij ruch w lokalu.");
+  }
+
+  const workingStock = DRUGS.reduce((acc, drug) => {
+    acc[drug.id] = Number(player.club?.stash?.[drug.id] || 0);
+    return acc;
+  }, {});
+  const soldByDrug = {};
+  let remainingDemand = demandBudget;
+
+  while (remainingDemand > 0) {
+    const candidate = DRUGS
+      .filter((drug) => workingStock[drug.id] > 0)
+      .sort(
+        (left, right) =>
+          workingStock[right.id] * (1 + Number(right.streetPrice || 0) / 7000) -
+          workingStock[left.id] * (1 + Number(left.streetPrice || 0) / 7000)
+      )[0];
+
+    if (!candidate) break;
+    soldByDrug[candidate.id] = (soldByDrug[candidate.id] || 0) + 1;
+    workingStock[candidate.id] -= 1;
+    remainingDemand -= 1;
+  }
+
+  const soldUnits = Object.values(soldByDrug).reduce((sum, amount) => sum + Number(amount || 0), 0);
+  if (!soldUnits) {
+    fail("Kolejka byla, ale nic konkretnego nie zeszlo ze stashu.");
+  }
+
+  const venueProfile = getClubVenueProfile(
+    {
+      ...player.club,
+      popularity: Number(player.club.popularity || 0),
+      mood: Number(player.club.mood || 0),
+      respect: Number(player.profile?.respect || 0),
+      policeBase: Number(player.club.policeBase || 0),
+      nightPlanId: plan.id,
+    },
+    { planId: plan.id }
+  );
+
+  let grossIncome = 0;
+  Object.entries(soldByDrug).forEach(([currentDrugId, amount]) => {
+    const drug = findDrugById(currentDrugId);
+    if (!drug || !amount) return;
+    const perUnit = Math.max(
+      80,
+      Math.floor(Number(drug.streetPrice || 0) * Number(venueProfile.nightIncomeFactor || 0.22) * (0.58 + trafficWeight * 0.28))
+    );
+    grossIncome += perUnit * Number(amount || 0);
+  });
+
+  const projectedPressure = clampNumber(
+    Number(player.club.policePressure || 0) +
+      effectiveTraffic * 1.4 +
+      soldUnits * 1.8 +
+      Math.max(0, totalUnits - soldUnits) * 0.18 +
+      Number(player.profile?.heat || 0) * 0.08,
+    0,
+    100
+  );
+  const incidentChance = clampNumber(
+    0.03 + Math.max(0, projectedPressure - 58) / 190 + trafficWeight * 0.05,
+    0.03,
+    0.24
+  );
+  const incidentTriggered = Math.random() < incidentChance;
+  const incidentLoss = incidentTriggered ? Math.floor(grossIncome * (0.12 + Math.random() * 0.08)) : 0;
+  const payout = Math.max(0, grossIncome - incidentLoss);
+  const quietNight = traffic < 1.25;
+  const soldSummary = Object.entries(soldByDrug)
+    .filter(([, amount]) => Number(amount || 0) > 0)
+    .map(([currentDrugId, amount]) => {
+      const drug = findDrugById(currentDrugId);
+      return drug ? `${amount}x ${drug.name}` : null;
+    })
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(", ");
+
+  Object.entries(soldByDrug).forEach(([currentDrugId, amount]) => {
+    player.club.stash[currentDrugId] = Math.max(
+      0,
+      Number(player.club?.stash?.[currentDrugId] || 0) - Number(amount || 0)
+    );
+  });
 
   player.profile.cash = Number(player.profile.cash || 0) + payout;
+  player.profile.heat = clampNumber(Number(player.profile.heat || 0) + (incidentTriggered ? 4 : 1), 0, 100);
   player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + payout;
   player.club.lastRunAt = now;
-  player.club.traffic = clampNumber(player.club.traffic * 0.34, 0, 100);
+  player.club.traffic = clampNumber(traffic * 0.34, 0, 100);
+  player.club.popularity = clampNumber(
+    Number(player.club.popularity || 0) + (incidentTriggered ? -1 : traffic >= 9 ? 2 : 1),
+    0,
+    100
+  );
+  player.club.mood = clampNumber(
+    Number(player.club.mood || 0) + (incidentTriggered ? -4 : soldUnits >= 4 ? 2 : 1),
+    0,
+    100
+  );
   player.club.policePressure = clampNumber(
-    Number(player.club.policePressure || 0) +
-      traffic * (plan.id === "showtime" ? 1.02 : plan.id === "guestlist" ? 0.72 : 0.22) -
-      (plan.id === "lowlights" ? 5 : 0),
+    Number(player.club.policePressure || 0) + effectiveTraffic * 0.9 + soldUnits * 0.7 + (incidentTriggered ? 5.5 : 2.1),
     0,
     100
   );
   player.club.threatLevel = clampNumber(
-    Number(player.club.threatLevel || 0) + district.pressure * 0.09 - Number(player.club.defenseReadiness || 0) * 0.06,
+    Number(player.club.threatLevel || 0) +
+      Number(district.pressure || 0) * 0.12 +
+      soldUnits * 0.28 -
+      Number(player.club.defenseReadiness || 0) * 0.05,
     0,
     100
   );
-  player.club.recentIncident = {
-    tone: payout >= 950 ? "traffic" : district.pressureState.id === "lockdown" ? "risk" : "calm",
-    text:
-      payout >= 950
-        ? "Lokal domyka dobra noc i zostawia ruch na dzielnicy."
-        : district.pressureState.id === "lockdown"
-          ? "Gliny przydusily noc, ale lokal nie zgasl."
-          : "Noc schodzi spokojnie i lokal dalej trzyma puls.",
-    createdAt: now,
-  };
+  player.club.recentIncident = incidentTriggered
+    ? {
+        tone: "risk",
+        text: `Patrol przecial sale i scial ${incidentLoss}$ z nocnego utargu.`,
+        createdAt: now,
+      }
+    : {
+        tone: quietNight ? "calm" : traffic >= 12 ? "traffic" : "calm",
+        text:
+          quietNight
+            ? "Lokal przepchnal cicha noc i rozruszal zaplecze bez szumu."
+            : traffic >= 12
+            ? "Kolejka dowiozla noc i lokal dalej trzyma ruch."
+            : "Noc zeszla spokojnie i bez zbednego szumu.",
+        createdAt: now,
+      };
 
   const activity = applyDistrictActivity(player.city, {
     districtId: district.id,
-    influenceDelta: 1.6 + Math.min(3, traffic / 7),
+    influenceDelta: 1.2 + Math.min(3, traffic / 7) + Math.min(2.2, soldUnits * 0.28),
     pressureDelta:
       plan.id === "lowlights"
         ? -4.4
-        : 2 + traffic * (plan.id === "showtime" ? 0.34 : 0.22),
+        : 2 + effectiveTraffic * (plan.id === "showtime" ? 0.34 : 0.22) + soldUnits * 0.12,
     threatDelta: payout >= 950 ? 0.9 : -0.8,
     actionFamily: `club-night:${district.id}`,
     eventText: "Noc klubu zamknela sie i zostawila slad na dzielnicy.",
@@ -397,8 +548,14 @@ export function runClubNightForPlayer(player, now = Date.now()) {
 
   return {
     payout,
+    soldUnits,
+    soldSummary,
     districtId: district.id,
-    logMessage: `Noc klubu domknieta. Wpada ${payout}$ i lekki puls wplywu w ${district.name}.`,
+    logMessage: incidentTriggered
+      ? `Noc klubu domknieta na ${payout}$. Patrol przycial ${incidentLoss}$. Poszlo: ${soldSummary || "skromny miks"}.`
+      : quietNight
+        ? `Cicha noc domknieta na ${payout}$. Poszlo: ${soldSummary || "skromny miks"}.`
+        : `Noc klubu dowiozla ${payout}$. Poszlo: ${soldSummary || "skromny miks"}.`,
   };
 }
 
