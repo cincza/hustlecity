@@ -173,6 +173,7 @@ async function main() {
     const login = `smoke${unique}`;
     const noEmailLoginOne = `sna${unique}`;
     const noEmailLoginTwo = `snb${unique}`;
+    const rivalLogin = `snc${unique}`;
     const password = "smoke123";
     const chatText = `smoke-message-${unique}`;
 
@@ -238,7 +239,17 @@ async function main() {
       },
     });
 
-    if (!noEmailRegisterOne.token || !noEmailRegisterTwo.token) {
+    await delay(AUTH_REGISTER_DELAY_MS);
+    const rivalRegister = await request("/auth/register", {
+      method: "POST",
+      body: {
+        login: rivalLogin,
+        username: rivalLogin,
+        password,
+      },
+    });
+
+    if (!noEmailRegisterOne.token || !noEmailRegisterTwo.token || !rivalRegister.token) {
       throw new Error("Rejestracja bez maila nie zwrocila tokena.");
     }
 
@@ -257,6 +268,12 @@ async function main() {
     await request("/auth/login", {
       method: "POST",
       body: { login: noEmailLoginTwo, password },
+    });
+
+    await delay(AUTH_LOGIN_DELAY_MS);
+    await request("/auth/login", {
+      method: "POST",
+      body: { login: rivalLogin, password },
     });
 
     const heists = await request("/heists", { token });
@@ -396,6 +413,80 @@ async function main() {
     if (Number(investedGangProject?.user?.gang?.projects?.["district-push"] || 0) < 1) {
       throw new Error("Projekt gangu nie wskoczyl na pierwszy poziom.");
     }
+
+    const rivalGang = await request("/gang/create", {
+      method: "POST",
+      token: rivalRegister.token,
+      body: { gangName: "Rival Avenue" },
+    });
+
+    if (!rivalGang?.user?.gang?.joined || rivalGang.user.gang.name !== "Rival Avenue") {
+      throw new Error("Tworzenie rywalizujacego gangu nie zapisalo stanu backendowego.");
+    }
+
+    const rivalClub = await request("/clubs/found", {
+      method: "POST",
+      token: rivalRegister.token,
+    });
+
+    if (!rivalClub?.user?.club?.owned || !String(rivalClub.user.club.sourceId || "").startsWith("club-custom-")) {
+      throw new Error("Zakladanie nowego klubu nie zapisalo custom lokalu po stronie backendu.");
+    }
+    if (!Array.isArray(rivalClub?.clubMarket) || !rivalClub.clubMarket.some((entry) => entry.id === rivalClub.user.club.sourceId)) {
+      throw new Error("Rynek klubow nie pokazuje nowego lokalu postawionego od zera.");
+    }
+
+    await request("/player/restaurant/eat", {
+      method: "POST",
+      token,
+      body: { itemId: "energybox" },
+    });
+
+    const gangRaidPreview = await request("/gang/pvp/preview", {
+      method: "POST",
+      token,
+      body: { targetGangName: "Rival Avenue" },
+    });
+
+    if (!Number.isFinite(Number(gangRaidPreview?.raidChance?.chance || 0))) {
+      throw new Error("Preview najazdu na gang nie zwrocil szansy wejscia.");
+    }
+    if (!gangRaidPreview?.attackerState || typeof gangRaidPreview.attackerState.canAttack !== "boolean") {
+      throw new Error("Preview najazdu na gang nie zwrocil stanu atakujacego.");
+    }
+
+    const allianceOffer = await request("/gang/alliance", {
+      method: "POST",
+      token,
+      body: { targetGangName: "Rival Avenue" },
+    });
+
+    if (!allianceOffer?.result?.message) {
+      throw new Error("Oferta sojuszu nie zapisala sie po stronie backendu.");
+    }
+
+    const gangRaidAttack = await request("/gang/pvp/attack", {
+      method: "POST",
+      token,
+      body: { targetGangName: "Rival Avenue" },
+    });
+
+    if (typeof gangRaidAttack?.result?.success !== "boolean") {
+      throw new Error("Najazd na gang nie zwrocil wyniku backendowego.");
+    }
+    if (Number(gangRaidAttack?.user?.cooldowns?.gangAttackUntil || 0) <= Date.now()) {
+      throw new Error("Najazd na gang nie ustawil globalnego cooldownu ekipy.");
+    }
+
+    await expectRequestFailure(
+      "/gang/pvp/attack",
+      {
+        method: "POST",
+        token,
+        body: { targetGangName: "Rival Avenue" },
+      },
+      /studzi|wracasz|cooldown/i
+    );
 
     const casinoMeta = await request("/casino/meta", { token });
     if (!casinoMeta?.limits?.slot || !casinoMeta?.limits?.highRisk) {

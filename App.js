@@ -46,6 +46,7 @@ import {
   executeOperationPlanOnline,
   executeHeistOnline,
   executeGangHeistOnline,
+  executeGangPvpOnline,
   fetchFriendListOnline,
   fetchCasinoMeta,
   fetchGangDirectoryOnline,
@@ -63,6 +64,7 @@ import {
   healOnline,
   hitBlackjackOnline,
   fortifyClubOnline,
+  foundClubOnline,
   loginUser,
   investGangProjectOnline,
   invitePlayerToGangOnline,
@@ -73,7 +75,7 @@ import {
   playFightClubRoundOnline,
   performClubActionOnline,
   playSlotOnline,
-  previewClubPvpOnline,
+  previewGangPvpOnline,
   registerUser,
   consumeClubDrugOnline,
   moveDrugToClubOnline,
@@ -85,6 +87,7 @@ import {
   sellProductOnline,
   sendGlobalChatMessageOnline,
   sendDirectMessageOnline,
+  sendGangAllianceOfferOnline,
   setClubPlanOnline,
   setGangFocusOnline,
   updateGangMemberRoleOnline,
@@ -683,6 +686,8 @@ const INITIAL = {
   cooldowns: {
     playerAttackUntil: 0,
     playerAttackTargets: {},
+    gangAttackUntil: 0,
+    gangAttackTargets: {},
   },
   collections: {
     businessCash: 0,
@@ -780,15 +785,20 @@ const normalizeAdminState = (adminState) => ({
   grantPresets: normalizeAdminGrantPresets(adminState?.grantPresets),
   respectPresets: normalizeAdminGrantPresets(adminState?.respectPresets),
 });
-const normalizePlayerAttackTargetCooldowns = (cooldowns, now = Date.now()) => {
+const normalizeTargetCooldownMap = (cooldowns, now = Date.now(), { lowercaseKeys = false } = {}) => {
   if (!cooldowns || typeof cooldowns !== "object" || Array.isArray(cooldowns)) {
     return {};
   }
 
   return Object.fromEntries(
     Object.entries(cooldowns)
-      .map(([targetUserId, until]) => [String(targetUserId || "").trim(), Math.max(0, Number(until || 0))])
-      .filter(([targetUserId, until]) => targetUserId && until > now)
+      .map(([targetKey, until]) => {
+        const normalizedKey = lowercaseKeys
+          ? String(targetKey || "").trim().toLowerCase()
+          : String(targetKey || "").trim();
+        return [normalizedKey, Math.max(0, Number(until || 0))];
+      })
+      .filter(([targetKey, until]) => targetKey && until > now)
   );
 };
 
@@ -1734,6 +1744,11 @@ function AppRuntime() {
     () => getGangRaidPreviewLines(selectedGangRaidPreview),
     [selectedGangRaidPreview]
   );
+  const selectedGangRaidBlocked = Boolean(
+    hasOnlineAuthority &&
+      selectedGangRaidPreview?.attackerState &&
+      selectedGangRaidPreview.attackerState.canAttack === false
+  );
   const gangInviteTargets = useMemo(
     () =>
       (game.online?.roster || []).filter(
@@ -1976,8 +1991,17 @@ function AppRuntime() {
                 0,
                 Number(serverUser.cooldowns?.playerAttackUntil || 0)
               ),
-              playerAttackTargets: normalizePlayerAttackTargetCooldowns(
+              playerAttackTargets: normalizeTargetCooldownMap(
                 serverUser.cooldowns?.playerAttackTargets
+              ),
+              gangAttackUntil: Math.max(
+                0,
+                Number(serverUser.cooldowns?.gangAttackUntil || 0)
+              ),
+              gangAttackTargets: normalizeTargetCooldownMap(
+                serverUser.cooldowns?.gangAttackTargets,
+                Date.now(),
+                { lowercaseKeys: true }
               ),
             }
           : prev.cooldowns,
@@ -4080,9 +4104,22 @@ function AppRuntime() {
     });
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - club founding must be validated server-side before production
   const foundClub = () => {
     if (!canDoStreetAction()) return;
+    if (hasOnlineAuthority) {
+      foundClubOnline(sessionToken)
+        .then((result) => {
+          mergeServerUser(result.user, { clubMarket: result.clubMarket });
+          showExplicitNotice({
+            tone: "success",
+            title: "NOWY LOKAL",
+            message: result?.result?.logMessage || "Nowy klub wskakuje do miasta.",
+            deltas: null,
+          });
+        })
+        .catch((error) => pushLog(error.message));
+      return;
+    }
     if (!requireOfflineDemoAuthority("Zakladanie klubu")) return;
     if (game.club.owned) return pushLog("Masz juz swoj klub.");
     if (!game.gang.joined) return pushLog("Nowy klub od zera stawia juz konkretna ekipa, nie solo typ.");
@@ -5380,6 +5417,21 @@ function AppRuntime() {
     if (!game.gang.joined) return pushLog("Sojusz wysyla juz konkretna ekipa, nie solo gracz.");
     if (game.gang.name === gangProfile.name) return pushLog("To Twoj gang.");
 
+    if (hasOnlineAuthority) {
+      sendGangAllianceOfferOnline(sessionToken, gangProfile.name)
+        .then((result) => {
+          mergeServerUser(result.user, { gangs: result.gangs });
+          showExplicitNotice({
+            tone: "success",
+            title: "OFERTA SOJUSZU",
+            message: result?.result?.logMessage || `Oferta sojuszu poleciala do ${gangProfile.name}.`,
+            deltas: null,
+          });
+        })
+        .catch((error) => pushLog(error.message));
+      return;
+    }
+
     setGame((prev) => ({
       ...prev,
       online: {
@@ -5399,41 +5451,6 @@ function AppRuntime() {
     }));
   };
 
-  const buildClubPvpPayload = (gangProfile) => ({
-    attacker: {
-      attack: effectivePlayer.attack,
-      defense: effectivePlayer.defense,
-      dexterity: effectivePlayer.dexterity,
-      respect: game.player.respect,
-      heat: game.player.heat,
-      gangMembers: game.gang.members,
-      gangInfluence: game.gang.influence,
-      committedCrew: Math.max(1, Math.min(game.gang.members, 4)),
-      intelBonus: 0,
-    },
-    defender: {
-      ownerAttack: gangProfile?.respect ? Math.max(8, Math.round(gangProfile.respect * 0.32)) : 10,
-      ownerDefense: gangProfile?.respect ? Math.max(8, Math.round(gangProfile.respect * 0.28)) : 10,
-      ownerDexterity: gangProfile?.respect ? Math.max(7, Math.round(gangProfile.respect * 0.24)) : 9,
-      ownerRespect: gangProfile?.respect || 0,
-      ownerHeat: 18,
-      gangMembers: gangProfile?.members || 1,
-      gangInfluence: gangProfile?.influence || 0,
-      popularity: 35,
-      mood: 62,
-      recentTraffic: Math.max(2, Math.round((gangProfile?.members || 1) / 2)),
-      recentIncomingAttacks: 0,
-      recentIncomingFromSameAttacker: 0,
-      clubAgeHours: 96,
-      defenderShieldSeconds: 0,
-      clubCash: gangProfile?.vault || 0,
-      targetUnclaimedIncome: Math.max(1200, Math.round((gangProfile?.influence || 0) * 240)),
-      targetNetWorth: Math.max((gangProfile?.vault || 0) * 4, 20000),
-      clubSecurityLevel: Math.max(0, Math.round((gangProfile?.territory || 1) / 2)),
-      baseNet: Math.max(1800, Math.round((gangProfile?.influence || 0) * 320)),
-    },
-  });
-
   useEffect(() => {
     if (!hasOnlineAuthority || !selectedGangProfile || selectedGangProfile.self) {
       setGangRaidPreviewState((prev) =>
@@ -5452,7 +5469,7 @@ function AppRuntime() {
       preview: prev.gangName === gangName ? prev.preview : null,
     }));
 
-    previewClubPvpOnline(sessionToken, buildClubPvpPayload(selectedGangProfile))
+    previewGangPvpOnline(sessionToken, gangName)
       .then((preview) => {
         if (cancelled) return;
         setGangRaidPreviewState({
@@ -5475,27 +5492,25 @@ function AppRuntime() {
     };
   }, [hasOnlineAuthority, sessionToken, selectedGangProfile]);
 
-  // Online mode only shows backend preview here until final gang/club PvP resolution gets a real live route.
   const attackGangProfile = async (gangProfile) => {
     if (!gangProfile || gangProfile.self) return pushLog("Nie zaatakujesz wlasnego gangu z poziomu tej akcji.");
     if (!canDoStreetAction("Atak na gang odpalasz dopiero po wyjsciu z celi.")) return;
     if (hasOnlineAuthority) {
       try {
-        const preview = await previewClubPvpOnline(sessionToken, buildClubPvpPayload(gangProfile));
-        const previewLines = getGangRaidPreviewLines(preview);
+        const result = await executeGangPvpOnline(sessionToken, gangProfile.name);
+        mergeServerUser(result.user, { gangs: result.gangs, clubMarket: result.clubMarket });
         setGangRaidPreviewState({
           gangName: gangProfile.name,
           loading: false,
-          preview,
+          preview: result?.result?.preview || null,
         });
         showExplicitNotice({
-          tone: "warning",
-          title: "PODGLAD NAJAZDU",
-          message: previewLines.length
-            ? `${gangProfile.name}: ${previewLines.slice(0, 3).join(" ")} Pelny najazd online wchodzi w kolejnym etapie.`
-            : `${gangProfile.name}: backend policzyl ryzyko, ale ten ruch jest jeszcze tylko podgladem.`,
+          tone: result?.result?.success ? "success" : "warning",
+          title: result?.result?.success ? "NAJAZD SIEDZI" : "NAJAZD ODBITY",
+          message: result?.result?.logMessage || `Backend rozliczyl najazd na ${gangProfile.name}.`,
           deltas: null,
         });
+        refreshSocialState(sessionToken).catch(() => {});
       } catch (error) {
         pushLog(error.message);
       }
@@ -5507,16 +5522,6 @@ function AppRuntime() {
 
     let successChance;
     let previewLoss = null;
-    if (sessionToken && apiStatus === "online") {
-      try {
-        const preview = await previewClubPvpOnline(sessionToken, buildClubPvpPayload(gangProfile));
-        successChance = preview.raidChance?.chance;
-        previewLoss = preview.lossPreview || null;
-      } catch (error) {
-        pushLog(error.message);
-      }
-    }
-
     if (successChance == null) {
       const ownGangPower = game.gang.members * 7 + game.gang.influence * 6 + game.gang.territory * 11 + game.gang.gearScore * 1.3 + game.player.respect * 0.6;
       const enemyPower = gangProfile.members * 7 + gangProfile.influence * 6 + gangProfile.territory * 11 + gangProfile.respect * 1.8;
@@ -5826,7 +5831,7 @@ function AppRuntime() {
         cooldowns: {
           ...(prev.cooldowns || {}),
           playerAttackTargets: {
-            ...normalizePlayerAttackTargetCooldowns(prev.cooldowns?.playerAttackTargets),
+            ...normalizeTargetCooldownMap(prev.cooldowns?.playerAttackTargets),
             [player.id]: Date.now() + PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS,
           },
         },
@@ -5854,7 +5859,7 @@ function AppRuntime() {
         cooldowns: {
           ...(prev.cooldowns || {}),
           playerAttackTargets: {
-            ...normalizePlayerAttackTargetCooldowns(prev.cooldowns?.playerAttackTargets),
+            ...normalizeTargetCooldownMap(prev.cooldowns?.playerAttackTargets),
             [player.id]: Date.now() + PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS,
           },
         },
@@ -6600,8 +6605,12 @@ function AppRuntime() {
                 </Pressable>
               ) : null}
               {!selectedGangProfile.self ? (
-                <Pressable onPress={() => attackGangProfile(selectedGangProfile)} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>{hasOnlineAuthority ? "Podglad najazdu" : "Atak na gang"}</Text>
+                <Pressable
+                  onPress={() => attackGangProfile(selectedGangProfile)}
+                  disabled={selectedGangRaidBlocked}
+                  style={[styles.inlineButton, selectedGangRaidBlocked && styles.tileDisabled]}
+                >
+                  <Text style={styles.inlineButtonText}>Atak na gang</Text>
                 </Pressable>
               ) : null}
               {!selectedGangProfile.self ? (
@@ -6627,18 +6636,18 @@ function AppRuntime() {
               <View style={styles.listCard}>
                 <Text style={styles.listCardTitle}>Akcje wobec gangu</Text>
                 <Text style={styles.listCardMeta}>
-                  {hasOnlineAuthority ? "Online widzisz backendowy podglad ryzyka. Pelny najazd jeszcze nie rozstrzyga sie live." : "Szybkie akcje wobec ekipy."}
+                  {hasOnlineAuthority ? "Backend liczy tu ryzyko, oslony i wynik najazdu na zywo." : "Szybkie akcje wobec ekipy."}
                 </Text>
                 <StatLine label="Boss" value={selectedGangProfile.boss} />
                 <StatLine label="Vice Boss" value={selectedGangProfile.viceBoss} />
                 <StatLine label="Potencjal skladu" value={`${selectedGangProfile.members} ludzi | ${selectedGangProfile.influence} wplywu | ${selectedGangProfile.territory} dzielnice`} />
                 {!selectedGangProfile.self && hasOnlineAuthority ? (
                   <View style={styles.listCard}>
-                    <Text style={styles.listCardTitle}>Podglad najazdu</Text>
+                    <Text style={styles.listCardTitle}>Najazd na gang</Text>
                     <Text style={styles.listCardMeta}>
                       {gangRaidPreviewState.loading && gangRaidPreviewState.gangName === selectedGangProfile.name
                         ? "Backend liczy ryzyko i oslony celu..."
-                        : "To jest tylko preview. Finalny wynik najazdu online dojdzie w kolejnym etapie."}
+                        : "Szansa, oslony i stawka sa liczone live po stronie serwera."}
                     </Text>
                     {selectedGangRaidPreviewLines.map((line) => (
                       <Text key={`${selectedGangProfile.name}-${line}`} style={styles.listCardMeta}>

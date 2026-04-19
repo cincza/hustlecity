@@ -86,6 +86,22 @@ export async function previewClubPvpOnline(token, payload) {
   });
 }
 
+export async function previewGangPvpOnline(token, targetGangName) {
+  return request("/gang/pvp/preview", {
+    method: "POST",
+    token,
+    body: { targetGangName },
+  });
+}
+
+export async function executeGangPvpOnline(token, targetGangName) {
+  return request("/gang/pvp/attack", {
+    method: "POST",
+    token,
+    body: { targetGangName },
+  });
+}
+
 export async function fetchCasinoMeta(token) {
   return request("/casino/meta", { token });
 }
@@ -436,6 +452,13 @@ export async function claimClubOnline(token, venueId) {
   });
 }
 
+export async function foundClubOnline(token) {
+  return request("/clubs/found", {
+    method: "POST",
+    token,
+  });
+}
+
 export async function setClubPlanOnline(token, planId) {
   return request("/clubs/plan", {
     method: "POST",
@@ -506,6 +529,14 @@ export async function invitePlayerToGangOnline(token, targetUserId) {
     method: "POST",
     token,
     body: { targetUserId },
+  });
+}
+
+export async function sendGangAllianceOfferOnline(token, targetGangName) {
+  return request("/gang/alliance", {
+    method: "POST",
+    token,
+    body: { targetGangName },
   });
 }
 

@@ -95,6 +95,7 @@ import {
   applyClubActionDistrictOutcome,
   applyOperationDistrictOutcome,
   ensurePlayerCityState,
+  foundClubForPlayer,
   fortifyClubForPlayer,
   consumeClubStashDrugForPlayer,
   moveDrugToClubForPlayer,
@@ -117,6 +118,11 @@ import {
   updateGangSettingsForPlayer,
 } from "./services/gangProjectService.js";
 import { executeGangHeistForPlayer } from "./services/gangHeistService.js";
+import {
+  buildGangRaidPreview,
+  executeGangRaidForPlayers,
+  sendGangAllianceOfferForPlayers,
+} from "./services/gangPvpService.js";
 import {
   advanceOperationForPlayer,
   ensurePlayerOperationState,
@@ -429,6 +435,8 @@ function createInitialPlayerData(username = "gracz") {
       casinoActionUntil: 0,
       playerAttackUntil: 0,
       playerAttackTargets: {},
+      gangAttackUntil: 0,
+      gangAttackTargets: {},
     },
     timers: {
       energyUpdatedAt: now,
@@ -566,12 +574,21 @@ function ensurePlayerExtendedState(player) {
   }
   player.cooldowns.casinoActionUntil = Math.max(0, Number(player.cooldowns.casinoActionUntil || 0));
   player.cooldowns.playerAttackUntil = Math.max(0, Number(player.cooldowns.playerAttackUntil || 0));
+  player.cooldowns.gangAttackUntil = Math.max(0, Number(player.cooldowns.gangAttackUntil || 0));
   player.cooldowns.playerAttackTargets =
     player.cooldowns.playerAttackTargets && typeof player.cooldowns.playerAttackTargets === "object" && !Array.isArray(player.cooldowns.playerAttackTargets)
       ? Object.fromEntries(
           Object.entries(player.cooldowns.playerAttackTargets)
             .map(([targetUserId, until]) => [String(targetUserId || "").trim(), Math.max(0, Number(until || 0))])
             .filter(([targetUserId, until]) => targetUserId && until > Date.now())
+        )
+      : {};
+  player.cooldowns.gangAttackTargets =
+    player.cooldowns.gangAttackTargets && typeof player.cooldowns.gangAttackTargets === "object" && !Array.isArray(player.cooldowns.gangAttackTargets)
+      ? Object.fromEntries(
+          Object.entries(player.cooldowns.gangAttackTargets)
+            .map(([targetKey, until]) => [String(targetKey || "").trim().toLowerCase(), Math.max(0, Number(until || 0))])
+            .filter(([targetKey, until]) => targetKey && until > Date.now())
         )
       : {};
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile.bounty || 0)));
@@ -933,7 +950,7 @@ function buildClubVenueFromPlayer(player) {
     ownerLabel,
     districtId: club.districtId || resolveClubDistrictId({ club }),
     respect: Math.max(0, Math.floor(Number(player?.profile?.respect || 0))),
-    takeoverCost: ECONOMY_RULES.empire.clubTakeoverCost,
+    takeoverCost: Math.max(0, Math.floor(Number(club.takeoverCost || ECONOMY_RULES.empire.clubTakeoverCost))),
     popularity: club.popularity,
     mood: club.mood,
     policeBase: Math.max(club.policeBase, Math.round(Number(club.policePressure || 0) / 8)),
@@ -3243,6 +3260,19 @@ app.post("/clubs/claim", auth, asyncHandler(async (req, res) => {
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
+app.post("/clubs/found", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "clubs-found", async () => {
+    await commitPlayerMutation(req, "clubs-found", async (player) => {
+      result = foundClubForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
 app.post("/clubs/plan", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const planId = String(req.body?.planId || "").trim();
@@ -3545,6 +3575,212 @@ app.post("/gang/invite", auth, asyncHandler(async (req, res) => {
   });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result, target: targetSnapshot }));
+}));
+
+app.post("/gang/alliance", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const targetGangName = String(req.body?.targetGangName || "").trim();
+  if (!targetGangName) {
+    res.status(400).json({ error: "targetGangName is required" });
+    return;
+  }
+
+  const liveGangs = await buildGangDirectorySnapshot(now);
+  const actorGangName = String(req.player?.gang?.name || "").trim().toLowerCase();
+  const actorGang = liveGangs.find((entry) => entry.name.toLowerCase() === actorGangName) || null;
+  const targetGang = liveGangs.find((entry) => entry.name.toLowerCase() === targetGangName.toLowerCase()) || null;
+  const actorBossUserId = actorGang?.bossUserId || req.user.id;
+  const targetBossUserId = targetGang?.bossUserId || null;
+
+  let result = null;
+  await withUserMutationLocks([req.user.id, actorBossUserId, targetBossUserId].filter(Boolean), `gang-alliance:${targetGangName.toLowerCase()}`, async () => {
+    const actorRecord = await findUserById(req.user.id);
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    const gangsSnapshot = await buildGangDirectorySnapshot(now);
+    const refreshedActorGangName = String(actorRecord.playerData?.gang?.name || "").trim().toLowerCase();
+    const refreshedActorGang =
+      gangsSnapshot.find((entry) => entry.name.toLowerCase() === refreshedActorGangName) || null;
+    const refreshedTargetGang =
+      gangsSnapshot.find((entry) => entry.name.toLowerCase() === targetGangName.toLowerCase()) || null;
+    const actorBossRecord =
+      refreshedActorGang?.bossUserId && refreshedActorGang.bossUserId !== actorRecord._id
+        ? await findUserById(refreshedActorGang.bossUserId)
+        : actorRecord;
+    const targetBossRecord =
+      refreshedTargetGang?.bossUserId ? await findUserById(refreshedTargetGang.bossUserId) : null;
+
+    syncPlayerState(actorRecord.playerData, now);
+    if (actorBossRecord?.playerData && actorBossRecord._id !== actorRecord._id) {
+      syncPlayerState(actorBossRecord.playerData, now);
+    }
+    if (targetBossRecord?.playerData) {
+      syncPlayerState(targetBossRecord.playerData, now);
+    }
+
+    result = sendGangAllianceOfferForPlayers(
+      actorRecord.playerData,
+      actorBossRecord?.playerData || actorRecord.playerData,
+      targetBossRecord?.playerData || null,
+      refreshedTargetGang,
+      now
+    );
+    pushLog(actorRecord.playerData, result.logMessage);
+    if (targetBossRecord?.playerData) {
+      pushLog(targetBossRecord.playerData, `${actorRecord.playerData?.gang?.name || "Gang"} proponuje sojusz.`);
+    }
+
+    const persistedRecords = await Promise.all(
+      [
+        actorRecord,
+        actorBossRecord?._id && actorBossRecord._id !== actorRecord._id ? actorBossRecord : null,
+        targetBossRecord,
+      ]
+        .filter((userRecord) => userRecord?.playerData)
+        .map((userRecord) => persistPlayerForUser(userRecord._id, userRecord.playerData))
+    );
+
+    const updatedActorRecord =
+      persistedRecords.find((userRecord) => userRecord?._id === req.user.id) || actorRecord;
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actorRecord.playerData;
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/gang/pvp/preview", auth, asyncHandler(async (req, res) => {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "gang-pvp-preview",
+      BACKEND_RULES.rateLimitsMs.clubPvpPreview,
+      "Gang PvP preview rate limit active"
+    )
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  ensurePlayerGangState(req.player, now);
+  const targetGangName = String(req.body?.targetGangName || "").trim();
+  if (!targetGangName) {
+    res.status(400).json({ error: "targetGangName is required" });
+    return;
+  }
+
+  const gangs = await buildGangDirectorySnapshot(now);
+  const actorGangName = String(req.player?.gang?.name || "").trim().toLowerCase();
+  const attackerGang =
+    gangs.find((entry) => entry.name.toLowerCase() === actorGangName) || {
+      name: req.player?.gang?.name || "Gang",
+      members: Math.max(1, Number(req.player?.gang?.members || 1)),
+      influence: Math.max(0, Number(req.player?.gang?.influence || 0)),
+      territory: Math.max(0, Number(req.player?.gang?.territory || 0)),
+    };
+  const targetGang = gangs.find((entry) => entry.name.toLowerCase() === targetGangName.toLowerCase()) || null;
+  const targetBossRecord = targetGang?.bossUserId ? await findUserById(targetGang.bossUserId) : null;
+  if (targetBossRecord?.playerData) {
+    syncPlayerState(targetBossRecord.playerData, now);
+  }
+
+  const preview = buildGangRaidPreview(
+    req.player,
+    attackerGang,
+    targetGang,
+    targetBossRecord?.playerData || null,
+    now
+  );
+
+  res.json(preview);
+}));
+
+app.post("/gang/pvp/attack", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const targetGangName = String(req.body?.targetGangName || "").trim();
+  if (!targetGangName) {
+    res.status(400).json({ error: "targetGangName is required" });
+    return;
+  }
+
+  const liveGangs = await buildGangDirectorySnapshot(now);
+  const actorGangName = String(req.player?.gang?.name || "").trim().toLowerCase();
+  const actorGang = liveGangs.find((entry) => entry.name.toLowerCase() === actorGangName) || null;
+  const targetGang = liveGangs.find((entry) => entry.name.toLowerCase() === targetGangName.toLowerCase()) || null;
+  const actorBossUserId = actorGang?.bossUserId || req.user.id;
+  const targetBossUserId = targetGang?.bossUserId || null;
+
+  let result = null;
+  await withUserMutationLocks([req.user.id, actorBossUserId, targetBossUserId].filter(Boolean), `gang-pvp-attack:${targetGangName.toLowerCase()}`, async () => {
+    const actorRecord = await findUserById(req.user.id);
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    const gangsSnapshot = await buildGangDirectorySnapshot(now);
+    const refreshedActorGangName = String(actorRecord.playerData?.gang?.name || "").trim().toLowerCase();
+    const refreshedActorGang =
+      gangsSnapshot.find((entry) => entry.name.toLowerCase() === refreshedActorGangName) || null;
+    const refreshedTargetGang =
+      gangsSnapshot.find((entry) => entry.name.toLowerCase() === targetGangName.toLowerCase()) || null;
+    const actorBossRecord =
+      refreshedActorGang?.bossUserId && refreshedActorGang.bossUserId !== actorRecord._id
+        ? await findUserById(refreshedActorGang.bossUserId)
+        : actorRecord;
+    const targetBossRecord =
+      refreshedTargetGang?.bossUserId ? await findUserById(refreshedTargetGang.bossUserId) : null;
+
+    syncPlayerState(actorRecord.playerData, now);
+    if (actorBossRecord?.playerData && actorBossRecord._id !== actorRecord._id) {
+      syncPlayerState(actorBossRecord.playerData, now);
+    }
+    if (targetBossRecord?.playerData) {
+      syncPlayerState(targetBossRecord.playerData, now);
+    }
+
+    result = executeGangRaidForPlayers(
+      actorRecord.playerData,
+      actorBossRecord?.playerData || actorRecord.playerData,
+      targetBossRecord?.playerData || null,
+      refreshedActorGang,
+      refreshedTargetGang,
+      now
+    );
+    pushLog(actorRecord.playerData, result.logMessage);
+    if (targetBossRecord?.playerData) {
+      pushLog(
+        targetBossRecord.playerData,
+        result.success
+          ? `${actorRecord.playerData?.profile?.name || "Gracz"} dociska Twoj gang i wyrywa ${result.steal}$.`
+          : `${actorRecord.playerData?.profile?.name || "Gracz"} probuje wejsc na Twoj gang, ale odbija sie od obrony.`
+      );
+    }
+
+    const persistedRecords = await Promise.all(
+      [
+        actorRecord,
+        actorBossRecord?._id && actorBossRecord._id !== actorRecord._id ? actorBossRecord : null,
+        targetBossRecord,
+      ]
+        .filter((userRecord) => userRecord?.playerData)
+        .map((userRecord) => persistPlayerForUser(userRecord._id, userRecord.playerData))
+    );
+
+    const updatedActorRecord =
+      persistedRecords.find((userRecord) => userRecord?._id === req.user.id) || actorRecord;
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actorRecord.playerData;
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/settings", auth, asyncHandler(async (req, res) => {

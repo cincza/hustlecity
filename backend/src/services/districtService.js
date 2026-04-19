@@ -8,6 +8,7 @@ import {
   normalizeCityState,
   syncCityState,
 } from "../../../shared/districts.js";
+import { ECONOMY_RULES } from "../../../shared/economy.js";
 import {
   CLUB_MARKET,
   CLUB_SYSTEM_RULES,
@@ -334,6 +335,71 @@ export function claimClubVenueForPlayer(player, venueId, now = Date.now()) {
     venueId: venue.id,
     districtId: venue.districtId,
     logMessage: `${venue.name} wpada pod Twoje drzwi. Teraz ten lokal zaczyna pracowac na wplywy.`,
+  };
+}
+
+export function foundClubForPlayer(player, now = Date.now()) {
+  syncCityStateForPlayer(player, now);
+  if (player?.club?.owned) {
+    fail("Masz juz swoj lokal.");
+  }
+  if (!player?.gang?.joined) {
+    fail("Nowy lokal od zera stawia juz konkretna ekipa, nie solo typ.");
+  }
+  if (String(player?.gang?.role || "").trim() !== "Boss") {
+    fail("Nowy lokal moze postawic tylko boss gangu.", 403);
+  }
+  if (Number(player?.profile?.jailUntil || 0) > now) {
+    fail("Klubu nie zalozysz z celi.");
+  }
+  if (Number(player?.profile?.respect || 0) < 26) {
+    fail("Na zalozenie nowego klubu potrzebujesz minimum 26 szacunu.");
+  }
+
+  const foundingCost = Math.max(0, Math.floor(Number(ECONOMY_RULES.empire?.clubFoundingCashCost || 0)));
+  if (Number(player?.profile?.cash || 0) < foundingCost) {
+    fail(`Nowy klub od zera kosztuje ${foundingCost}$.`);
+  }
+
+  const district = findDistrictById(player?.gang?.focusDistrictId || player?.city?.focusDistrictId || DISTRICTS[0].id);
+  const gangName = String(player?.gang?.name || player?.profile?.name || "Nowy lokal").trim();
+  const clubId = `club-custom-${now}`;
+  const clubName = `${gangName} Social Club`;
+
+  player.profile.cash = Number(player.profile.cash || 0) - foundingCost;
+  player.club = {
+    ...player.club,
+    owned: true,
+    sourceId: clubId,
+    districtId: district.id,
+    visitId: clubId,
+    ownerLabel: player.profile?.name || "Gracz",
+    name: clubName,
+    respect: 26,
+    takeoverCost: foundingCost,
+    popularity: 18,
+    mood: 68,
+    policeBase: 13,
+    policePressure: 0,
+    traffic: 0,
+    nightPlanId: getClubNightPlan().id,
+    recentIncident: null,
+    note: `Nowy lokal postawiony od zera w ${district.name}. Wysoki koszt, wysoki potencjal i szybsza uwaga sluzb.`,
+    securityLevel: 0,
+    defenseReadiness: 46,
+    threatLevel: 8,
+    stash: {},
+    lastNightSummary: null,
+  };
+  player.city.focusDistrictId = district.id;
+  syncCityStateForPlayer(player, now);
+
+  return {
+    venueId: clubId,
+    districtId: district.id,
+    venueName: clubName,
+    foundingCost,
+    logMessage: `Stawiasz od zera ${clubName}. Lokal wpina sie pod ${district.name} i zaczyna grac pod Twoj gang.`,
   };
 }
 

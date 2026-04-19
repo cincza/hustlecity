@@ -31,21 +31,30 @@ export function getGangRaidPreviewLines(preview) {
 
   const chance = Number(preview.raidChance?.chance || 0);
   const cashLoss = Math.max(0, Math.floor(Number(preview.lossPreview?.cashLoss || 0)));
-  const heatLoss = Math.max(0, Math.floor(Number(preview.lossPreview?.heatGain || 0)));
   const sameTargetCooldownSeconds = Math.max(
     0,
     Math.floor(Number(preview.cooldowns?.sameTargetRepeatCooldownSeconds || 0))
   );
+  const attackerState = preview.attackerState && typeof preview.attackerState === "object" ? preview.attackerState : {};
   const protection = preview.raidChance?.protection || {};
 
-  const lines = [
-    `Szansa wejscia ok. ${Math.round(chance * 100)}%.`,
-    cashLoss > 0 ? `Przy sukcesie mozesz wyrwac do $${cashLoss}.` : "Cel ma niski zapas do wyrwania.",
-    heatLoss > 0 ? `Po akcji robi sie cieplej: +${heatLoss} heat.` : "Przypal po akcji jest niski.",
-  ];
+  const lines = [];
+
+  if (attackerState.reason) {
+    lines.push(attackerState.reason);
+  }
+
+  lines.push(`Szansa wejscia ok. ${Math.round(chance * 100)}%.`);
+  lines.push(cashLoss > 0 ? `Przy sukcesie mozesz wyrwac do $${cashLoss}.` : "Cel ma niski zapas do wyrwania.");
 
   if (sameTargetCooldownSeconds > 0) {
     lines.push(`Ten sam cel blokuje sie na ${Math.ceil(sameTargetCooldownSeconds / 60)} min.`);
+  }
+  if (Number(attackerState.globalCooldownRemainingSeconds || 0) > 0) {
+    lines.push(`Ekipa studzi sie jeszcze ${Math.ceil(Number(attackerState.globalCooldownRemainingSeconds || 0) / 60)} min.`);
+  }
+  if (Number(attackerState.sameTargetCooldownRemainingSeconds || 0) > 0) {
+    lines.push(`Na ten gang wracasz za ${Math.ceil(Number(attackerState.sameTargetCooldownRemainingSeconds || 0) / 60)} min.`);
   }
   if (protection?.starterShield) {
     lines.push("Cel siedzi jeszcze pod swieza ochrona startowa.");
