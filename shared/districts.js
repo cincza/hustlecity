@@ -49,6 +49,18 @@ export const DISTRICTS = [
   },
 ];
 
+const FACTORY_DISTRICT_MAP = {
+  smokeworks: "oldtown",
+  distillery: "oldtown",
+  wetlab: "neon",
+  greenhouse: "neon",
+  powderlab: "harbor",
+  poppyworks: "harbor",
+  cartelrefinery: "harbor",
+  acidlab: "harbor",
+  designerlab: "harbor",
+};
+
 export const DISTRICT_PRESSURE_STATES = [
   {
     id: "quiet",
@@ -98,6 +110,10 @@ export const DISTRICT_PRESSURE_STATES = [
 
 export function findDistrictById(districtId) {
   return DISTRICTS.find((district) => district.id === districtId) || DISTRICTS[0];
+}
+
+export function getFactoryDistrictId(factoryId) {
+  return findDistrictById(FACTORY_DISTRICT_MAP[String(factoryId || "").trim()] || DISTRICTS[0].id).id;
 }
 
 export function getDistrictPressureState(pressure = 0) {

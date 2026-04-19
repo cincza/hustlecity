@@ -407,6 +407,7 @@ export function createClubState(overrides = {}) {
     lastTrafficAt: 0,
     nightPlanId: getClubNightPlan().id,
     recentIncident: null,
+    lastNightSummary: null,
     note: null,
     lastRunAt: 0,
     securityLevel: 0,
@@ -482,6 +483,10 @@ export function normalizeClubState(value) {
     recentIncident:
       value.recentIncident && typeof value.recentIncident === "object" && !Array.isArray(value.recentIncident)
         ? JSON.parse(JSON.stringify(value.recentIncident))
+        : null,
+    lastNightSummary:
+      value.lastNightSummary && typeof value.lastNightSummary === "object" && !Array.isArray(value.lastNightSummary)
+        ? JSON.parse(JSON.stringify(value.lastNightSummary))
         : null,
     note: value.note ?? null,
     lastRunAt: Math.max(0, Math.floor(Number(value.lastRunAt || 0))),

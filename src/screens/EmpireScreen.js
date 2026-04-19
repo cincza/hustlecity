@@ -1,5 +1,12 @@
 import React from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+import { getFactoryDistrictId } from "../../shared/districts.js";
+import { getGangProjectEffects } from "../../shared/gangProjects.js";
+import {
+  getDistrictAlertText,
+  getDistrictEffectLines,
+  getDrugBatchEconomy,
+} from "../game/selectors/metaGameplay";
 
 export function EmpireScreen({
   section,
@@ -177,6 +184,20 @@ export function EmpireScreen({
   const guestClubStashDrugs = drugs.filter(
     (drug) => Number(currentClubVenue?.stash?.[drug.id] || 0) > 0
   );
+  const gangEffects = getGangProjectEffects(safeGame.gang);
+  const districtSummaryById = Object.fromEntries(
+    (Array.isArray(districtSummaries) ? districtSummaries : []).map((district) => [district.id, district])
+  );
+  const activeClubDistrictSummary =
+    currentClubVenue?.districtId && districtSummaryById[currentClubVenue.districtId]
+      ? districtSummaryById[currentClubVenue.districtId]
+      : focusDistrictSummary;
+  const activeClubDistrictLines = getDistrictEffectLines(activeClubDistrictSummary, {
+    focused: Boolean(activeClubDistrictSummary?.id && activeClubDistrictSummary.id === safeGame.gang?.focusDistrictId),
+    gangEffects,
+  });
+  const activeClubDistrictAlert = getDistrictAlertText(activeClubDistrictSummary);
+  const clubNightSummary = insideOwnClub ? safeGame.club?.lastNightSummary || null : null;
 
   const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
     <SectionCard title={title} subtitle={subtitle}>
@@ -447,6 +468,7 @@ export function EmpireScreen({
           {factories.map((factory) => {
             const owned = helpers.hasFactory(safeGame, factory.id);
             const factoryRisk = Math.max(...factory.unlocks.map((drugId) => helpers.getDrugPoliceProfile(drugs.find((entry) => entry.id === drugId)).risk));
+            const factoryDistrict = districtSummaryById[getFactoryDistrictId(factory.id)] || focusDistrictSummary;
             return (
               <View key={factory.id} style={[styles.listCard, safeGame.player.respect < factory.respect && styles.listCardLocked]}>
                 <View style={styles.listCardHeader}>
@@ -462,6 +484,9 @@ export function EmpireScreen({
                 <Text style={styles.listCardMeta}>
                   Odblokowuje: {factory.unlocks.map((drugId) => drugs.find((entry) => entry.id === drugId)?.name).join(", ")} | Presja glin: {Math.round(factoryRisk * 100)}%
                 </Text>
+                <Text style={styles.listCardMeta}>
+                  Dzielnica: {factoryDistrict?.name || "-"} | {factoryDistrict?.pressureLabel || "Spokojnie"} | Produkcja lapie heat {factoryDistrict?.pressureState ? `x${Number(factoryDistrict.pressureState.heistHeatMultiplier || 1).toFixed(2)}` : "x1.00"}
+                </Text>
                 <View style={styles.inlineRow}>
                   <Text style={styles.costLabel}>{owned ? "Zaklad stoi i pracuje." : safeGame.player.respect < factory.respect ? `Wymagany szacunek: ${factory.respect}` : `Koszt: ${formatMoney(factory.cost)}`}</Text>
                   <Pressable onPress={() => actions.buyFactory(factory)} style={[styles.inlineButton, (owned || safeGame.player.respect < factory.respect) && styles.tileDisabled]}>
@@ -476,6 +501,8 @@ export function EmpireScreen({
         <SectionCard title="Produkcja" subtitle="Kazdy mocniejszy towar daje lepsze staty, ale niesie wieksze ryzyko zgonu po spozyciu.">
           {drugs.map((drug) => {
             const policeProfile = helpers.getDrugPoliceProfile(drug);
+            const batchEconomy = getDrugBatchEconomy(drug, suppliers, helpers.getDealerPayoutForDrug);
+            const factoryDistrict = districtSummaryById[getFactoryDistrictId(drug.factoryId)] || focusDistrictSummary;
             return (
               <View key={drug.id} style={styles.listCard}>
                 <View style={styles.listCardHeader}>
@@ -493,7 +520,15 @@ export function EmpireScreen({
                 <Text style={styles.listCardMeta}>
                   Wymagane: {Object.entries(drug.supplies).map(([supplyId, amount]) => `${suppliers.find((entry) => entry.id === supplyId)?.name || supplyId} x${amount}`).join(" | ")}
                 </Text>
-                <Text style={styles.listCardMeta}>Ryzyko policji: {Math.round(policeProfile.risk * 100)}% | {policeProfile.label}</Text>
+                <Text style={styles.listCardMeta}>
+                  Batch kosztuje {formatMoney(batchEconomy.batchCost)} | Dealer odda {formatMoney(batchEconomy.dealerCashout)} | Marza {formatMoney(batchEconomy.dealerMargin)}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  Ryzyko policji: {Math.round(policeProfile.risk * 100)}% | {policeProfile.label} | {factoryDistrict?.name || "-"}: {factoryDistrict?.pressureLabel || "Spokojnie"}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  Klubowy potencjal: okolo {formatMoney(batchEconomy.estimatedClubGross)} z batcha. {batchEconomy.recommendation}
+                </Text>
                 <View style={styles.inlineRow}>
                   <Text style={styles.costLabel}>Wymagana fabryka: {factories.find((entry) => entry.id === drug.factoryId)?.name}</Text>
                   <Pressable onPress={() => actions.produceDrug(drug)} style={[styles.inlineButton, !helpers.hasFactory(safeGame, drug.factoryId) && styles.tileDisabled]}>
@@ -682,6 +717,22 @@ export function EmpireScreen({
               </View>
               <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text>
               <Text style={styles.listCardMeta}>{activeClubPlan?.summary}</Text>
+              {activeClubDistrictSummary ? (
+                <View style={styles.listCard}>
+                  <Text style={styles.listCardTitle}>{activeClubDistrictSummary.name}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {activeClubDistrictSummary.controlLabel} | {activeClubDistrictSummary.pressureLabel} | {activeClubDistrictSummary.bonusLabel}
+                  </Text>
+                  {activeClubDistrictLines.map((line) => (
+                    <Text key={`${activeClubDistrictSummary.id}-${line}`} style={styles.listCardMeta}>
+                      {line}
+                    </Text>
+                  ))}
+                  {activeClubDistrictAlert ? (
+                    <Text style={styles.listCardMeta}>{activeClubDistrictAlert}</Text>
+                  ) : null}
+                </View>
+              ) : null}
               {insideOwnClub ? (
                 <View style={styles.planChipRow}>
                   {clubNightPlans.map((plan) => {
@@ -796,12 +847,30 @@ export function EmpireScreen({
             </View>
 
             <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>Ostatni wynik</Text>
-              <Text style={styles.listCardMeta}>
-                {lastOutcome
-                  ? lastOutcome.logMessage
-                  : "Po pierwszej akcji zobaczysz tutaj konkret: tip, lead albo chwile spokoju."}
-              </Text>
+              <Text style={styles.listCardTitle}>{insideOwnClub ? "Ostatnia noc" : "Ostatni wynik"}</Text>
+              {insideOwnClub && clubNightSummary ? (
+                <>
+                  <Text style={styles.listCardMeta}>
+                    Zeszlo {clubNightSummary.soldUnits} szt. | {clubNightSummary.soldSummary || "Miks z sali"}
+                  </Text>
+                  <Text style={styles.listCardMeta}>
+                    Wpada {formatMoney(clubNightSummary.payout)} | Pressure +{Number(clubNightSummary.clubPressureGain || 0).toFixed(1)} | Wplyw +{Number(clubNightSummary.influenceGain || 0).toFixed(1)}
+                  </Text>
+                  <Text style={styles.listCardMeta}>
+                    {clubNightSummary.incidentTriggered
+                      ? `Incydent: ${clubNightSummary.incidentText || "Patrol przycial noc."}`
+                      : clubNightSummary.incidentText || "Noc zeszla bez grubego incydentu."}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.listCardMeta}>
+                  {lastOutcome
+                    ? lastOutcome.logMessage
+                    : insideOwnClub
+                      ? "Po pierwszej odpalonej nocy zobaczysz tutaj sprzedany towar, payout i pressure."
+                      : "Po pierwszej akcji zobaczysz tutaj konkret: tip, lead albo chwile spokoju."}
+                </Text>
+              )}
               <View style={styles.listActionsRow}>
                 {insideOwnClub ? (
                   <>
@@ -824,7 +893,7 @@ export function EmpireScreen({
               </View>
               {insideOwnClub ? (
                 <Text style={styles.listCardMeta}>
-                  Noc skaluje sie z ruchem i tym, co dzieje sie w lokalu.
+                  Noc liczy ruch, stash i temperature dzielnicy. Goraca okolica dusi lokal szybciej niz sama sala.
                 </Text>
               ) : (
                 <Text style={styles.listCardMeta}>
@@ -918,35 +987,6 @@ export function EmpireScreen({
             <Text style={styles.emptyText}>Nie masz teraz nic do dorzucenia na stash. Dowiez towar z fabryk albo ogarnij go poza ekranem klubu.</Text>
           )}
         </SectionCard>
-      ) : null}
-
-      {false ? (
-      <SectionCard title="Stash klubu" subtitle="Dorzuc towar z fabryk do klubu. Tu jest glowny loop z dragami.">
-        {!safeGame.club.owned ? (
-          <Text style={styles.emptyText}>Bez swojego lokalu nie masz gdzie wrzucac towaru.</Text>
-        ) : !insideOwnClub ? (
-          <View style={styles.lockedPanel}>
-            <Text style={styles.lockedPanelText}>Stash jest dostepny tylko, kiedy fizycznie siedzisz w swoim klubie.</Text>
-          </View>
-        ) : (
-          drugs.map((drug) => (
-            <View key={drug.id} style={styles.listCard}>
-              <View style={styles.inlineRow}>
-                <View style={styles.entityHead}>
-                  <EntityBadge visual={drugVisuals[drug.id]} />
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{drug.name}</Text>
-                    <Text style={styles.listCardMeta}>Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | W klubie: {safeGame.club.stash[drug.id] || 0}</Text>
-                  </View>
-                </View>
-                <Pressable onPress={() => actions.moveDrugToClub(drug)} style={[styles.inlineButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
-                  <Text style={styles.inlineButtonText}>Wrzuć do klubu</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))
-        )}
-      </SectionCard>
       ) : null}
     </>
   );

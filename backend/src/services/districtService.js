@@ -472,6 +472,8 @@ export function runClubNightForPlayer(player, now = Date.now()) {
   const district = getDistrictModifierSummary(player.city, resolveClubDistrictId(player, player.club.sourceId));
   const plan = getClubNightPlan(player.club.nightPlanId);
   const traffic = Math.max(0, Number(player.club.traffic || 0));
+  const previousClubPressure = Number(player.club.policePressure || 0);
+  const previousDistrictPressure = Number(district.pressure || 0);
   const totalUnits = DRUGS.reduce((sum, drug) => sum + Number(player.club?.stash?.[drug.id] || 0), 0);
   if (!totalUnits) {
     fail("Klub stoi pusty. Dorzuc najpierw towar na stash.");
@@ -635,10 +637,36 @@ export function runClubNightForPlayer(player, now = Date.now()) {
     now,
   });
   player.city = activity.city;
+  const districtPressureGain = Number(
+    (Number(activity?.district?.pressure || previousDistrictPressure) - previousDistrictPressure).toFixed(1)
+  );
+  const clubPressureGain = Number(
+    (Number(player.club.policePressure || 0) - previousClubPressure).toFixed(1)
+  );
 
   if (player?.gang?.joined && player.gang.focusDistrictId === district.id) {
     player.gang = incrementGangGoalProgress(player.gang, "clubActions", 1, now);
   }
+
+  player.club.lastNightSummary = {
+    venueId: player.club.sourceId,
+    venueName: player.club.name,
+    districtId: district.id,
+    districtName: district.name,
+    soldUnits,
+    soldByDrug,
+    soldSummary,
+    payout,
+    grossIncome,
+    incidentTriggered,
+    incidentLoss,
+    incidentText: player.club.recentIncident?.text || null,
+    clubPressureGain,
+    districtPressureGain,
+    influenceGain: Number(activity?.appliedInfluence || 0),
+    quietNight,
+    ranAt: now,
+  };
 
   syncCityStateForPlayer(player, now);
 
@@ -646,6 +674,10 @@ export function runClubNightForPlayer(player, now = Date.now()) {
     payout,
     soldUnits,
     soldSummary,
+    clubPressureGain,
+    districtPressureGain,
+    incidentTriggered,
+    incidentLoss,
     districtId: district.id,
     logMessage: incidentTriggered
       ? `Noc klubu domknieta na ${payout}$. Patrol przycial ${incidentLoss}$. Poszlo: ${soldSummary || "skromny miks"}.`

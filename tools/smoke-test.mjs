@@ -397,6 +397,73 @@ async function main() {
       throw new Error("Projekt gangu nie wskoczyl na pierwszy poziom.");
     }
 
+    const casinoMeta = await request("/casino/meta", { token });
+    if (!casinoMeta?.limits?.slot || !casinoMeta?.limits?.highRisk) {
+      throw new Error("Kasyno nie zwrocilo limitow backendowych.");
+    }
+
+    const slotBet = Math.max(100, Number(casinoMeta?.limits?.slot?.minBet || 100));
+    const slotSpin = await request("/casino/slot", {
+      method: "POST",
+      token,
+      body: { bet: slotBet },
+    });
+
+    if (!slotSpin?.outcome?.id || !slotSpin?.user?.profile) {
+      throw new Error("Slot online nie zwrocil kompletnego wyniku backendowego.");
+    }
+    if (!Number.isFinite(Number(slotSpin?.net))) {
+      throw new Error("Slot online nie zwrocil netto rozliczenia.");
+    }
+
+    await delay(1000);
+
+    const clubPvpPreview = await request("/club-pvp/preview", {
+      method: "POST",
+      token,
+      body: {
+        attacker: {
+          attack: 34,
+          defense: 28,
+          dexterity: 30,
+          respect: 30,
+          heat: 12,
+          gangMembers: 3,
+          gangInfluence: 8,
+          committedCrew: 3,
+          intelBonus: 0,
+        },
+        defender: {
+          ownerAttack: 26,
+          ownerDefense: 24,
+          ownerDexterity: 22,
+          ownerRespect: 28,
+          ownerHeat: 18,
+          gangMembers: 4,
+          gangInfluence: 10,
+          popularity: 42,
+          mood: 60,
+          recentTraffic: 5,
+          recentIncomingAttacks: 0,
+          recentIncomingFromSameAttacker: 0,
+          clubAgeHours: 96,
+          defenderShieldSeconds: 0,
+          clubCash: 24000,
+          targetUnclaimedIncome: 4800,
+          targetNetWorth: 90000,
+          clubSecurityLevel: 2,
+          baseNet: 5400,
+        },
+      },
+    });
+
+    if (!Number.isFinite(Number(clubPvpPreview?.raidChance?.chance))) {
+      throw new Error("Club PvP preview nie zwrocil szansy najazdu.");
+    }
+    if (Number(clubPvpPreview?.cooldowns?.sameTargetRepeatCooldownSeconds || 0) <= 0) {
+      throw new Error("Club PvP preview nie zwrocil cooldownu celu.");
+    }
+
     const boughtBusiness = await request("/businesses/buy", {
       method: "POST",
       token,
@@ -475,6 +542,9 @@ async function main() {
     }
     if (Number(producedDrug?.user?.drugInventory?.smokes || 0) <= 0) {
       throw new Error("Produkcja nie dodala towaru do magazynu.");
+    }
+    if (!producedDrug?.result?.districtId) {
+      throw new Error("Produkcja nie zwrocila dzielnicy fabryki.");
     }
     if (Number(producedDrug?.user?.stats?.drugBatches || 0) < 1) {
       throw new Error("Produkcja nie podniosla statystyki drugBatches.");
@@ -929,6 +999,9 @@ async function main() {
 
     if (!Number.isFinite(clubNight?.result?.payout) || clubNight.result.payout <= 0) {
       throw new Error("Run night klubu nie zwrocil dodatniego payoutu.");
+    }
+    if (!clubNight?.user?.club?.lastNightSummary || Number(clubNight.user.club.lastNightSummary.payout || 0) <= 0) {
+      throw new Error("Run night klubu nie zapisuje czytelnego podsumowania nocy.");
     }
 
     const districtsAfterClub = await request("/districts", { token });

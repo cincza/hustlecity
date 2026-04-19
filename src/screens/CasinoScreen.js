@@ -2,6 +2,11 @@ import React, { useMemo, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, Text, TextInput, View } from "react-native";
 
+function sanitizeCasinoBetInput(value, maxBet) {
+  const safeDigits = Math.max(1, String(Math.max(0, Math.floor(Number(maxBet || 0)))).length);
+  return value.replace(/[^0-9]/g, "").slice(0, safeDigits) || "0";
+}
+
 export function CasinoScreen({
   apiStatus,
   casinoState,
@@ -15,6 +20,7 @@ export function CasinoScreen({
   sceneBackgrounds,
   systemVisuals,
   formatMoney,
+  formatCooldown,
   handValue,
   setCasinoState,
   spinRoulette,
@@ -24,7 +30,6 @@ export function CasinoScreen({
   standBlackjack,
 }) {
   const [casinoView, setCasinoView] = useState("blackjack");
-  // TODO: TO_MIGRATE_TO_SERVER casino presentation is modularized, but blackjack/roulette local fallback actions still come from App.js.
   const safeRouletteHistory = Array.isArray(casinoState?.rouletteHistory) ? casinoState.rouletteHistory : [];
   const safeBackendMeta = casinoState?.backendMeta || null;
   const safeBlackjack = {
@@ -46,6 +51,9 @@ export function CasinoScreen({
   const slotResult = casinoState?.slotResult ?? null;
   const serverGame = casinoState?.serverGame ?? null;
   const slotLimits = safeBackendMeta?.limits?.slot || null;
+  const highRiskLimits = safeBackendMeta?.limits?.highRisk || null;
+  const blackjackLimits = safeBackendMeta?.limits?.blackjack || null;
+  const casinoCooldownRemainingMs = Math.max(0, Math.round(Number(safeBackendMeta?.cooldownRemainingSeconds || 0) * 1000));
   const slotSymbols = useMemo(() => ({
     MASK: { icon: "mask", color: "#e7cf95", label: "Maska" },
     CASH: { icon: "cash-multiple", color: "#f0cf75", label: "Kasa" },
@@ -118,6 +126,15 @@ export function CasinoScreen({
               value="Blackjack online zapisuje sie na backendzie"
               visual={systemVisuals.casino}
             />
+            {blackjackLimits ? (
+              <StatLine
+                label="Stawka"
+                value={`${formatMoney(blackjackLimits.minBet || 0)} - ${formatMoney(blackjackLimits.maxBet || 0)}`}
+              />
+            ) : null}
+            {casinoCooldownRemainingMs > 0 ? (
+              <StatLine label="Stol stygnie" value={formatCooldown(casinoCooldownRemainingMs)} />
+            ) : null}
           </View>
         ) : null}
         <View style={styles.listCard}>
@@ -161,7 +178,15 @@ export function CasinoScreen({
             <Text style={styles.betPanelLabel}>Stawka</Text>
             <TextInput
               value={safeBlackjack.bet}
-              onChangeText={(value) => setCasinoState((prev) => ({ ...prev, blackjack: { ...prev.blackjack, bet: value.replace(/[^0-9]/g, "").slice(0, 5) || "0" } }))}
+              onChangeText={(value) =>
+                setCasinoState((prev) => ({
+                  ...prev,
+                  blackjack: {
+                    ...prev.blackjack,
+                    bet: sanitizeCasinoBetInput(value, blackjackLimits?.maxBet || 500000),
+                  },
+                }))
+              }
               keyboardType="numeric"
               style={styles.betInput}
             />
@@ -171,7 +196,7 @@ export function CasinoScreen({
             subtitle={`Wejscie: ${formatMoney(Number(safeBlackjack.bet || 0))}.`}
             visual={systemVisuals.casino}
             onPress={startBlackjack}
-            disabled={["dealing", "player", "dealer"].includes(safeBlackjack.stage)}
+            disabled={["dealing", "player", "dealer"].includes(safeBlackjack.stage) || casinoCooldownRemainingMs > 0}
           />
           <ActionTile title="Dobierz" subtitle="Bierzesz karte." visual={systemVisuals.attack} onPress={hitBlackjack} disabled={safeBlackjack.stage !== "player"} />
           <ActionTile title="Pas" subtitle="Krupier gra dalej." visual={systemVisuals.defense} onPress={standBlackjack} disabled={safeBlackjack.stage !== "player"} />
@@ -196,6 +221,9 @@ export function CasinoScreen({
               visual={systemVisuals.casino}
             />
             <StatLine label="RTP preview" value={`${Math.round((safeBackendMeta?.rtp?.slot || 0) * 100)}%`} />
+            {casinoCooldownRemainingMs > 0 ? (
+              <StatLine label="Kolejny spin za" value={formatCooldown(casinoCooldownRemainingMs)} />
+            ) : null}
           </View>
         ) : null}
         <View style={[styles.listCard, { borderColor: "#4f3820", backgroundColor: "#0f0d0a" }]}>
@@ -228,13 +256,22 @@ export function CasinoScreen({
         <View style={styles.choiceRow}>
           <TextInput
             value={slotBet}
-            onChangeText={(value) => setCasinoState((prev) => ({ ...prev, slotBet: value.replace(/[^0-9]/g, "").slice(0, 5) || "0" }))}
+            onChangeText={(value) =>
+              setCasinoState((prev) => ({
+                ...prev,
+                slotBet: sanitizeCasinoBetInput(value, slotLimits?.maxBet || 50000),
+              }))
+            }
             keyboardType="numeric"
             style={styles.betInput}
           />
-          <Pressable onPress={spinSlot} style={[styles.inlineButton, slotSpinning && styles.tileDisabled]}>
+          <Pressable
+            onPress={spinSlot}
+            disabled={slotSpinning || casinoCooldownRemainingMs > 0}
+            style={[styles.inlineButton, (slotSpinning || casinoCooldownRemainingMs > 0) && styles.tileDisabled]}
+          >
             <Text style={styles.inlineButtonText}>
-              {slotSpinning ? "Kreci..." : `Spin ${formatMoney(Number(slotBet || 0))}`}
+              {slotSpinning ? "Kreci..." : casinoCooldownRemainingMs > 0 ? `Wroc za ${formatCooldown(casinoCooldownRemainingMs)}` : `Spin ${formatMoney(Number(slotBet || 0))}`}
             </Text>
           </Pressable>
         </View>
@@ -283,6 +320,9 @@ export function CasinoScreen({
               label="Stawka high-risk"
               value={`${formatMoney(safeBackendMeta.limits?.highRisk?.minBet || 0)} - ${formatMoney(safeBackendMeta.limits?.highRisk?.maxBet || 0)}`}
             />
+            {casinoCooldownRemainingMs > 0 ? (
+              <StatLine label="Kolejny spin za" value={formatCooldown(casinoCooldownRemainingMs)} />
+            ) : null}
           </View>
         ) : null}
         <View style={styles.casinoHero}>
@@ -309,12 +349,23 @@ export function CasinoScreen({
           ))}
           <TextInput
             value={rouletteBet}
-            onChangeText={(value) => setCasinoState((prev) => ({ ...prev, rouletteBet: value.replace(/[^0-9]/g, "").slice(0, 5) || "0" }))}
+            onChangeText={(value) =>
+              setCasinoState((prev) => ({
+                ...prev,
+                rouletteBet: sanitizeCasinoBetInput(value, highRiskLimits?.maxBet || 15000),
+              }))
+            }
             keyboardType="numeric"
             style={styles.betInput}
           />
-          <Pressable onPress={spinRoulette} style={[styles.inlineButton, rouletteSpinning && styles.tileDisabled]}>
-            <Text style={styles.inlineButtonText}>Spin {formatMoney(Number(rouletteBet || 0))}</Text>
+          <Pressable
+            onPress={spinRoulette}
+            disabled={rouletteSpinning || casinoCooldownRemainingMs > 0}
+            style={[styles.inlineButton, (rouletteSpinning || casinoCooldownRemainingMs > 0) && styles.tileDisabled]}
+          >
+            <Text style={styles.inlineButtonText}>
+              {casinoCooldownRemainingMs > 0 ? `Wroc za ${formatCooldown(casinoCooldownRemainingMs)}` : `Spin ${formatMoney(Number(rouletteBet || 0))}`}
+            </Text>
           </Pressable>
         </View>
         <View style={styles.historyRow}>

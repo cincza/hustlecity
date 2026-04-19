@@ -127,6 +127,8 @@ import { blockIfOnlineAlpha } from "./src/game/authority";
 import { getGameMode } from "./src/game/modes";
 import { getNextHeistTier } from "./src/game/config/heistTiers";
 import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradePreview, getBusinessUpgradeState } from "./src/game/selectors/businessSelectors";
+import { getCasinoGameConfig, getGangRaidPreviewLines } from "./src/game/selectors/authorityFeedback";
+import { getDistrictEffectLines, getGangEffectLines, getGangProjectLevelLine } from "./src/game/selectors/metaGameplay";
 import {
   FACTORIES,
   SUPPLIERS,
@@ -1650,6 +1652,11 @@ function AppRuntime() {
   const didHydrateSessionRef = useRef(false);
   const [gangProfileView, setGangProfileView] = useState("actions");
   const [casinoState, setCasinoState] = useState(createInitialCasinoState);
+  const [gangRaidPreviewState, setGangRaidPreviewState] = useState({
+    gangName: "",
+    loading: false,
+    preview: null,
+  });
   const { width } = useWindowDimensions();
   const isCompact = width < 1080;
   const isPhone = width < 760;
@@ -1710,6 +1717,14 @@ function AppRuntime() {
     if (!game.online?.selectedGangId) return null;
     return getGangProfileByName(game, game.online.selectedGangId);
   }, [game]);
+  const selectedGangRaidPreview =
+    selectedGangProfile?.name && gangRaidPreviewState.gangName === selectedGangProfile.name
+      ? gangRaidPreviewState.preview
+      : null;
+  const selectedGangRaidPreviewLines = useMemo(
+    () => getGangRaidPreviewLines(selectedGangRaidPreview),
+    [selectedGangRaidPreview]
+  );
   const gangInviteTargets = useMemo(
     () =>
       (game.online?.roster || []).filter(
@@ -1768,6 +1783,14 @@ function AppRuntime() {
   );
   const gangGoalProgress = useMemo(() => getGangWeeklyProgress(game.gang), [game.gang]);
   const gangProjectEffects = useMemo(() => getGangProjectEffects(game.gang), [game.gang]);
+  const focusDistrictEffectLines = useMemo(
+    () => getDistrictEffectLines(focusDistrictSummary, { focused: true, gangEffects: gangProjectEffects }),
+    [focusDistrictSummary, gangProjectEffects]
+  );
+  const gangEffectLines = useMemo(
+    () => getGangEffectLines(gangProjectEffects, focusDistrictSummary),
+    [gangProjectEffects, focusDistrictSummary]
+  );
   const adminState = useMemo(
     () => normalizeAdminState({
       isAdmin: game.player.isAdmin,
@@ -1776,6 +1799,7 @@ function AppRuntime() {
     }),
     [game.player.isAdmin, game.player.adminGrantPresets, game.player.adminRespectPresets]
   );
+  const hasOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
 
   const mergeServerUser = (serverUser, marketPayload) => {
     const safeProfile = serverUser?.profile;
@@ -3269,7 +3293,7 @@ function AppRuntime() {
     const nextPlan = getClubNightPlan(planId);
     if (game.club.nightPlanId === nextPlan.id) return;
 
-      if (sessionToken) {
+      if (hasOnlineAuthority) {
         setClubPlanOnline(sessionToken, nextPlan.id)
           .then((result) => {
             mergeServerUser(result.user, { clubMarket: result.clubMarket });
@@ -3997,7 +4021,7 @@ function AppRuntime() {
     if (game.club.owned) return pushLog("Klub juz jest Twoj.");
     if (!listing) return pushLog("Wybierz lokal z listy klubow.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await claimClubOnline(sessionToken, listing.id);
         mergeServerUser(result.user, { clubMarket: result.clubMarket });
@@ -4245,7 +4269,7 @@ function AppRuntime() {
     if (!insideOwnClub) return pushLog("Musisz siedziec we wlasnym klubie, zeby odpalic noc i pilnowac stolow.");
     if (clubNightRemaining > 0) return pushLog(`Klub juz pracuje. Wroc za ${formatCooldown(clubNightRemaining)}.`);
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       runClubNightOnline(sessionToken)
         .then((result) => {
           mergeServerUser(result.user, { clubMarket: result.clubMarket });
@@ -4440,7 +4464,7 @@ function AppRuntime() {
     if (!game.club.owned) return pushLog("Najpierw musisz miec swoj lokal.");
     if (!insideOwnClub) return pushLog("Zabezpieczenie lokalu ustawiasz tylko bedac u siebie.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await fortifyClubOnline(sessionToken);
         mergeServerUser(result.user, { clubMarket: result.clubMarket });
@@ -4552,7 +4576,7 @@ function AppRuntime() {
   // pricing and inventory mutation must stay server-authoritative.
   const buyProduct = async (product) => {
     if (!canDoStreetAction()) return;
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await buyProductOnline(sessionToken, product.id, 1);
         mergeServerUser(result.user, result.market);
@@ -4578,7 +4602,7 @@ function AppRuntime() {
   // must be resolved only by backend.
   const sellProduct = async (product) => {
     if (!canDoStreetAction()) return;
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await sellProductOnline(sessionToken, product.id, 1);
         mergeServerUser(result.user, result.market);
@@ -4665,7 +4689,7 @@ function AppRuntime() {
     if (!amount || amount <= 0) return pushLog("Wpisz kwote do zasilenia skarbca.");
     if (game.player.cash < amount) return pushLog(`Brakuje ${formatMoney(amount)} w gotowce.`);
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       contributeGangOnline(sessionToken, amount)
         .then((result) => {
           mergeServerUser(result.user, result);
@@ -4693,7 +4717,7 @@ function AppRuntime() {
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     const district = findDistrictById(districtId);
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await setGangFocusOnline(sessionToken, district.id);
         mergeServerUser(result.user, result);
@@ -4717,7 +4741,7 @@ function AppRuntime() {
     if (!project) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await investGangProjectOnline(sessionToken, project.id);
         mergeServerUser(result.user, result);
@@ -4748,7 +4772,7 @@ function AppRuntime() {
 
   const claimGangGoal = async () => {
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
         const result = await claimGangGoalOnline(sessionToken);
         mergeServerUser(result.user, result);
@@ -4876,7 +4900,7 @@ function AppRuntime() {
     const cleanName = gangDraftName.trim();
     if (cleanName.length < 3) return pushLog("Nazwa gangu jest za krotka.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       createGangOnline(sessionToken, cleanName)
         .then((result) => {
           mergeServerUser(result.user, result);
@@ -4920,7 +4944,7 @@ function AppRuntime() {
     if (!invite) return;
     if (game.player.respect < invite.inviteRespectMin) return pushLog(`Ten gang bierze od ${invite.inviteRespectMin} szacunu.`);
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       joinGangOnline(sessionToken, invite)
         .then((result) => {
           mergeServerUser(result.user, result);
@@ -4963,7 +4987,7 @@ function AppRuntime() {
   const leaveGang = () => {
     if (!game.gang.joined) return pushLog("Nie jestes w zadnym gangu.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       leaveGangOnline(sessionToken)
         .then((result) => {
           mergeServerUser(result.user, result);
@@ -5115,20 +5139,16 @@ function AppRuntime() {
     );
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - local bank fallback should be deleted before alpha; all
-  // transfers, fees and balance validation must be backend-only.
+  // Offline demo keeps a tiny fallback, but online always delegates transfer validation to backend.
   const depositCash = async () => {
     const parsed = Number.parseInt(bankAmountDraft.replace(/[^\d]/g, ""), 10);
     if (!parsed || parsed <= 0) return pushLog("Wpisz sensowna kwote do wplaty.");
-    const amount = Math.min(parsed, Math.max(0, game.player.cash));
-    if (!amount) return pushLog("Nie masz gotowki do wplaty.");
-    if (parsed > game.player.cash) return pushLog("Nie masz tyle gotowki przy sobie.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
-        const result = await depositOnline(sessionToken, amount);
+        const result = await depositOnline(sessionToken, parsed);
         mergeServerUser(result.user);
-        setBankAmountDraft(String(amount));
+        setBankAmountDraft(String(parsed));
         return;
       } catch (error) {
         pushLog(error.message);
@@ -5136,25 +5156,23 @@ function AppRuntime() {
       }
     }
 
+    const amount = Math.min(parsed, Math.max(0, game.player.cash));
+    if (!amount) return pushLog("Nie masz gotowki do wplaty.");
+    if (parsed > game.player.cash) return pushLog("Nie masz tyle gotowki przy sobie.");
     updateLocalPlayer({ cash: game.player.cash - amount, bank: (game.player.bank || 0) + amount }, `Wplacono do banku ${formatMoney(amount)}.`);
     setBankAmountDraft(String(amount));
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - local bank fallback should be deleted before alpha; all
-  // withdrawals, fees and balance validation must be backend-only.
+  // Offline demo keeps a tiny fallback, but online always delegates withdrawal validation to backend.
   const withdrawCash = async () => {
-    const bankBalance = game.player.bank || 0;
     const parsed = Number.parseInt(bankAmountDraft.replace(/[^\d]/g, ""), 10);
     if (!parsed || parsed <= 0) return pushLog("Wpisz sensowna kwote do wyplaty.");
-    const amount = Math.min(parsed, Math.max(0, bankBalance));
-    if (!amount) return pushLog("Nie masz nic w banku.");
-    if (parsed > bankBalance) return pushLog("Nie masz tyle siana na koncie.");
 
-    if (sessionToken) {
+    if (hasOnlineAuthority) {
       try {
-        const result = await withdrawOnline(sessionToken, amount);
+        const result = await withdrawOnline(sessionToken, parsed);
         mergeServerUser(result.user);
-        setBankAmountDraft(String(amount));
+        setBankAmountDraft(String(parsed));
         return;
       } catch (error) {
         pushLog(error.message);
@@ -5162,6 +5180,10 @@ function AppRuntime() {
       }
     }
 
+    const bankBalance = game.player.bank || 0;
+    const amount = Math.min(parsed, Math.max(0, bankBalance));
+    if (!amount) return pushLog("Nie masz nic w banku.");
+    if (parsed > bankBalance) return pushLog("Nie masz tyle siana na koncie.");
     updateLocalPlayer({ cash: game.player.cash + amount, bank: Math.max(0, (game.player.bank || 0) - amount) }, `Wyplacono z banku ${formatMoney(amount)}.`);
     setBankAmountDraft(String(amount));
   };
@@ -5319,11 +5341,73 @@ function AppRuntime() {
     },
   });
 
-  // TODO: TO_MIGRATE_TO_SERVER - gang/club PvP chance, protection windows, grief locks,
-  // loss caps and cooldown enforcement must be computed server-side before live multiplayer.
+  useEffect(() => {
+    if (!hasOnlineAuthority || !selectedGangProfile || selectedGangProfile.self) {
+      setGangRaidPreviewState((prev) =>
+        prev.gangName || prev.loading || prev.preview
+          ? { gangName: "", loading: false, preview: null }
+          : prev
+      );
+      return;
+    }
+
+    let cancelled = false;
+    const gangName = selectedGangProfile.name;
+    setGangRaidPreviewState((prev) => ({
+      gangName,
+      loading: true,
+      preview: prev.gangName === gangName ? prev.preview : null,
+    }));
+
+    previewClubPvpOnline(sessionToken, buildClubPvpPayload(selectedGangProfile))
+      .then((preview) => {
+        if (cancelled) return;
+        setGangRaidPreviewState({
+          gangName,
+          loading: false,
+          preview,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGangRaidPreviewState({
+          gangName,
+          loading: false,
+          preview: null,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasOnlineAuthority, sessionToken, selectedGangProfile]);
+
+  // Online mode only shows backend preview here until final gang/club PvP resolution gets a real live route.
   const attackGangProfile = async (gangProfile) => {
     if (!gangProfile || gangProfile.self) return pushLog("Nie zaatakujesz wlasnego gangu z poziomu tej akcji.");
     if (!canDoStreetAction("Atak na gang odpalasz dopiero po wyjsciu z celi.")) return;
+    if (hasOnlineAuthority) {
+      try {
+        const preview = await previewClubPvpOnline(sessionToken, buildClubPvpPayload(gangProfile));
+        const previewLines = getGangRaidPreviewLines(preview);
+        setGangRaidPreviewState({
+          gangName: gangProfile.name,
+          loading: false,
+          preview,
+        });
+        showExplicitNotice({
+          tone: "warning",
+          title: "PODGLAD NAJAZDU",
+          message: previewLines.length
+            ? `${gangProfile.name}: ${previewLines.slice(0, 3).join(" ")} Pelny najazd online wchodzi w kolejnym etapie.`
+            : `${gangProfile.name}: backend policzyl ryzyko, ale ten ruch jest jeszcze tylko podgladem.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Finalny wynik PvP")) return;
     if (!game.gang.joined) return pushLog("Na gang idzie sie ze swoja ekipa, nie solo.");
     if (game.player.energy < 3) return pushLog("Potrzebujesz 3 energii na akcje przeciw gangowi.");
@@ -5761,15 +5845,23 @@ function AppRuntime() {
   const spinSlot = async () => {
     if (!canDoStreetAction("Kasyno nie wpuszcza ludzi w kajdankach.")) return;
     if (casinoState.slotSpinning) return;
+    const slotConfig = getCasinoGameConfig(casinoState.backendMeta, "slot", {
+      minBet: 100,
+      maxBet: 50000,
+    });
     const bet = Number(casinoState.slotBet || 0);
-    if (bet < 100) return pushLog("Minimalna stawka slota to $100.");
-    if (bet > 50000) {
-      setCasinoState((prev) => ({ ...prev, slotBet: "50000" }));
-      return pushLog("Na ten automat max stawka to $50tys.");
-    }
-    if (game.player.cash < bet) return pushLog(`Potrzebujesz ${formatMoney(bet)} na spin automatu.`);
 
-    if (sessionToken && apiStatus === "online") {
+    if (hasOnlineAuthority) {
+      if (slotConfig.cooldownRemainingMs > 0) {
+        return pushLog(`Kasyno studzi stol. Wroc za ${formatCooldown(slotConfig.cooldownRemainingMs)}.`);
+      }
+      if (slotConfig.hasServerLimits && bet < slotConfig.minBet) {
+        return pushLog(`Minimalna stawka slota to ${formatMoney(slotConfig.minBet)}.`);
+      }
+      if (slotConfig.hasServerLimits && bet > slotConfig.maxBet) {
+        setCasinoState((prev) => ({ ...prev, slotBet: String(slotConfig.maxBet) }));
+        return pushLog(`Na ten automat max stawka to ${formatMoney(slotConfig.maxBet)}.`);
+      }
       setCasinoState((prev) => ({
         ...prev,
         slotSpinning: true,
@@ -5812,6 +5904,13 @@ function AppRuntime() {
         return;
       }
     }
+
+    if (bet < slotConfig.minBet) return pushLog(`Minimalna stawka slota to ${formatMoney(slotConfig.minBet)}.`);
+    if (bet > slotConfig.maxBet) {
+      setCasinoState((prev) => ({ ...prev, slotBet: String(slotConfig.maxBet) }));
+      return pushLog(`Na ten automat max stawka to ${formatMoney(slotConfig.maxBet)}.`);
+    }
+    if (game.player.cash < bet) return pushLog(`Potrzebujesz ${formatMoney(bet)} na spin automatu.`);
 
     updateLocalPlayer({ cash: game.player.cash - bet }, `Wrzucasz ${formatMoney(bet)} do automatu.`);
     setCasinoState((prev) => ({
@@ -5880,20 +5979,27 @@ function AppRuntime() {
     });
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - roulette still has an offline fallback path below.
-  // Online mode already delegates stake validation, cooldowns, RNG and rewards to backend high-risk bet rules.
+  // Online mode delegates high-risk bet rules to backend; offline demo keeps the local fallback below.
   const spinRoulette = async () => {
     if (!canDoStreetAction("Kasyno nie wpuszcza ludzi w kajdankach.")) return;
     if (casinoState.rouletteSpinning) return;
+    const highRiskConfig = getCasinoGameConfig(casinoState.backendMeta, "highRisk", {
+      minBet: 50,
+      maxBet: 15000,
+    });
     const bet = Number(casinoState.rouletteBet || 0);
-    if (bet > 15000) {
-      setCasinoState((prev) => ({ ...prev, rouletteBet: "15000" }));
-      return pushLog("Na ten stol max stawka to $15tys.");
-    }
-    if (bet < 50) return pushLog("Minimalna stawka ruletki to $50.");
-    if (game.player.cash < bet) return pushLog(`Potrzebujesz ${formatMoney(bet)} na wejscie do ruletki.`);
 
-    if (sessionToken && apiStatus === "online") {
+    if (hasOnlineAuthority) {
+      if (highRiskConfig.cooldownRemainingMs > 0) {
+        return pushLog(`Kasyno studzi stol. Wroc za ${formatCooldown(highRiskConfig.cooldownRemainingMs)}.`);
+      }
+      if (highRiskConfig.hasServerLimits && bet < highRiskConfig.minBet) {
+        return pushLog(`Minimalna stawka stolu high-risk to ${formatMoney(highRiskConfig.minBet)}.`);
+      }
+      if (highRiskConfig.hasServerLimits && bet > highRiskConfig.maxBet) {
+        setCasinoState((prev) => ({ ...prev, rouletteBet: String(highRiskConfig.maxBet) }));
+        return pushLog(`Na ten stol max stawka to ${formatMoney(highRiskConfig.maxBet)}.`);
+      }
       const selectedChoice = casinoState.rouletteChoice;
       setCasinoState((prev) => ({
         ...prev,
@@ -5931,6 +6037,13 @@ function AppRuntime() {
         return;
       }
     }
+
+    if (bet > highRiskConfig.maxBet) {
+      setCasinoState((prev) => ({ ...prev, rouletteBet: String(highRiskConfig.maxBet) }));
+      return pushLog(`Na ten stol max stawka to ${formatMoney(highRiskConfig.maxBet)}.`);
+    }
+    if (bet < highRiskConfig.minBet) return pushLog(`Minimalna stawka ruletki to ${formatMoney(highRiskConfig.minBet)}.`);
+    if (game.player.cash < bet) return pushLog(`Potrzebujesz ${formatMoney(bet)} na wejscie do ruletki.`);
 
     updateLocalPlayer({ cash: game.player.cash - bet }, `Wrzucasz ${formatMoney(bet)} na stol ruletki.`);
     setCasinoState((prev) => ({ ...prev, rouletteSpinning: true, rouletteResult: null }));
@@ -5986,8 +6099,25 @@ function AppRuntime() {
   const startBlackjack = async () => {
     if (!canDoStreetAction("Kasyno nie wpuszcza ludzi w kajdankach.")) return;
     setNotice(null);
-    if (sessionToken && apiStatus === "online") {
-      const bet = Number(casinoState.blackjack.bet || 0);
+    const blackjackConfig = getCasinoGameConfig(casinoState.backendMeta, "blackjack", {
+      minBet: 50,
+      maxBet: 500000,
+    });
+    const bet = Number(casinoState.blackjack.bet || 0);
+    if (hasOnlineAuthority) {
+      if (blackjackConfig.cooldownRemainingMs > 0) {
+        return pushLog(`Kasyno studzi stol. Wroc za ${formatCooldown(blackjackConfig.cooldownRemainingMs)}.`);
+      }
+      if (blackjackConfig.hasServerLimits && bet < blackjackConfig.minBet) {
+        return pushLog(`Minimalna stawka blackjacka to ${formatMoney(blackjackConfig.minBet)}.`);
+      }
+      if (blackjackConfig.hasServerLimits && bet > blackjackConfig.maxBet) {
+        setCasinoState((prev) => ({
+          ...prev,
+          blackjack: { ...prev.blackjack, bet: String(blackjackConfig.maxBet) },
+        }));
+        return pushLog(`Na ten stol max stawka to ${formatMoney(blackjackConfig.maxBet)}.`);
+      }
       try {
         const result = await startBlackjackOnline(sessionToken, bet);
         mergeServerUser(result.user);
@@ -6009,8 +6139,14 @@ function AppRuntime() {
       }
     }
     if (["dealing", "player", "dealer"].includes(casinoState.blackjack.stage)) return;
-    const bet = Number(casinoState.blackjack.bet || 0);
-    if (bet < 50) return pushLog("Minimalna stawka blackjacka to $50.");
+    if (bet < blackjackConfig.minBet) return pushLog(`Minimalna stawka blackjacka to ${formatMoney(blackjackConfig.minBet)}.`);
+    if (bet > blackjackConfig.maxBet) {
+      setCasinoState((prev) => ({
+        ...prev,
+        blackjack: { ...prev.blackjack, bet: String(blackjackConfig.maxBet) },
+      }));
+      return pushLog(`Na ten stol max stawka to ${formatMoney(blackjackConfig.maxBet)}.`);
+    }
     if (game.player.cash < bet) return pushLog("Brakuje kasy na stol blackjacka.");
 
     updateLocalPlayer({ cash: game.player.cash - bet }, `Wchodzisz na blackjacka za ${formatMoney(bet)}.`);
@@ -6152,7 +6288,6 @@ function AppRuntime() {
     }, 700);
   };
 
-  const isOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
   const totalBusinessIncome = getBusinessIncomePerMinute(game, BUSINESSES);
   const totalEscortIncome = getEscortIncomePerMinute(game);
   const businessCollectionCap = getPassiveCapAmount(totalBusinessIncome);
@@ -6161,16 +6296,16 @@ function AppRuntime() {
     game.collections,
     totalBusinessIncome,
     businessCollectionCap,
-    isOnlineAuthority
+    hasOnlineAuthority
   );
   const projectedEscortCash = getProjectedEscortCash(
     game.collections,
     totalEscortIncome,
     escortCollectionCap,
-    isOnlineAuthority
+    hasOnlineAuthority
   );
   const projectedScreenGame =
-    isOnlineAuthority &&
+    hasOnlineAuthority &&
     (projectedBusinessCash !== Number(game.collections?.businessCash || 0) ||
       projectedEscortCash !== Number(game.collections?.escortCash || 0))
       ? {
@@ -6373,7 +6508,7 @@ function AppRuntime() {
               ) : null}
               {!selectedGangProfile.self ? (
                 <Pressable onPress={() => attackGangProfile(selectedGangProfile)} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>Atak na gang</Text>
+                  <Text style={styles.inlineButtonText}>{hasOnlineAuthority ? "Podglad najazdu" : "Atak na gang"}</Text>
                 </Pressable>
               ) : null}
               {!selectedGangProfile.self ? (
@@ -6398,10 +6533,27 @@ function AppRuntime() {
             {gangProfileView === "actions" ? (
               <View style={styles.listCard}>
                 <Text style={styles.listCardTitle}>Akcje wobec gangu</Text>
-                <Text style={styles.listCardMeta}>Szybkie akcje wobec ekipy.</Text>
+                <Text style={styles.listCardMeta}>
+                  {hasOnlineAuthority ? "Online widzisz backendowy podglad ryzyka. Pelny najazd jeszcze nie rozstrzyga sie live." : "Szybkie akcje wobec ekipy."}
+                </Text>
                 <StatLine label="Boss" value={selectedGangProfile.boss} />
                 <StatLine label="Vice Boss" value={selectedGangProfile.viceBoss} />
                 <StatLine label="Potencjal skladu" value={`${selectedGangProfile.members} ludzi | ${selectedGangProfile.influence} wplywu | ${selectedGangProfile.territory} dzielnice`} />
+                {!selectedGangProfile.self && hasOnlineAuthority ? (
+                  <View style={styles.listCard}>
+                    <Text style={styles.listCardTitle}>Podglad najazdu</Text>
+                    <Text style={styles.listCardMeta}>
+                      {gangRaidPreviewState.loading && gangRaidPreviewState.gangName === selectedGangProfile.name
+                        ? "Backend liczy ryzyko i oslony celu..."
+                        : "To jest tylko preview. Finalny wynik najazdu online dojdzie w kolejnym etapie."}
+                    </Text>
+                    {selectedGangRaidPreviewLines.map((line) => (
+                      <Text key={`${selectedGangProfile.name}-${line}`} style={styles.listCardMeta}>
+                        {line}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             ) : null}
 
@@ -6686,6 +6838,19 @@ function AppRuntime() {
             value={`${gangGoalProgress.goal?.title || "Brak"} ${gangGoalProgress.current}/${gangGoalProgress.target}`}
           />
           <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>Co robi fokus</Text>
+            {focusDistrictEffectLines.map((line) => (
+              <Text key={`gang-focus-${line}`} style={styles.listCardMeta}>
+                {line}
+              </Text>
+            ))}
+            {gangEffectLines.map((line) => (
+              <Text key={`gang-effects-${line}`} style={styles.listCardMeta}>
+                {line}
+              </Text>
+            ))}
+          </View>
+          <View style={styles.listCard}>
             <Text style={styles.listCardTitle}>Przerzut fokusu</Text>
             <Text style={styles.listCardMeta}>Jedna decyzja dla gangu. Tam idzie projekt, operacja i cisnienie tygodnia.</Text>
             <View style={styles.listActionsRow}>
@@ -6714,6 +6879,7 @@ function AppRuntime() {
                       <Text style={styles.listCardTitle}>{project.name}</Text>
                       <Text style={styles.listCardMeta}>{project.summary}</Text>
                       <Text style={styles.listCardMeta}>Poziom {level}/{project.levels.length}</Text>
+                      <Text style={styles.listCardMeta}>{getGangProjectLevelLine(project, level)}</Text>
                     </View>
                     <Pressable onPress={() => investGangProject(project.id)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
                       <Text style={styles.inlineButtonText}>{locked ? "Max" : formatMoney(cost)}</Text>
@@ -6728,6 +6894,9 @@ function AppRuntime() {
             <Text style={styles.listCardMeta}>{gangGoalProgress.goal?.summary}</Text>
             <Text style={styles.listCardMeta}>
               Nagroda: {formatMoney(gangGoalProgress.goal?.rewards?.vaultCash || 0)} do skarbca i puls w fokusie.
+            </Text>
+            <Text style={styles.listCardMeta}>
+              Fokus dostaje +{gangGoalProgress.goal?.rewards?.focusInfluence || 0} influence, a pressure schodzi o {gangGoalProgress.goal?.rewards?.pressureRelief || 0}.
             </Text>
             <Pressable
               onPress={claimGangGoal}
@@ -7254,15 +7423,16 @@ function AppRuntime() {
     EntityBadge,
     sceneBackgrounds: SCENE_BACKGROUNDS,
     systemVisuals: SYSTEM_VISUALS,
-      formatMoney,
-      handValue,
-      setCasinoState,
-      spinRoulette,
-      spinSlot,
-      startBlackjack,
-      hitBlackjack,
-      standBlackjack,
-    };
+    formatMoney,
+    formatCooldown,
+    handValue,
+    setCasinoState,
+    spinRoulette,
+    spinSlot,
+    startBlackjack,
+    hitBlackjack,
+    standBlackjack,
+  };
 
   const empireScreenBaseProps = {
     game: projectedScreenGame,

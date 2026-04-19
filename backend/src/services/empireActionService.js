@@ -18,6 +18,7 @@ import {
   normalizeFactoriesOwned,
   normalizeSupplies,
 } from "../../../shared/empire.js";
+import { getDistrictModifierSummary, getFactoryDistrictId } from "../../../shared/districts.js";
 import { ESCORTS, findDrugById } from "../../../shared/socialGameplay.js";
 import {
   findStreetDistrictById,
@@ -541,10 +542,16 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   }
 
   const policeProfile = getDrugPoliceProfile(drug);
+  const factoryDistrictId = getFactoryDistrictId(drug.factoryId);
+  const factoryDistrict = getDistrictModifierSummary(player?.city, factoryDistrictId);
+  const focusedFactory = String(player?.gang?.focusDistrictId || "") === factoryDistrictId;
   const bustChance = clamp(
     Number(policeProfile.risk || 0) +
       Number(player.profile?.heat || 0) * 0.0022 -
-      Number(player.profile?.dexterity || 0) * 0.003,
+      Number(player.profile?.dexterity || 0) * 0.003 +
+      Math.max(0, Number(factoryDistrict.pressure || 0) - Number(factoryDistrict.basePressure || 0)) * 0.0015 +
+      (factoryDistrict.pressureState?.id === "lockdown" ? 0.05 : 0) -
+      (focusedFactory ? 0.012 : 0),
     0.03,
     0.52
   );
@@ -562,7 +569,8 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
     const fine = Math.floor(Number(drug.streetPrice || 0) * (1.05 + Number(policeProfile.risk || 0)));
     player.profile.cash = Math.max(0, Number(player.profile?.cash || 0) - fine);
     player.profile.heat = clamp(
-      Number(player.profile?.heat || 0) + Number(policeProfile.heatGain || 0) + 5,
+      Number(player.profile?.heat || 0) +
+        Math.round((Number(policeProfile.heatGain || 0) + 5) * Number(factoryDistrict.pressureState?.heistHeatMultiplier || 1)),
       0,
       100
     );
@@ -577,15 +585,19 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
       fine,
       logMessage:
         jailSeconds > 0
-          ? `Nalot na produkcji ${drug.name}. Strata $${fine} i cela na ${Math.ceil(jailSeconds / 60)} min.`
-          : `Policja weszla na produkcje ${drug.name}. Strata $${fine} i spalone skladniki.`,
+          ? `Nalot na produkcji ${drug.name} w ${factoryDistrict.name}. Strata $${fine} i cela na ${Math.ceil(jailSeconds / 60)} min.`
+          : `Policja weszla na produkcje ${drug.name} w ${factoryDistrict.name}. Strata $${fine} i spalone skladniki.`,
     };
   }
 
   player.drugInventory = player.drugInventory || {};
   player.drugInventory[drug.id] = Number(player.drugInventory?.[drug.id] || 0) + Number(drug.batchSize || 0);
   player.profile.heat = clamp(
-    Number(player.profile?.heat || 0) + Number(policeProfile.heatGain || 0),
+    Number(player.profile?.heat || 0) +
+      Math.max(
+        1,
+        Math.round(Number(policeProfile.heatGain || 0) * Number(factoryDistrict.pressureState?.heistHeatMultiplier || 1))
+      ),
     0,
     100
   );
@@ -593,8 +605,10 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
 
   return {
     drugId: drug.id,
+    districtId: factoryDistrict.id,
+    districtName: factoryDistrict.name,
     busted: false,
     batchSize: Number(drug.batchSize || 0),
-    logMessage: `Wyprodukowano ${drug.batchSize} szt. ${drug.name}. Ryzyko: ${policeProfile.label}.`,
+    logMessage: `Wyprodukowano ${drug.batchSize} szt. ${drug.name} pod ${factoryDistrict.name}. Ryzyko: ${policeProfile.label}, dzielnica: ${factoryDistrict.pressureLabel}.`,
   };
 }

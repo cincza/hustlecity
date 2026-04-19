@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+import { getGangProjectEffects } from "../../shared/gangProjects.js";
+import { getDistrictAlertText, getDistrictEffectLines } from "../game/selectors/metaGameplay";
 
 const MAX_GYM_BATCH = 10;
 
@@ -60,6 +62,7 @@ export function CityScreen({
   const businessCash = Number(game.collections?.businessCash || 0);
   const businessCollectableCash = Math.floor(businessCash);
   const escortCash = Number(game.collections?.escortCash || 0);
+  const gangEffects = getGangProjectEffects(game.gang);
   const escortCollectableCash = Math.floor(escortCash);
   const businessCollectionSubtitle =
     businessCash > 0
@@ -107,7 +110,7 @@ export function CityScreen({
     { id: "quick-heist", title: "Napad", subtitle: "Najwyzszy odblokowany prog.", visual: systemVisuals.heist, onPress: actions.quickHeist, danger: true },
     { id: "bank", title: "Bank", subtitle: `Saldo ${formatMoney(game.player.bank || 0)}.`, visual: systemVisuals.bank, onPress: () => actions.openSection("city", "bank") },
     { id: "casino", title: "Kasyno", subtitle: "Blackjack i ruletka na szybko.", visual: systemVisuals.casino, onPress: () => actions.openSection("profile", "casino") },
-    { id: "market", title: "Rynek", subtitle: "Kup, sprzedaj, rusz towar.", visual: systemVisuals.market, onPress: () => actions.openSection("market", "street") },
+    { id: "market", title: "Rynek", subtitle: "Kup, sprzedaj, rusz towar.", visual: systemVisuals.market, onPress: () => actions.openSection("market", "drugs") },
   ];
 
   const empireCards = [
@@ -224,12 +227,32 @@ export function CityScreen({
                     ) : null}
                   </View>
                   <Text style={styles.listCardMeta}>{district.note}</Text>
+                  {getDistrictEffectLines(district, {
+                    focused: game.gang?.focusDistrictId === district.id,
+                    gangEffects,
+                  }).map((line) => (
+                    <Text key={`${district.id}-${line}`} style={styles.listCardMeta}>
+                      {line}
+                    </Text>
+                  ))}
+                  {getDistrictAlertText(district) ? (
+                    <Text style={styles.listCardMeta}>{getDistrictAlertText(district)}</Text>
+                  ) : null}
                 </View>
               ))
             : null}
         </SectionCard>
 
         <SectionCard title="Puls miasta" subtitle="Najwazniejsze liczby bez sciany tekstu.">
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>Najgoretsza dzielnica</Text>
+            <Text style={styles.listCardMeta}>
+              {hottestDistrictSummary?.name || "-"} | {hottestDistrictSummary?.pressureLabel || "Spokojnie"} | {hottestDistrictSummary?.bonusLabel || "-"}
+            </Text>
+            {getDistrictAlertText(hottestDistrictSummary) ? (
+              <Text style={styles.listCardMeta}>{getDistrictAlertText(hottestDistrictSummary)}</Text>
+            ) : null}
+          </View>
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Energia</Text>
@@ -315,9 +338,10 @@ export function CityScreen({
     const maxWithdrawAmount = Math.max(0, Math.floor(Number(game.player.bank || 0)));
 
     return (
-      <SectionCard title="Bank" subtitle={`Tryb: ${apiStatus === "online" ? "online" : "lokalny"}.`}>
+      <SectionCard title="Bank" subtitle={apiStatus === "online" ? "Saldo i walidacja leca z backendu." : "Lokalny fallback do testow offline."}>
         <StatLine label="Gotowka przy sobie" value={formatMoney(game.player.cash)} visual={systemVisuals.cash} />
         <StatLine label="Saldo bankowe" value={formatMoney(game.player.bank || 0)} visual={systemVisuals.bank} />
+        <StatLine label="Operacje" value={apiStatus === "online" ? "Bez podatku, z limitem serwera." : "Tryb lokalny."} visual={systemVisuals.bank} />
         <View style={styles.listCard}>
           <View style={styles.entityHead}>
             <EntityBadge visual={systemVisuals.bank} />
@@ -354,8 +378,8 @@ export function CityScreen({
           </View>
         </View>
         <View style={styles.grid}>
-          <ActionTile title="Wplac" subtitle={`Do banku pojdzie ${bankAmountDraft || 0}.`} visual={systemVisuals.bank} onPress={actions.depositCash} />
-          <ActionTile title="Wyplac" subtitle={`Z konta wyciagasz ${bankAmountDraft || 0}.`} visual={systemVisuals.cash} onPress={actions.withdrawCash} />
+          <ActionTile title="Wplac" subtitle={`Do banku leci ${bankAmountDraft || 0}.`} visual={systemVisuals.bank} onPress={actions.depositCash} />
+          <ActionTile title="Wyplac" subtitle={`Z konta sciagasz ${bankAmountDraft || 0}.`} visual={systemVisuals.cash} onPress={actions.withdrawCash} />
         </View>
       </SectionCard>
     );

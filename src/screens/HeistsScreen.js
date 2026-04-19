@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { HEIST_TIERS, getNextHeistTier, groupHeistsByTier } from "../game/config/heistTiers";
 import { HeistCard, HeistTabs } from "../components/GameShellUI";
+import { getGangProjectEffects } from "../../shared/gangProjects.js";
+import { getOperationChoiceImpactLines, getOperationPreviewDetails } from "../game/selectors/metaGameplay";
 
 export function HeistsScreen({
   heists,
@@ -49,9 +51,27 @@ export function HeistsScreen({
         : null,
     [activeOperation, safeOperations]
   );
-  const districtLabelById = useMemo(
-    () => Object.fromEntries(safeDistrictSummaries.map((district) => [district.id, district.name])),
+  const districtSummaryById = useMemo(
+    () => Object.fromEntries(safeDistrictSummaries.map((district) => [district.id, district])),
     [safeDistrictSummaries]
+  );
+  const gangEffects = useMemo(() => getGangProjectEffects(game.gang), [game.gang]);
+  const activeOperationDefinition = useMemo(
+    () => safeOperations.find((operation) => operation.id === activeOperation?.operationId) || null,
+    [activeOperation?.operationId, safeOperations]
+  );
+  const activeOperationPreview = useMemo(
+    () =>
+      activeOperationDefinition
+        ? getOperationPreviewDetails({
+            operation: activeOperationDefinition,
+            activeOperation,
+            player: effectivePlayer,
+            districtSummary: districtSummaryById[activeOperationDefinition.districtId],
+            gangEffects,
+          })
+        : null,
+    [activeOperation, activeOperationDefinition, districtSummaryById, effectivePlayer, gangEffects]
   );
 
   const tierTabs = HEIST_TIERS.map((tier) => ({
@@ -84,16 +104,32 @@ export function HeistsScreen({
           <View style={styles.listCard}>
             <Text style={styles.listCardTitle}>{activeOperationTitle}</Text>
             <Text style={styles.listCardMeta}>
-              Dzielnica: {districtLabelById[activeOperation.districtId] || activeOperation.districtId} | Etap: {activeOperationStage || "final"}
+              Dzielnica: {districtSummaryById[activeOperation.districtId]?.name || activeOperation.districtId} | Etap: {activeOperationStage || "final"}
             </Text>
+            {(activeOperationPreview?.lines || []).map((line) => (
+              <Text key={`active-op-${line}`} style={styles.listCardMeta}>
+                {line}
+              </Text>
+            ))}
             {activeOperationStage ? (
-              <View style={styles.listActionsRow}>
-                {safeOperationChoices.map((choice) => (
-                  <Pressable key={choice.id} onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
-                    <Text style={styles.inlineButtonText}>{choice.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
+              safeOperationChoices.map((choice) => (
+                <View key={choice.id} style={styles.listCard}>
+                  <View style={styles.inlineRow}>
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{choice.label}</Text>
+                      <Text style={styles.listCardMeta}>{choice.summary}</Text>
+                      {getOperationChoiceImpactLines(choice).map((line) => (
+                        <Text key={`${choice.id}-${line}`} style={styles.listCardMeta}>
+                          {line}
+                        </Text>
+                      ))}
+                    </View>
+                    <Pressable onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
+                      <Text style={styles.inlineButtonText}>Wybierz</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))
             ) : (
               <Pressable onPress={onExecuteOperation} style={styles.inlineButton}>
                 <Text style={styles.inlineButtonText}>Odpal final</Text>
@@ -109,12 +145,22 @@ export function HeistsScreen({
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{operation.name}</Text>
                     <Text style={styles.listCardMeta}>
-                      {districtLabelById[operation.districtId] || operation.districtId} | Start od {operation.respect} RES
+                      {districtSummaryById[operation.districtId]?.name || operation.districtId} | Start od {operation.respect} RES
                     </Text>
                   </View>
                   <SafeTag text={formatMoney(operation.baseReward[0])} />
                 </View>
                 <Text style={styles.listCardMeta}>{operation.summary}</Text>
+                {(getOperationPreviewDetails({
+                  operation,
+                  player: effectivePlayer,
+                  districtSummary: districtSummaryById[operation.districtId],
+                  gangEffects,
+                })?.lines || []).map((line) => (
+                  <Text key={`${operation.id}-${line}`} style={styles.listCardMeta}>
+                    {line}
+                  </Text>
+                ))}
                 <View style={styles.inlineRow}>
                   <Text style={styles.costLabel}>Przygotowanie {formatMoney(operation.prepCost)} | Energia {operation.energyCost}</Text>
                   <Pressable onPress={() => onStartOperation(operation.id)} style={styles.inlineButton}>
