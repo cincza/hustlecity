@@ -22,9 +22,11 @@ import * as ImagePicker from "expo-image-picker";
 import {
   addFriendOnline,
   advanceOperationOnline,
+  assignEscortToStreetOnline,
   bribeOutOfJailOnline,
   buyBusinessOnline,
   buyDrugFromDealerOnline,
+  buyEscortOnline,
   buyFactoryOnline,
   buyFactorySupplyOnline,
   buyProductOnline,
@@ -34,6 +36,7 @@ import {
   claimGangGoalOnline,
   claimTaskOnline,
   collectBusinessIncomeOnline,
+  collectEscortIncomeOnline,
   contributeGangOnline,
   consumeDrugOnline,
   createGangOnline,
@@ -70,7 +73,9 @@ import {
   registerUser,
   moveDrugToClubOnline,
   produceDrugOnline,
+  pullEscortFromStreetOnline,
   runClubNightOnline,
+  sellEscortOnline,
   sellDrugToDealerOnline,
   sellProductOnline,
   sendGlobalChatMessageOnline,
@@ -180,6 +185,15 @@ import {
   getLeadTargetEscortForVenue,
   normalizeClubState,
 } from "./shared/socialGameplay.js";
+import {
+  getEscortDistrictCount,
+  getEscortIncomePerMinute,
+  getEscortReserveCount,
+  getEscortRoutes,
+  getEscortWorkingCount,
+  getOwnedEscort,
+  STREET_DISTRICTS,
+} from "./shared/street.js";
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
 const PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.sameTargetRepeatCooldownSeconds || 0) * 1000;
@@ -278,13 +292,6 @@ const GANG_HEISTS = [
   { id: "port", name: "Kontener w porcie", respect: 30, minMembers: 8, reward: [36000, 54000], risk: 0.49, energy: 5 },
   { id: "armory", name: "Sklad wojskowy", respect: 42, minMembers: 12, reward: [65000, 98000], risk: 0.59, energy: 6 },
   { id: "mint", name: "Miejska mennica", respect: 58, minMembers: 18, reward: [120000, 170000], risk: 0.68, energy: 7 },
-];
-
-const STREET_DISTRICTS = [
-  { id: "oldtown", name: "Stare Miasto", respect: 0, incomeMultiplier: 0.82, policeRisk: 0.03, beatRisk: 0.04, escapeRisk: 0.015, note: "Najbezpieczniejsza ulica. Mniej hajsu, mniej przypalu." },
-  { id: "neon", name: "Neon Avenue", respect: 8, incomeMultiplier: 1, policeRisk: 0.05, beatRisk: 0.06, escapeRisk: 0.025, note: "Srodek miasta. Dobry balans zarobku i przypalu." },
-  { id: "strip", name: "Casino Strip", respect: 16, incomeMultiplier: 1.24, policeRisk: 0.08, beatRisk: 0.085, escapeRisk: 0.035, note: "Lepsza klientela i grubsze stawki, ale gliny czesto robia objazd." },
-  { id: "harbor", name: "Port Cienia", respect: 24, incomeMultiplier: 1.52, policeRisk: 0.12, beatRisk: 0.11, escapeRisk: 0.05, note: "Najgrubsza kasa z ulicy. Najwiecej przemocy, donosow i znikniec." },
 ];
 
 const PRODUCTS = MARKET_PRODUCTS;
@@ -725,6 +732,8 @@ const INITIAL = {
     escortCash: 0,
     businessCollectedAt: null,
     escortCollectedAt: null,
+    businessAccruedAt: Date.now(),
+    escortAccruedAt: Date.now(),
   },
 };
 
@@ -952,46 +961,6 @@ function getGangVisual(name) {
   return GANG_VISUALS[name] || GANG_VISUALS.default;
 }
 
-function getEscortIncomePerMinute(state) {
-  return state.escortsOwned.reduce((sum, owned) => {
-    const escort = ESCORTS.find((entry) => entry.id === owned.id);
-    if (!escort) return sum;
-    return (
-      sum +
-      Object.entries(getEscortRoutes(owned)).reduce((routeSum, [districtId, count]) => {
-        const district = STREET_DISTRICTS.find((entry) => entry.id === districtId) || STREET_DISTRICTS[0];
-        return routeSum + escort.cashPerMinute * district.incomeMultiplier * count;
-      }, 0)
-    );
-  }, 0);
-}
-
-function getEscortRoutes(owned) {
-  if (!owned) return {};
-  if (owned.routes) return owned.routes;
-  if (owned.working) return { [STREET_DISTRICTS[0].id]: owned.working };
-  return {};
-}
-
-function getEscortWorkingCount(owned) {
-  return Object.values(getEscortRoutes(owned)).reduce((sum, count) => sum + count, 0);
-}
-
-function getOwnedEscort(state, escortId) {
-  return state.escortsOwned.find((entry) => entry.id === escortId);
-}
-
-function getEscortReserveCount(state, escortId) {
-  const owned = getOwnedEscort(state, escortId);
-  if (!owned) return 0;
-  return Math.max(0, owned.count - getEscortWorkingCount(owned));
-}
-
-function getEscortDistrictCount(state, escortId, districtId) {
-  const owned = getOwnedEscort(state, escortId);
-  return getEscortRoutes(owned)[districtId] || 0;
-}
-
 function getCollectionTimeToCap(currentAmount, incomePerMinute) {
   if (incomePerMinute <= 0) return null;
   const cap = getPassiveCapAmount(incomePerMinute);
@@ -1006,6 +975,22 @@ function getProjectedBusinessCash(collections, incomePerMinute, capAmount, isOnl
   }
 
   const accruedAt = Number(collections?.businessAccruedAt || 0);
+  if (!Number.isFinite(accruedAt) || accruedAt <= 0) {
+    return Math.min(baseCash, capAmount);
+  }
+
+  const elapsedMs = Math.max(0, now - accruedAt);
+  const projectedCash = baseCash + incomePerMinute * (elapsedMs / 60000);
+  return Math.min(projectedCash, capAmount);
+}
+
+function getProjectedEscortCash(collections, incomePerMinute, capAmount, isOnlineAuthority, now = Date.now()) {
+  const baseCash = Math.max(0, Number(collections?.escortCash || 0));
+  if (!isOnlineAuthority || incomePerMinute <= 0) {
+    return baseCash;
+  }
+
+  const accruedAt = Number(collections?.escortAccruedAt || 0);
   if (!Number.isFinite(accruedAt) || accruedAt <= 0) {
     return Math.min(baseCash, capAmount);
   }
@@ -2328,6 +2313,7 @@ function AppRuntime() {
           businessCollectedAt: prev.collections?.businessCollectedAt || null,
           escortCollectedAt: prev.collections?.escortCollectedAt || null,
           businessAccruedAt: prev.collections?.businessAccruedAt || null,
+          escortAccruedAt: prev.collections?.escortAccruedAt || null,
         };
         const logLines = [...prev.log];
 
@@ -3192,7 +3178,18 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - street income claim, daily cap, anti-spam cooldown, district risk and heat scaling must be server-authoritative
-  const collectEscortIncome = () => {
+  const collectEscortIncome = async () => {
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await collectEscortIncomeOnline(sessionToken);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
+
     if (!requireOfflineDemoAuthority("Odbior ulicy")) return;
     const payout = Math.floor(game.collections?.escortCash || 0);
     if (payout <= 0) return pushLog("Na razie ulica nic jeszcze nie oddala.");
@@ -3201,14 +3198,29 @@ function AppRuntime() {
       ...prev,
       player: { ...prev.player, cash: prev.player.cash + payout },
       stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + payout },
-      collections: { ...prev.collections, escortCash: 0, escortCollectedAt: Date.now() },
+      collections: {
+        ...prev.collections,
+        escortCash: 0,
+        escortCollectedAt: Date.now(),
+        escortAccruedAt: Date.now(),
+      },
       log: [`Odebrales z ulicy ${formatMoney(payout)}. Dziewczyny rozliczone.`, ...prev.log].slice(0, 16),
     }));
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - escort acquisition and scaling need server validation before real multiplayer launch
-  const buyEscort = (escort) => {
+  const buyEscort = async (escort) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await buyEscortOnline(sessionToken, escort.id);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (!requireOfflineDemoAuthority("Kupowanie kontaktow")) return;
     if (game.player.respect < escort.respect) return pushLog(`Ten kontakt odblokuje sie przy ${escort.respect} szacunu.`);
     if (game.player.cash < escort.cost) return pushLog(`Za malo gotowki na ${escort.name}.`);
@@ -3629,8 +3641,18 @@ function AppRuntime() {
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - escort street assignment affects passive economy and must move to server state
-  const assignEscortToStreet = (escort, districtId) => {
+  const assignEscortToStreet = async (escort, districtId) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await assignEscortToStreetOnline(sessionToken, escort.id, districtId);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (!requireOfflineDemoAuthority("Wystawianie na ulice")) return;
     const district = STREET_DISTRICTS.find((entry) => entry.id === districtId);
     if (!district) return pushLog("Wybierz konkretna dzielnice.");
@@ -3652,8 +3674,18 @@ function AppRuntime() {
     });
   };
 
-  const pullEscortFromStreet = (escort, districtId) => {
+  const pullEscortFromStreet = async (escort, districtId) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await pullEscortFromStreetOnline(sessionToken, escort.id, districtId);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (!requireOfflineDemoAuthority("Sciaganie z ulicy")) return;
     const district = STREET_DISTRICTS.find((entry) => entry.id === districtId);
     if (!district) return pushLog("Wybierz konkretna dzielnice.");
@@ -3676,8 +3708,18 @@ function AppRuntime() {
     });
   };
 
-  const sellEscort = (escort) => {
+  const sellEscort = async (escort) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await sellEscortOnline(sessionToken, escort.id);
+        mergeServerUser(result.user);
+        return;
+      } catch (error) {
+        pushLog(error.message);
+        return;
+      }
+    }
     if (!requireOfflineDemoAuthority("Sprzedaz kontaktu")) return;
     if (getEscortReserveCount(game, escort.id) <= 0) return pushLog(`Najpierw sciagij z ulicy wolna sztuke ${escort.name}, zeby ja opchnac.`);
 
@@ -5921,18 +5963,27 @@ function AppRuntime() {
     businessCollectionCap,
     isOnlineAuthority
   );
+  const projectedEscortCash = getProjectedEscortCash(
+    game.collections,
+    totalEscortIncome,
+    escortCollectionCap,
+    isOnlineAuthority
+  );
   const projectedScreenGame =
-    isOnlineAuthority && projectedBusinessCash !== Number(game.collections?.businessCash || 0)
+    isOnlineAuthority &&
+    (projectedBusinessCash !== Number(game.collections?.businessCash || 0) ||
+      projectedEscortCash !== Number(game.collections?.escortCash || 0))
       ? {
           ...game,
           collections: {
             ...game.collections,
             businessCash: projectedBusinessCash,
+            escortCash: projectedEscortCash,
           },
         }
       : game;
   const businessCapEta = getCollectionTimeToCap(projectedBusinessCash, totalBusinessIncome);
-  const escortCapEta = getCollectionTimeToCap(game.collections?.escortCash || 0, totalEscortIncome);
+  const escortCapEta = getCollectionTimeToCap(projectedEscortCash, totalEscortIncome);
   const escortFindChance = currentClubVenue
     ? clamp(currentClubProfile.huntProgressValue / CLUB_SYSTEM_RULES.leadRequired, 0.12, 0.42)
     : clamp(escortBaseFindChance * 0.75, 0.05, 0.12);

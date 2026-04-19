@@ -184,6 +184,45 @@ export async function collectBusinessIncomeOnline(token) {
   });
 }
 
+export async function buyEscortOnline(token, escortId) {
+  return request("/escorts/buy", {
+    method: "POST",
+    token,
+    body: { escortId },
+  });
+}
+
+export async function assignEscortToStreetOnline(token, escortId, districtId) {
+  return request("/escorts/assign", {
+    method: "POST",
+    token,
+    body: { escortId, districtId },
+  });
+}
+
+export async function pullEscortFromStreetOnline(token, escortId, districtId) {
+  return request("/escorts/pull", {
+    method: "POST",
+    token,
+    body: { escortId, districtId },
+  });
+}
+
+export async function sellEscortOnline(token, escortId) {
+  return request("/escorts/sell", {
+    method: "POST",
+    token,
+    body: { escortId },
+  });
+}
+
+export async function collectEscortIncomeOnline(token) {
+  return request("/escorts/collect", {
+    method: "POST",
+    token,
+  });
+}
+
 export async function buyFactoryOnline(token, factoryId) {
   return request("/factories/buy", {
     method: "POST",

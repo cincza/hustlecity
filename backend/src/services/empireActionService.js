@@ -18,7 +18,16 @@ import {
   normalizeFactoriesOwned,
   normalizeSupplies,
 } from "../../../shared/empire.js";
-import { findDrugById } from "../../../shared/socialGameplay.js";
+import { ESCORTS, findDrugById } from "../../../shared/socialGameplay.js";
+import {
+  findStreetDistrictById,
+  getEscortDistrictCount,
+  getEscortIncomePerMinute,
+  getEscortReserveCount,
+  getEscortRoutes,
+  getEscortWorkingCount,
+  normalizeEscortsOwned,
+} from "../../../shared/street.js";
 import { getTaskStates } from "../../../shared/tasks.js";
 
 function fail(message, statusCode = 400) {
@@ -56,6 +65,7 @@ export function ensurePlayerEmpireState(player) {
   }
 
   ensureStatsShape(player);
+  player.escortsOwned = normalizeEscortsOwned(player.escortsOwned);
   player.businessesOwned = normalizeBusinessesOwned(player.businessesOwned);
   player.businessUpgrades = normalizeBusinessUpgrades(player.businessUpgrades);
   player.factoriesOwned = normalizeFactoriesOwned(player.factoriesOwned);
@@ -89,6 +99,35 @@ export function syncBusinessCollections(player, now = Date.now()) {
   }
 
   player.collections.businessAccruedAt = now;
+  return {
+    perMinute,
+    cap: perMinute * ECONOMY_RULES.energy.passiveClaimCapMinutes,
+  };
+}
+
+export function syncEscortCollections(player, now = Date.now()) {
+  ensurePlayerEmpireState(player);
+  const perMinute = getEscortIncomePerMinute(player);
+  const lastAccruedAt = Number(player.collections.escortAccruedAt || now);
+  const elapsedMs = Math.max(0, now - lastAccruedAt);
+
+  if (elapsedMs <= 0) {
+    player.collections.escortAccruedAt = now;
+    return {
+      perMinute,
+      cap: perMinute * ECONOMY_RULES.energy.passiveClaimCapMinutes,
+    };
+  }
+
+  if (perMinute > 0) {
+    const cap = perMinute * ECONOMY_RULES.energy.passiveClaimCapMinutes;
+    player.collections.escortCash = Math.min(
+      Number(player.collections.escortCash || 0) + perMinute * (elapsedMs / 60000),
+      cap
+    );
+  }
+
+  player.collections.escortAccruedAt = now;
   return {
     perMinute,
     cap: perMinute * ECONOMY_RULES.energy.passiveClaimCapMinutes,
@@ -259,6 +298,189 @@ export function buyFactoryForPlayer(player, factoryId, now = Date.now()) {
   return {
     factoryId: factory.id,
     logMessage: `Przejeta produkcja: ${factory.name}.`,
+  };
+}
+
+export function buyEscortForPlayer(player, escortId, now = Date.now()) {
+  ensurePlayerEmpireState(player);
+  syncEscortCollections(player, now);
+
+  const escort = ESCORTS.find((entry) => entry.id === escortId);
+  if (!escort) {
+    fail("Nie ma takiego kontaktu.");
+  }
+  if (Number(player.profile?.jailUntil || 0) > now) {
+    fail("Kontaktu nie kupisz zza krat.");
+  }
+  if (Number(player.profile?.respect || 0) < Number(escort.respect || 0)) {
+    fail(`Ten kontakt odblokuje sie przy ${escort.respect} szacunku.`);
+  }
+  if (Number(player.profile?.cash || 0) < Number(escort.cost || 0)) {
+    fail(`Za malo gotowki na ${escort.name}.`);
+  }
+
+  const owned = player.escortsOwned.find((entry) => entry.id === escort.id);
+  if (owned) {
+    owned.count += 1;
+    owned.working = getEscortWorkingCount(owned);
+    owned.routes = { ...getEscortRoutes(owned) };
+  } else {
+    player.escortsOwned.push({ id: escort.id, count: 1, working: 0, routes: {} });
+  }
+
+  player.profile.cash = Number(player.profile.cash || 0) - Number(escort.cost || 0);
+  player.collections.escortAccruedAt = now;
+
+  return {
+    escortId: escort.id,
+    logMessage: `Kupiles kontakt: ${escort.name}. Teraz mozesz wystawic ja na ulice.`,
+  };
+}
+
+export function assignEscortToStreetForPlayer(player, escortId, districtId, now = Date.now()) {
+  ensurePlayerEmpireState(player);
+  syncEscortCollections(player, now);
+
+  const escort = ESCORTS.find((entry) => entry.id === escortId);
+  if (!escort) {
+    fail("Nie ma takiego kontaktu.");
+  }
+  if (Number(player.profile?.jailUntil || 0) > now) {
+    fail("Z celi nikogo nie wystawisz na ulice.");
+  }
+
+  const district = findStreetDistrictById(districtId);
+  if (!district) {
+    fail("Wybierz konkretna dzielnice.");
+  }
+  if (Number(player.profile?.respect || 0) < Number(district.respect || 0)) {
+    fail(`Na ${district.name} potrzebujesz ${district.respect} szacunku.`);
+  }
+  if (getEscortReserveCount(player, escort.id) <= 0) {
+    fail(`Nie masz wolnej sztuki ${escort.name}, zeby wystawic ja na ulice.`);
+  }
+
+  player.escortsOwned = player.escortsOwned.map((entry) => {
+    if (entry.id !== escort.id) return entry;
+    const routes = {
+      ...getEscortRoutes(entry),
+      [district.id]: getEscortDistrictCount(player, escort.id, district.id) + 1,
+    };
+    return {
+      ...entry,
+      routes,
+      working: getEscortWorkingCount({ ...entry, routes }),
+    };
+  });
+  player.collections.escortAccruedAt = now;
+
+  return {
+    escortId: escort.id,
+    districtId: district.id,
+    logMessage: `${escort.name} zaczyna robic trase na ${district.name}.`,
+  };
+}
+
+export function pullEscortFromStreetForPlayer(player, escortId, districtId, now = Date.now()) {
+  ensurePlayerEmpireState(player);
+  syncEscortCollections(player, now);
+
+  const escort = ESCORTS.find((entry) => entry.id === escortId);
+  if (!escort) {
+    fail("Nie ma takiego kontaktu.");
+  }
+  if (Number(player.profile?.jailUntil || 0) > now) {
+    fail("Z celi nikogo nie sciagniesz z ulicy.");
+  }
+
+  const district = findStreetDistrictById(districtId);
+  if (!district) {
+    fail("Wybierz konkretna dzielnice.");
+  }
+  if (getEscortDistrictCount(player, escort.id, district.id) <= 0) {
+    fail(`${escort.name} nie stoi teraz na ${district.name}.`);
+  }
+
+  player.escortsOwned = player.escortsOwned.map((entry) => {
+    if (entry.id !== escort.id) return entry;
+    const routes = {
+      ...getEscortRoutes(entry),
+      [district.id]: Math.max(0, Number(getEscortRoutes(entry)[district.id] || 0) - 1),
+    };
+    if (routes[district.id] <= 0) {
+      delete routes[district.id];
+    }
+    return {
+      ...entry,
+      routes,
+      working: getEscortWorkingCount({ ...entry, routes }),
+    };
+  });
+  player.collections.escortAccruedAt = now;
+
+  return {
+    escortId: escort.id,
+    districtId: district.id,
+    logMessage: `${escort.name} schodzi z trasy na ${district.name}.`,
+  };
+}
+
+export function sellEscortForPlayer(player, escortId, now = Date.now()) {
+  ensurePlayerEmpireState(player);
+  syncEscortCollections(player, now);
+
+  const escort = ESCORTS.find((entry) => entry.id === escortId);
+  if (!escort) {
+    fail("Nie ma takiego kontaktu.");
+  }
+  if (Number(player.profile?.jailUntil || 0) > now) {
+    fail("Kontaktu nie opchniesz zza krat.");
+  }
+  if (getEscortReserveCount(player, escort.id) <= 0) {
+    fail(`Najpierw sciagnij z ulicy wolna sztuke ${escort.name}, zeby ja opchnac.`);
+  }
+
+  player.escortsOwned = normalizeEscortsOwned(
+    player.escortsOwned
+      .map((entry) => {
+        if (entry.id !== escort.id) return entry;
+        return {
+          ...entry,
+          count: Math.max(0, Number(entry.count || 0) - 1),
+          working: getEscortWorkingCount(entry),
+          routes: { ...getEscortRoutes(entry) },
+        };
+      })
+      .filter((entry) => Number(entry.count || 0) > 0)
+  );
+  player.profile.cash = Number(player.profile?.cash || 0) + Number(escort.sellPrice || 0);
+  player.collections.escortAccruedAt = now;
+
+  return {
+    escortId: escort.id,
+    payout: Number(escort.sellPrice || 0),
+    logMessage: `Opchnales ${escort.name} za $${escort.sellPrice}.`,
+  };
+}
+
+export function collectEscortIncomeForPlayer(player, now = Date.now()) {
+  ensurePlayerEmpireState(player);
+  syncEscortCollections(player, now);
+
+  const payout = Math.floor(Number(player.collections?.escortCash || 0));
+  if (payout <= 0) {
+    fail("Na razie ulica nic jeszcze nie oddala.");
+  }
+
+  player.profile.cash = Number(player.profile?.cash || 0) + payout;
+  player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + payout;
+  player.collections.escortCash = 0;
+  player.collections.escortCollectedAt = now;
+  player.collections.escortAccruedAt = now;
+
+  return {
+    payout,
+    logMessage: `Odebrales z ulicy $${payout}. Dziewczyny rozliczone.`,
   };
 }
 

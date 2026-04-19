@@ -72,14 +72,20 @@ import {
   sendQuickMessageBetweenPlayers,
 } from "./services/socialActionService.js";
 import {
+  assignEscortToStreetForPlayer,
   buyBusinessForPlayer,
+  buyEscortForPlayer,
   buyFactoryForPlayer,
   buyFactorySupplyForPlayer,
   claimTaskForPlayer,
   collectBusinessIncomeForPlayer,
+  collectEscortIncomeForPlayer,
   ensurePlayerEmpireState,
+  pullEscortFromStreetForPlayer,
   produceDrugForPlayer,
+  sellEscortForPlayer,
   syncBusinessCollections,
+  syncEscortCollections,
   upgradeBusinessForPlayer,
 } from "./services/empireActionService.js";
 import {
@@ -143,6 +149,7 @@ import {
   normalizeClubState,
 } from "../../shared/socialGameplay.js";
 import { createBusinessCollections, createSupplyCounterMap } from "../../shared/empire.js";
+import { normalizeEscortsOwned } from "../../shared/street.js";
 import { createCityState, getDistrictSummaries } from "../../shared/districts.js";
 import { createGangState } from "../../shared/gangProjects.js";
 import { createOperationsState, getOperationById, OPERATION_CATALOG } from "../../shared/operations.js";
@@ -538,17 +545,7 @@ function ensurePlayerExtendedState(player) {
   if (!Array.isArray(player.escortsOwned)) {
     player.escortsOwned = [];
   } else {
-    player.escortsOwned = player.escortsOwned
-      .filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string")
-      .map((entry) => ({
-        id: entry.id,
-        count: Math.max(0, Math.floor(Number(entry.count || 0))),
-        working: Math.max(0, Math.floor(Number(entry.working || 0))),
-        routes: entry.routes && typeof entry.routes === "object" && !Array.isArray(entry.routes)
-          ? { ...entry.routes }
-          : {},
-      }))
-      .filter((entry) => entry.count > 0);
+    player.escortsOwned = normalizeEscortsOwned(player.escortsOwned);
   }
   player.club = normalizeClubState(player.club);
   ensurePlayerGangState(player);
@@ -998,6 +995,7 @@ function syncPlayerState(player, now = Date.now()) {
   syncPlayerHealth(player, now);
   syncClubState(player, now);
   syncBusinessCollections(player, now);
+  syncEscortCollections(player, now);
   syncCityStateForPlayer(player, now);
   syncGangDerivedState(player, now);
   player.activeBoosts = player.activeBoosts.filter((entry) => Number(entry?.expiresAt || 0) > now);
@@ -2494,6 +2492,102 @@ app.post("/businesses/collect", auth, asyncHandler(async (req, res) => {
   await withPlayerActionLock(req, "business-collect", async () => {
     await commitPlayerMutation(req, "business-collect", async (player) => {
       result = collectBusinessIncomeForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/escorts/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const escortId = String(req.body?.escortId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "escort-buy", async () => {
+    await commitPlayerMutation(req, "escort-buy", async (player) => {
+      result = buyEscortForPlayer(player, escortId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/escorts/assign", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const escortId = String(req.body?.escortId || "").trim();
+  const districtId = String(req.body?.districtId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "escort-assign", async () => {
+    await commitPlayerMutation(req, "escort-assign", async (player) => {
+      result = assignEscortToStreetForPlayer(player, escortId, districtId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/escorts/pull", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const escortId = String(req.body?.escortId || "").trim();
+  const districtId = String(req.body?.districtId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "escort-pull", async () => {
+    await commitPlayerMutation(req, "escort-pull", async (player) => {
+      result = pullEscortFromStreetForPlayer(player, escortId, districtId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/escorts/sell", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const escortId = String(req.body?.escortId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "escort-sell", async () => {
+    await commitPlayerMutation(req, "escort-sell", async (player) => {
+      result = sellEscortForPlayer(player, escortId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/escorts/collect", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+
+  await withPlayerActionLock(req, "escort-collect", async () => {
+    await commitPlayerMutation(req, "escort-collect", async (player) => {
+      result = collectEscortIncomeForPlayer(player, now);
       pushLog(player, result.logMessage);
       return null;
     });

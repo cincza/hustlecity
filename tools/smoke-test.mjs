@@ -681,6 +681,60 @@ async function main() {
       throw new Error("Akcji klubowej nie rozliczono na backendzie.");
     }
 
+    const cornerEscortCountBefore = Number(
+      escortSearchResult?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.count || 0
+    );
+
+    const boughtEscort = await request("/escorts/buy", {
+      method: "POST",
+      token,
+      body: { escortId: "corner" },
+    });
+
+    if (Number(boughtEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.count || 0) !== cornerEscortCountBefore + 1) {
+      throw new Error("Kupno eskorty online nie dodalo kontaktu.");
+    }
+
+    const assignedEscort = await request("/escorts/assign", {
+      method: "POST",
+      token,
+      body: { escortId: "corner", districtId: "oldtown" },
+    });
+
+    if (Number(assignedEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.routes?.oldtown || 0) <= 0) {
+      throw new Error("Wystawienie eskorty na ulice nie zapisalo trasy.");
+    }
+
+    await delay(2200);
+    const collectedEscort = await request("/escorts/collect", {
+      method: "POST",
+      token,
+    });
+
+    if (!Number.isFinite(collectedEscort?.result?.payout) || collectedEscort.result.payout <= 0) {
+      throw new Error("Odbior z ulicy nie zwrocil dodatniego payoutu.");
+    }
+
+    const pulledEscort = await request("/escorts/pull", {
+      method: "POST",
+      token,
+      body: { escortId: "corner", districtId: "oldtown" },
+    });
+
+    if (Number(pulledEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.routes?.oldtown || 0) !== 0) {
+      throw new Error("Sciagniecie eskorty z ulicy nie wyczyscilo trasy.");
+    }
+
+    const soldEscort = await request("/escorts/sell", {
+      method: "POST",
+      token,
+      body: { escortId: "corner" },
+    });
+
+    if (Number(soldEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.count || 0) !== cornerEscortCountBefore) {
+      throw new Error("Sprzedaz eskorty online nie oddala poprawnego stanu.");
+    }
+
     const claimedClub = await request("/clubs/claim", {
       method: "POST",
       token,

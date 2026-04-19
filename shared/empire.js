@@ -57,6 +57,7 @@ export function createBusinessCollections() {
     businessCollectedAt: null,
     escortCollectedAt: null,
     businessAccruedAt: Date.now(),
+    escortAccruedAt: Date.now(),
   };
 }
 
@@ -151,6 +152,7 @@ export function normalizeBusinessCollections(collections) {
     businessCollectedAt: Number.isFinite(safe.businessCollectedAt) ? safe.businessCollectedAt : null,
     escortCollectedAt: Number.isFinite(safe.escortCollectedAt) ? safe.escortCollectedAt : null,
     businessAccruedAt: Number.isFinite(safe.businessAccruedAt) ? safe.businessAccruedAt : now,
+    escortAccruedAt: Number.isFinite(safe.escortAccruedAt) ? safe.escortAccruedAt : now,
   };
 }
 
