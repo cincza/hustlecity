@@ -39,6 +39,13 @@ export async function executeHeistOnline(token, heistId) {
   });
 }
 
+export async function executeGangHeistOnline(token, heistId) {
+  return request(`/gang/heists/${encodeURIComponent(heistId)}/execute`, {
+    method: "POST",
+    token,
+  });
+}
+
 export async function buyProductOnline(token, productId, quantity = 1) {
   return request("/market/buy", {
     method: "POST",
@@ -456,6 +463,14 @@ export async function moveDrugToClubOnline(token, drugId, quantity = 1) {
     method: "POST",
     token,
     body: { drugId, quantity },
+  });
+}
+
+export async function consumeClubDrugOnline(token, venueId, drugId) {
+  return request("/clubs/stash/consume", {
+    method: "POST",
+    token,
+    body: { venueId, drugId },
   });
 }
 

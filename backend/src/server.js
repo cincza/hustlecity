@@ -96,6 +96,7 @@ import {
   applyOperationDistrictOutcome,
   ensurePlayerCityState,
   fortifyClubForPlayer,
+  consumeClubStashDrugForPlayer,
   moveDrugToClubForPlayer,
   resolveClubDistrictId,
   runClubNightForPlayer,
@@ -114,6 +115,7 @@ import {
   syncGangDerivedState,
   updateGangSettingsForPlayer,
 } from "./services/gangProjectService.js";
+import { executeGangHeistForPlayer } from "./services/gangHeistService.js";
 import {
   advanceOperationForPlayer,
   ensurePlayerOperationState,
@@ -129,6 +131,7 @@ import {
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
 import { clampGangInviteRespectMin, GANG_INVITE_RESPECT_MIN } from "../../shared/gangProjects.js";
+import { GANG_HEISTS, getGangHeistById } from "../../shared/gangHeists.js";
 import {
   createAuthMiddleware,
   getBearerToken,
@@ -411,6 +414,7 @@ function createInitialPlayerData(username = "gracz") {
     stats: {
       heistsDone: 0,
       heistsWon: 0,
+      gangHeistsWon: 0,
       totalEarned: 0,
       casinoWins: 0,
       drugBatches: 0,
@@ -505,6 +509,7 @@ function ensurePlayerExtendedState(player) {
   if (!player.stats || typeof player.stats !== "object") {
     player.stats = {};
   }
+  player.stats.gangHeistsWon = Math.max(0, Math.floor(Number(player.stats.gangHeistsWon || 0)));
   if (!player.inventory || typeof player.inventory !== "object" || Array.isArray(player.inventory)) {
     player.inventory = Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0]));
   } else {
@@ -848,6 +853,42 @@ function buildGangInviteFromGangEntry(gangEntry, now = Date.now()) {
   };
 }
 
+function syncResponseGangEntryWithPlayerState(gangs, user) {
+  if (!Array.isArray(gangs)) return [];
+  if (!user?.gang?.joined || !user.gang?.name) return gangs;
+
+  return gangs.map((gangEntry) => {
+    if (gangEntry?.name !== user.gang.name) {
+      return gangEntry;
+    }
+
+    return {
+      ...gangEntry,
+      vault: Math.max(0, Math.floor(Number(user.gang.vault || gangEntry.vault || 0))),
+      inviteRespectMin: clampGangInviteRespectMin(
+        user.gang.inviteRespectMin ?? gangEntry.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
+      ),
+      focusDistrictId: user.gang.focusDistrictId || gangEntry.focusDistrictId,
+      projects:
+        user.gang.projects && typeof user.gang.projects === "object" && !Array.isArray(user.gang.projects)
+          ? { ...user.gang.projects }
+          : gangEntry.projects,
+      weeklyGoal:
+        user.gang.weeklyGoal && typeof user.gang.weeklyGoal === "object" && !Array.isArray(user.gang.weeklyGoal)
+          ? { ...user.gang.weeklyGoal }
+          : gangEntry.weeklyGoal,
+      weeklyProgress:
+        user.gang.weeklyProgress &&
+        typeof user.gang.weeklyProgress === "object" &&
+        !Array.isArray(user.gang.weeklyProgress)
+          ? { ...user.gang.weeklyProgress }
+          : gangEntry.weeklyProgress,
+      weeklyGoalClaimedAt: user.gang.weeklyGoalClaimedAt ?? gangEntry.weeklyGoalClaimedAt ?? null,
+      eventLog: Array.isArray(user.gang.chat) && user.gang.chat.length ? user.gang.chat.slice(0, 20) : gangEntry.eventLog,
+    };
+  });
+}
+
 function syncGangInvitesWithLiveDirectory(invites, gangs) {
   if (!Array.isArray(invites) || !Array.isArray(gangs)) {
     return [];
@@ -901,6 +942,7 @@ function buildClubVenueFromPlayer(player) {
     securityLevel: Number(club.securityLevel || 0),
     defenseReadiness: Number(club.defenseReadiness || 0),
     threatLevel: Number(club.threatLevel || 0),
+    stash: { ...(club.stash || {}) },
     note: club.note || "Prywatny lokal gracza. Ruch i presja licza sie z wizyt.",
   };
 }
@@ -1261,8 +1303,37 @@ function publicPlayer(player, now = Date.now()) {
 }
 
 async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
-  const gangs = await buildGangDirectorySnapshot(now);
   const user = publicPlayer(player, now);
+  const gangs = syncResponseGangEntryWithPlayerState(await buildGangDirectorySnapshot(now), user);
+  const liveGang = user?.gang?.joined
+    ? gangs.find((entry) => entry?.name === user.gang.name) || null
+    : null;
+  if (liveGang) {
+    user.gang = {
+      ...user.gang,
+      members: liveGang.members,
+      territory: liveGang.territory,
+      influence: liveGang.influence,
+      vault: liveGang.vault,
+      inviteRespectMin: liveGang.inviteRespectMin,
+      focusDistrictId: liveGang.focusDistrictId || user.gang.focusDistrictId,
+      projects:
+        liveGang.projects && typeof liveGang.projects === "object" && !Array.isArray(liveGang.projects)
+          ? { ...liveGang.projects }
+          : user.gang.projects,
+      weeklyGoal:
+        liveGang.weeklyGoal && typeof liveGang.weeklyGoal === "object" && !Array.isArray(liveGang.weeklyGoal)
+          ? { ...liveGang.weeklyGoal }
+          : user.gang.weeklyGoal,
+      weeklyProgress:
+        liveGang.weeklyProgress && typeof liveGang.weeklyProgress === "object" && !Array.isArray(liveGang.weeklyProgress)
+          ? { ...liveGang.weeklyProgress }
+          : user.gang.weeklyProgress,
+      weeklyGoalClaimedAt: liveGang.weeklyGoalClaimedAt ?? user.gang.weeklyGoalClaimedAt ?? null,
+      membersList: Array.isArray(liveGang.membersList) && liveGang.membersList.length ? liveGang.membersList : user.gang.membersList,
+      chat: Array.isArray(liveGang.eventLog) && liveGang.eventLog.length ? liveGang.eventLog : user.gang.chat,
+    };
+  }
   if (Array.isArray(user?.gang?.invites)) {
     user.gang.invites = syncGangInvitesWithLiveDirectory(user.gang.invites, gangs);
   }
@@ -3217,6 +3288,58 @@ app.post("/clubs/stash/move", auth, asyncHandler(async (req, res) => {
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
+app.post("/clubs/stash/consume", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const drugId = String(req.body?.drugId || "").trim();
+  const venueId = String(req.body?.venueId || req.player?.club?.visitId || "").trim();
+  const ownerRecordPreview = await findClubOwnerRecordByVenueId(venueId);
+  const ownerUserId =
+    ownerRecordPreview?._id && ownerRecordPreview._id !== req.user.id ? ownerRecordPreview._id : null;
+  let result = null;
+
+  await withUserMutationLocks([req.user.id, ownerUserId].filter(Boolean), `club-stash-consume:${venueId}`, async () => {
+    const actorRecord = await findUserById(req.user.id);
+    const ownerRecord = ownerUserId ? await findUserById(ownerUserId) : ownerRecordPreview?._id === req.user.id ? actorRecord : null;
+
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    const actor = actorRecord.playerData;
+    syncPlayerState(actor, now);
+    if (ownerRecord?.playerData) {
+      syncPlayerState(ownerRecord.playerData, now);
+    }
+
+    result = consumeClubStashDrugForPlayer(actor, ownerRecord?.playerData || null, venueId, drugId, now);
+    pushLog(actor, result.logMessage);
+    if (ownerRecord?.playerData && result?.ownerLogMessage) {
+      pushLog(ownerRecord.playerData, result.ownerLogMessage);
+    }
+
+    const persistTasks = [persistPlayerForUser(actorRecord._id, actor)];
+    if (ownerRecord?._id && ownerRecord._id !== actorRecord._id && ownerRecord.playerData) {
+      persistTasks.push(persistPlayerForUser(ownerRecord._id, ownerRecord.playerData));
+    }
+
+    const [updatedActorRecord] = await Promise.all(persistTasks);
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+  });
+
+  logInfo("clubs", "stash-consume", {
+    userId: req.user.id,
+    venueId,
+    drugId,
+    overdose: Boolean(result?.overdose),
+    stashCount: Number(result?.stashCount || 0),
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
 app.post("/clubs/night", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   let result = null;
@@ -3601,6 +3724,73 @@ app.post("/gang/goals/claim", auth, asyncHandler(async (req, res) => {
     });
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/gang/heists/:id/execute", auth, asyncHandler(async (req, res) => {
+  const heistId = String(req.params?.id || "").trim();
+  const heist = getGangHeistById(heistId);
+  if (!heist) {
+    res.status(404).json({ error: "Gang heist not found", heistId });
+    return;
+  }
+
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  if (req.player?.gang?.joined && req.player.gang.name) {
+    const liveGang = (await buildGangDirectorySnapshot(now)).find(
+      (entry) => entry?.name === req.player.gang.name
+    );
+    if (liveGang) {
+      req.player.gang = {
+        ...req.player.gang,
+        members: liveGang.members,
+        territory: liveGang.territory,
+        influence: liveGang.influence,
+        vault: liveGang.vault,
+        inviteRespectMin: liveGang.inviteRespectMin,
+        focusDistrictId: liveGang.focusDistrictId || req.player.gang.focusDistrictId,
+        projects:
+          liveGang.projects && typeof liveGang.projects === "object" && !Array.isArray(liveGang.projects)
+            ? { ...liveGang.projects }
+            : req.player.gang.projects,
+        weeklyGoal:
+          liveGang.weeklyGoal && typeof liveGang.weeklyGoal === "object" && !Array.isArray(liveGang.weeklyGoal)
+            ? { ...liveGang.weeklyGoal }
+            : req.player.gang.weeklyGoal,
+        weeklyProgress:
+          liveGang.weeklyProgress && typeof liveGang.weeklyProgress === "object" && !Array.isArray(liveGang.weeklyProgress)
+            ? { ...liveGang.weeklyProgress }
+            : req.player.gang.weeklyProgress,
+        weeklyGoalClaimedAt: liveGang.weeklyGoalClaimedAt ?? req.player.gang.weeklyGoalClaimedAt ?? null,
+        membersList:
+          Array.isArray(liveGang.membersList) && liveGang.membersList.length
+            ? liveGang.membersList
+            : req.player.gang.membersList,
+        chat:
+          Array.isArray(liveGang.eventLog) && liveGang.eventLog.length
+            ? liveGang.eventLog
+            : req.player.gang.chat,
+      };
+    }
+  }
+
+  if (isPlayerJailed(req.player, now)) {
+    res.status(423).json({ error: "Siedzisz w wiezieniu. Najpierw odsiadka albo kaucja." });
+    return;
+  }
+
+  let result = null;
+  await withPlayerActionLock(req, `gang-heist:${heist.id}`, async () => {
+    await commitPlayerMutation(req, "gang-heist-execute", async (player) => {
+      result = executeGangHeistForPlayer(player, heist.id, now);
+      return null;
+    });
+  });
+
+  res.json(await buildPlayerEnvelope(req.player, now, {
+    result,
+    gangHeists: GANG_HEISTS,
+  }));
 }));
 
 app.get("/operations", auth, asyncHandler(async (req, res) => {

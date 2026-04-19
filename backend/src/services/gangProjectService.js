@@ -28,6 +28,23 @@ export function ensurePlayerGangState(player, now = Date.now()) {
 
 export function syncGangDerivedState(player, now = Date.now()) {
   ensurePlayerGangState(player, now);
+  if (
+    player.gang.joined &&
+    Number(player.gang.crewLockdownUntil || 0) > 0 &&
+    Number(player.gang.crewLockdownUntil || 0) <= now
+  ) {
+    player.gang.jailedCrew = 0;
+    player.gang.crewLockdownUntil = 0;
+    player.gang.chat = [
+      {
+        id: `gang-lockdown-clear-${now}`,
+        author: "System",
+        text: "Ekipa wraca z odsiadki i znow jest w komplecie.",
+        time: new Date(now).toISOString(),
+      },
+      ...(Array.isArray(player.gang.chat) ? player.gang.chat : []),
+    ].slice(0, 20);
+  }
   const summaries = getDistrictSummaries(player?.city);
   const controlled = summaries.filter((entry) => entry.controlState.id === "control").length;
   const totalInfluence = summaries.reduce((sum, entry) => sum + Number(entry.influence || 0), 0);

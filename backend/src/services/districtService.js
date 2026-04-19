@@ -17,6 +17,7 @@ import {
   getClubVenueProfile,
 } from "../../../shared/socialGameplay.js";
 import { ensureGangWeeklyGoal, getGangProjectEffects, incrementGangGoalProgress } from "../../../shared/gangProjects.js";
+import { applyDrugConsumptionToPlayer } from "./socialActionService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -121,6 +122,43 @@ export function applyHeistDistrictOutcome(player, heist, { success = false, now 
     threatDelta: success ? 1 : 1.6,
     actionFamily: `heist:${districtId}`,
     eventText: success ? "Napad podbil ruch w dzielnicy." : "Nieudany ruch zostawil slad na dzielni.",
+    now,
+  });
+  player.city = activity.city;
+
+  if (player?.gang?.joined && player.gang.focusDistrictId === districtId) {
+    player.gang = incrementGangGoalProgress(player.gang, "focusHeists", 1, now);
+  }
+
+  syncCityStateForPlayer(player, now);
+  return activity;
+}
+
+export function applyGangHeistDistrictOutcome(player, heist, { success = false, now = Date.now() } = {}) {
+  syncCityStateForPlayer(player, now);
+  const districtId = findDistrictById(
+    heist?.districtId || player?.gang?.focusDistrictId || player?.city?.focusDistrictId
+  ).id;
+  const gangEffects = getGangProjectEffects(player?.gang || {});
+  const focusBonus =
+    player?.gang?.focusDistrictId === districtId
+      ? 1.14 + Number(gangEffects.influenceGain || 0)
+      : 1;
+  const influenceBase = success ? 4.8 : 1.7;
+  const pressureBase =
+    success
+      ? 5.4 + Number(heist?.risk || 0) * 18
+      : 3.6 + Number(heist?.risk || 0) * 13;
+
+  const activity = applyDistrictActivity(player.city, {
+    districtId,
+    influenceDelta: influenceBase * focusBonus,
+    pressureDelta: pressureBase * (1 - Number(gangEffects.pressureMitigation || 0)),
+    threatDelta: success ? 1.4 : 2.7,
+    actionFamily: `gang-heist:${districtId}`,
+    eventText: success
+      ? "Gang odpala grubsza robote i podbija puls dzielni."
+      : "Spalona robota gangu zostawia gruby slad na dzielni.",
     now,
   });
   player.city = activity.city;
@@ -355,6 +393,64 @@ export function moveDrugToClubForPlayer(player, drugId, quantity = 1, now = Date
     inventoryCount: Number(player.drugInventory?.[drug.id] || 0),
     stashCount: Number(player.club.stash?.[drug.id] || 0),
     logMessage: `Do stashu wpada ${safeQuantity}x ${drug.name}.`,
+  };
+}
+
+export function consumeClubStashDrugForPlayer(player, ownerPlayer, venueId, drugId, now = Date.now()) {
+  syncCityStateForPlayer(player, now);
+  if (ownerPlayer) {
+    syncCityStateForPlayer(ownerPlayer, now);
+  }
+
+  const safeVenueId = String(venueId || player?.club?.visitId || "").trim();
+  if (!safeVenueId || String(player?.club?.visitId || "").trim() !== safeVenueId) {
+    fail("Najpierw wejdz do lokalu, zeby korzystac ze stashu.");
+  }
+  if (player?.club?.owned && String(player.club.sourceId || "").trim() === safeVenueId) {
+    fail("W swoim lokalu ogarniasz towar normalnie, nie przez stash dla gosci.");
+  }
+  if (!ownerPlayer?.club?.owned || String(ownerPlayer.club.sourceId || "").trim() !== safeVenueId) {
+    fail("W tym lokalu nie ma aktywnego stashu gospodarza.");
+  }
+  if (Number(player?.profile?.jailUntil || 0) > now) {
+    fail("Z celi nie zarzucisz towaru.");
+  }
+
+  const consumeReadyAt =
+    Number(player?.club?.guestState?.lastConsumeAt || 0) + Number(CLUB_SYSTEM_RULES.consumeCooldownMs || 0);
+  if (consumeReadyAt > now) {
+    fail(`Z lokalu zarzucisz znowu za ${Math.ceil((consumeReadyAt - now) / 1000)} sek.`);
+  }
+
+  const drug = findDrugById(drugId);
+  if (!drug) {
+    fail("Nie ma takiego towaru.", 404);
+  }
+  if (Number(ownerPlayer.club?.stash?.[drug.id] || 0) <= 0) {
+    fail(`Na stashu nie ma teraz ${drug.name}.`);
+  }
+
+  ownerPlayer.club.stash[drug.id] = Math.max(0, Number(ownerPlayer.club.stash?.[drug.id] || 0) - 1);
+  ownerPlayer.club.recentIncident = {
+    tone: "stash",
+    text: `${player?.profile?.name || "Gosc"} schodzi z 1x ${drug.name} z lokalu.`,
+    createdAt: now,
+  };
+  player.club.guestState.lastConsumeAt = now;
+  player.club.guestState.lastVenueId = safeVenueId;
+
+  const consumeResult = applyDrugConsumptionToPlayer(player, drug, now);
+  const ownerName = ownerPlayer?.profile?.name || ownerPlayer?.username || "wlasciciela";
+
+  return {
+    ...consumeResult,
+    drugId: drug.id,
+    stashCount: Number(ownerPlayer.club?.stash?.[drug.id] || 0),
+    venueId: safeVenueId,
+    logMessage: consumeResult.overdose
+      ? `Przedawkowanie po ${drug.name} z lokalu ${ownerName}.`
+      : `Zarzuciles ${drug.name} ze stashu lokalu ${ownerName}.`,
+    ownerLogMessage: `${player?.profile?.name || "Gosc"} zszedl 1x ${drug.name} ze stashu ${ownerPlayer?.club?.name || "lokalu"}.`,
   };
 }
 

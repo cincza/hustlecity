@@ -581,6 +581,16 @@ async function main() {
       throw new Error("Zaproszenie do gangu nie zwrocilo komunikatu backendowego.");
     }
 
+    const secondGangInviteResult = await request("/gang/invite", {
+      method: "POST",
+      token,
+      body: { targetUserId: firstAttackTarget.id },
+    });
+
+    if (!secondGangInviteResult?.result?.message) {
+      throw new Error("Drugie zaproszenie do gangu nie zwrocilo komunikatu backendowego.");
+    }
+
     await delay(AUTH_LOGIN_DELAY_MS);
     const invitedUserLogin = await request("/auth/login", {
       method: "POST",
@@ -589,6 +599,60 @@ async function main() {
     const invitedUserMe = await request("/me", { token: invitedUserLogin.token });
     if (!Array.isArray(invitedUserMe?.user?.gang?.invites) || !invitedUserMe.user.gang.invites.some((entry) => entry.gangName === "Smoke Syndicate" && Number(entry.inviteRespectMin || 0) === 30)) {
       throw new Error("Zaproszony gracz nie dostal invite do zywego gangu.");
+    }
+
+    const joinedGangOne = await request("/gang/join", {
+      method: "POST",
+      token: invitedUserLogin.token,
+      body: { invite: invitedUserMe.user.gang.invites.find((entry) => entry.gangName === "Smoke Syndicate") },
+    });
+
+    if (!joinedGangOne?.user?.gang?.joined || joinedGangOne.user.gang.name !== "Smoke Syndicate") {
+      throw new Error("Pierwszy zaproszony gracz nie dolaczyl do gangu.");
+    }
+
+    const secondInvitedUserMe = await request("/me", { token: noEmailRegisterTwo.token });
+    if (!Array.isArray(secondInvitedUserMe?.user?.gang?.invites) || !secondInvitedUserMe.user.gang.invites.some((entry) => entry.gangName === "Smoke Syndicate")) {
+      throw new Error("Drugi zaproszony gracz nie dostal invite do gangu.");
+    }
+
+    const joinedGangTwo = await request("/gang/join", {
+      method: "POST",
+      token: noEmailRegisterTwo.token,
+      body: { invite: secondInvitedUserMe.user.gang.invites.find((entry) => entry.gangName === "Smoke Syndicate") },
+    });
+
+    if (!joinedGangTwo?.user?.gang?.joined || joinedGangTwo.user.gang.name !== "Smoke Syndicate") {
+      throw new Error("Drugi zaproszony gracz nie dolaczyl do gangu.");
+    }
+
+    const postJoinGangState = await request("/me", { token });
+    if (Number(postJoinGangState?.user?.gang?.members || 0) < 3) {
+      throw new Error("Boss nie widzi pelnego skladu po dolaczeniu ludzi do gangu.");
+    }
+
+    const gangHeistResult = await request("/gang/heists/pharma/execute", {
+      method: "POST",
+      token,
+    });
+
+    if (!/success|failure/i.test(String(gangHeistResult?.result?.result || ""))) {
+      throw new Error("Napad gangu nie zwrocil poprawnego wyniku backendowego.");
+    }
+    if (gangHeistResult?.user?.gang?.name !== "Smoke Syndicate") {
+      throw new Error("Napad gangu nie zwrocil zsynchronizowanego stanu gangu.");
+    }
+    if (!Array.isArray(gangHeistResult?.gangs) || !gangHeistResult.gangs.some((entry) => entry.name === "Smoke Syndicate")) {
+      throw new Error("Napad gangu nie odswiezyl katalogu gangow.");
+    }
+    if (Number(gangHeistResult?.user?.profile?.jailUntil || 0) > Date.now()) {
+      const bribeAfterGangHeist = await request("/player/jail/bribe", {
+        method: "POST",
+        token,
+      });
+      if (Number(bribeAfterGangHeist?.user?.profile?.jailUntil || 0) > Date.now()) {
+        throw new Error("Bribe po wpadce na napadzie gangu nie wypuscil gracza z celi.");
+      }
     }
 
     const attackResult = await request(`/social/players/${firstAttackTarget.id}/attack`, {
@@ -661,6 +725,10 @@ async function main() {
     ) {
       throw new Error("Boost po zarzuceniu nie zostal zwrocony z backendu.");
     }
+    const smokesAfterConsume = Number(consumeResult?.user?.drugInventory?.smokes || 0);
+    if (smokesAfterConsume !== dealerTradeStartingSmokes + 2) {
+      throw new Error("Dealer consume nie odjal jednej sztuki towaru.");
+    }
 
     const soldDealerBatch = await request("/dealer/sell", {
       method: "POST",
@@ -668,7 +736,7 @@ async function main() {
       body: { drugId: "smokes", quantity: 2 },
     });
 
-    if (Number(soldDealerBatch?.user?.drugInventory?.smokes || 0) !== dealerTradeStartingSmokes) {
+    if (Number(soldDealerBatch?.user?.drugInventory?.smokes || 0) !== smokesAfterConsume - 2) {
       throw new Error("Dealer sell x2 nie odjal poprawnej ilosci towaru.");
     }
 
@@ -829,6 +897,31 @@ async function main() {
       throw new Error("Stash klubu nie przyjal towaru po stronie backendu.");
     }
 
+    await request("/clubs/visit", {
+      method: "POST",
+      token: noEmailRegisterTwo.token,
+      body: { mode: "enter", venueId: "club-2" },
+    });
+
+    const clubConsume = await request("/clubs/stash/consume", {
+      method: "POST",
+      token: noEmailRegisterTwo.token,
+      body: { venueId: "club-2", drugId: "smokes" },
+    });
+
+    if (!clubConsume?.result?.logMessage) {
+      throw new Error("Konsumpcja towaru ze stashu klubu nie zwrocila wyniku.");
+    }
+    if (Number(clubConsume?.result?.stashCount || 0) !== 1) {
+      throw new Error("Stash klubu nie odjal sztuki po konsumpcji goscia.");
+    }
+    if (
+      !clubConsume?.result?.overdose &&
+      !Array.isArray(clubConsume?.user?.activeBoosts)
+    ) {
+      throw new Error("Konsumpcja towaru z klubu nie odswiezyla boostow gracza.");
+    }
+
     const clubNight = await request("/clubs/night", {
       method: "POST",
       token,
@@ -842,6 +935,16 @@ async function main() {
     const neonDistrict = districtsAfterClub?.districts?.find((entry) => entry.id === "neon");
     if (!neonDistrict || Number(neonDistrict.influence || 0) <= 0) {
       throw new Error("Klub i fokus gangu nie zostawily sladu influence w Neon.");
+    }
+
+    const toppedUpEnergy = await request("/player/restaurant/eat", {
+      method: "POST",
+      token,
+      body: { itemId: "energybox" },
+    });
+
+    if (Number(toppedUpEnergy?.user?.profile?.energy || 0) < 3) {
+      throw new Error("Restauracja nie dowiozla energii pod final operacji.");
     }
 
     const operationsSnapshot = await request("/operations", { token });
@@ -1105,6 +1208,7 @@ async function main() {
       clubAction: escortSearchResult.result.outcome,
       gang: "ok",
       gangInvite: "ok",
+      gangHeist: gangHeistResult.result.result,
       gangDelete: "ok",
       districts: districtsAfterClub.districts.length,
         gangProject: investedGangProject.result.level,

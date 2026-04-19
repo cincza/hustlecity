@@ -259,6 +259,7 @@ export const PLAYER_BOUNTY_INCREMENT = 1500;
 export const CLUB_SYSTEM_RULES = {
   trafficTickMinutes: 10,
   actionCooldownMs: 3 * 60 * 1000,
+  consumeCooldownMs: 90 * 1000,
   leadRequired: 100,
   visitDiminishingFloor: 0.16,
   ownerSelfTrafficFactor: 0.32,
@@ -378,6 +379,7 @@ export function createClubGuestVenueState() {
 export function createClubGuestState() {
   return {
     lastActionAt: 0,
+    lastConsumeAt: 0,
     lastActionType: null,
     lastOutcome: null,
     lastVenueId: null,
@@ -439,6 +441,7 @@ export function normalizeClubGuestState(value) {
 
   return {
     lastActionAt: Math.max(0, Math.floor(Number(value.lastActionAt || 0))),
+    lastConsumeAt: Math.max(0, Math.floor(Number(value.lastConsumeAt || 0))),
     lastActionType: typeof value.lastActionType === "string" && value.lastActionType.trim() ? value.lastActionType.trim() : null,
     lastOutcome:
       value.lastOutcome && typeof value.lastOutcome === "object" && !Array.isArray(value.lastOutcome)

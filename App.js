@@ -45,6 +45,7 @@ import {
   depositOnline,
   executeOperationPlanOnline,
   executeHeistOnline,
+  executeGangHeistOnline,
   fetchFriendListOnline,
   fetchCasinoMeta,
   fetchGangDirectoryOnline,
@@ -74,6 +75,7 @@ import {
   playSlotOnline,
   previewClubPvpOnline,
   registerUser,
+  consumeClubDrugOnline,
   moveDrugToClubOnline,
   produceDrugOnline,
   pullEscortFromStreetOnline,
@@ -137,6 +139,12 @@ import {
   normalizeSupplies,
 } from "./shared/empire.js";
 import { applyXpProgression } from "./shared/progression.js";
+import {
+  canRunGangHeistRole,
+  GANG_HEISTS,
+  getGangHeistBonusRate,
+  getGangHeistOdds,
+} from "./shared/gangHeists.js";
 import {
   createCityState,
   findDistrictById,
@@ -299,14 +307,6 @@ const REFERRAL_MILESTONES = [
 ];
 
 const HEISTS = HEIST_DEFINITIONS;
-
-const GANG_HEISTS = [
-  { id: "pharma", name: "Magazyn farmaceutyczny", respect: 12, minMembers: 3, reward: [9000, 14000], risk: 0.32, energy: 3 },
-  { id: "casino", name: "Sejf kasyna", respect: 20, minMembers: 5, reward: [18000, 28000], risk: 0.4, energy: 4 },
-  { id: "port", name: "Kontener w porcie", respect: 30, minMembers: 8, reward: [36000, 54000], risk: 0.49, energy: 5 },
-  { id: "armory", name: "Sklad wojskowy", respect: 42, minMembers: 12, reward: [65000, 98000], risk: 0.59, energy: 6 },
-  { id: "mint", name: "Miejska mennica", respect: 58, minMembers: 18, reward: [120000, 170000], risk: 0.68, energy: 7 },
-];
 
 const PRODUCTS = MARKET_PRODUCTS;
 
@@ -483,7 +483,7 @@ const TAB_DEFINITIONS = [
   },
   { id: "heists", label: "Napady", sections: [{ id: "solo", label: "Solo", title: "Napady" }, { id: "fightclub", label: "Fight", title: "Fightclub" }, { id: "prison", label: "Cela", title: "Wiezienie" }] },
   { id: "empire", label: "Biznes", sections: [{ id: "businesses", label: "Biznesy", title: "Biznesy" }, { id: "factories", label: "Fabryki", title: "Fabryki" }, { id: "suppliers", label: "Dostawy", title: "Hurtownie" }, { id: "club", label: "Klub", title: "Klub" }] },
-  { id: "market", label: "Rynek", sections: [{ id: "street", label: "Handel", title: "Handel" }, { id: "drugs", label: "Towar", title: "Narkotyki" }, { id: "boosts", label: "Boosty", title: "Boosty" }] },
+  { id: "market", label: "Rynek", sections: [{ id: "drugs", label: "Towar", title: "Narkotyki" }, { id: "boosts", label: "Boosty", title: "Boosty" }] },
   { id: "gang", label: "Gang", sections: [{ id: "overview", label: "Gang", title: "Gang" }, { id: "heists", label: "Napady", title: "Napady gangu" }, { id: "members", label: "Sklad", title: "Czlonkowie" }, { id: "chat", label: "Chat", title: "Chat gangu" }, { id: "ops", label: "Akcje", title: "Operacje" }] },
   {
     id: "profile",
@@ -1051,10 +1051,6 @@ function createClubListings() {
   }));
 }
 
-function canRunGangHeistRole(role) {
-  return role === "Boss" || role === "Vice Boss" || role === "Zaufany";
-}
-
 function getGangProfileByName(game, gangName) {
   if (!gangName || gangName === "No gang") return null;
   const liveGang = (game.online?.gangs || []).find((entry) => entry.name === gangName);
@@ -1195,6 +1191,7 @@ function getCurrentClubVenue(game) {
       policePressure: game.club.policePressure,
       traffic: game.club.traffic,
       nightPlanId: game.club.nightPlanId,
+      stash: { ...(game.club.stash || {}) },
       districtId: game.club.districtId || null,
       securityLevel: game.club.securityLevel,
       defenseReadiness: game.club.defenseReadiness,
@@ -1290,24 +1287,6 @@ function getSoloHeistOdds(player, effectivePlayer, gang, heist) {
   const jailChance = clamp(heist.risk * 0.8 + player.heat * 0.005 - effectivePlayer.defense * 0.006 - effectivePlayer.dexterity * 0.004, 0.08, 0.68);
 
   return { chance, jailChance };
-}
-
-function getGangHeistOdds(player, effectivePlayer, gang, heist) {
-  const gangPower =
-    effectivePlayer.attack * 1.1 +
-    effectivePlayer.defense * 0.8 +
-    effectivePlayer.dexterity * 1.0 +
-    player.respect * 0.45 +
-    gang.members * 2.4 +
-    gang.influence * 1.2;
-  const gangDifficulty = heist.respect * 1.5 + heist.energy * 5 + heist.minMembers * 4 + heist.risk * 60;
-  const chance = clamp(0.35 + (gangPower - gangDifficulty) / 140 - player.heat * 0.002, 0.06, 0.9);
-
-  return { chance };
-}
-
-function getGangHeistBonusRate(gang) {
-  return clamp(gang.members * 0.01 + gang.influence * 0.004, 0, 0.24);
 }
 
 function ProgressBar({ progress }) {
@@ -1689,8 +1668,10 @@ function AppRuntime() {
   }, [game.player.avatarCustomUri]);
 
   const activeTab = TAB_DEFINITIONS.find((entry) => entry.id === tab) ?? TAB_DEFINITIONS[0];
-  const activeSectionId = sectionByTab[tab] || activeTab.sections[0].id;
-  const activeSection = activeTab.sections.find((entry) => entry.id === activeSectionId) || activeTab.sections[0];
+  const requestedSectionId = sectionByTab[tab] || activeTab.sections[0].id;
+  const activeSection =
+    activeTab.sections.find((entry) => entry.id === requestedSectionId) || activeTab.sections[0];
+  const activeSectionId = activeSection.id;
   const visibleSections = activeTab.sections.filter((entry) => !entry.hidden);
 
   const trimHandledNoticeLogs = (now = Date.now()) => {
@@ -3044,9 +3025,17 @@ function AppRuntime() {
     }
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - gang heist outcome, jailed crew, vault changes and payout split must be validated on backend
-  const executeGangHeist = (heist) => {
+  const executeGangHeist = async (heist) => {
     if (!canDoStreetAction()) return;
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await executeGangHeistOnline(sessionToken, heist.id);
+        mergeServerUser(result.user, result);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
     if (!requireOfflineDemoAuthority("Napady gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     if (!canRunGangHeistRole(game.gang.role)) return pushLog("Napady gangu odpalaja tylko Boss, Vice Boss albo Zaufany.");
@@ -4165,6 +4154,87 @@ function AppRuntime() {
         stash: { ...prev.club.stash, [drug.id]: Number(prev.club.stash?.[drug.id] || 0) + quantity },
       },
       log: [`Przerzucono ${quantity}x ${drug.name} do klubu.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const consumeDrugFromClub = async (drug) => {
+    if (!canDoStreetAction()) return;
+    if (!currentClubVenue) return pushLog("Najpierw wejdz do lokalu.");
+    if (insideOwnClub) return pushLog("W swoim klubie ogarniasz towar normalnie, nie ze stashu dla gosci.");
+
+    const stashCount = Number(currentClubVenue?.stash?.[drug.id] || 0);
+    if (stashCount <= 0) {
+      return pushLog(`Na stashu nie ma teraz ${drug.name}.`);
+    }
+
+    if (sessionToken && apiStatus === "online") {
+      try {
+        const result = await consumeClubDrugOnline(sessionToken, currentClubVenue.id, drug.id);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
+        showExplicitNotice({
+          tone: result?.result?.overdose ? "failure" : "success",
+          title: result?.result?.overdose ? "PRZEDAWKOWANIE" : "TOWAR Z LOKALU",
+          message: result?.result?.logMessage || `Zarzuciles ${drug.name} ze stashu lokalu.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message || `Nie udalo sie zarzucic ${drug.name} z lokalu.`);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Towar z klubu")) return;
+
+    const now = Date.now();
+    const consumeReadyAt =
+      Number(game.club?.guestState?.lastConsumeAt || 0) + Number(CLUB_SYSTEM_RULES.consumeCooldownMs || 0);
+    if (consumeReadyAt > now) {
+      return pushLog(`Z lokalu zarzucisz znowu za ${formatCooldown(consumeReadyAt - now)}.`);
+    }
+
+    const overdosed = Math.random() < Number(drug.overdoseRisk || 0);
+    const damage = overdosed ? randomBetween(28, 55) : 0;
+
+    setGame((prev) => ({
+      ...prev,
+      clubListings: prev.clubListings.map((listing) =>
+        listing.id === prev.club.visitId
+          ? {
+              ...listing,
+              stash: {
+                ...(listing.stash || {}),
+                [drug.id]: Math.max(0, Number(listing?.stash?.[drug.id] || 0) - 1),
+              },
+            }
+          : listing
+      ),
+      club: {
+        ...prev.club,
+        guestState: {
+          ...(prev.club.guestState || {}),
+          lastConsumeAt: now,
+          lastVenueId: prev.club.visitId || null,
+        },
+      },
+      activeBoosts: overdosed
+        ? prev.activeBoosts
+        : [
+            ...prev.activeBoosts,
+            { id: `${drug.id}-${now}`, name: drug.name, effect: drug.effect, expiresAt: now + drug.durationSeconds * 1000 },
+          ],
+      player: overdosed
+        ? {
+            ...prev.player,
+            hp: clamp(prev.player.hp - damage, 1, prev.player.maxHp),
+            heat: clamp(prev.player.heat + 8, 0, 100),
+          }
+        : prev.player,
+      log: [
+        overdosed
+          ? `Przedawkowanie po ${drug.name} z lokalu.`
+          : `Zarzuciles ${drug.name} ze stashu lokalu.`,
+        ...prev.log,
+      ].slice(0, 16),
     }));
   };
 
@@ -6175,8 +6245,22 @@ function AppRuntime() {
       />
       <SectionCard title="Napady gangu" subtitle="Sklad i szacun decyduja o wejsciu.">
         {GANG_HEISTS.map((heist) => {
-          const locked = game.player.respect < heist.respect || game.gang.members < heist.minMembers;
+          const roleLocked = !canRunGangHeistRole(game.gang.role);
+          const memberLocked = game.gang.members < heist.minMembers;
+          const respectLocked = game.player.respect < heist.respect;
+          const crewLocked = game.gang.members - game.gang.jailedCrew < heist.minMembers;
+          const lockdownLocked = crewLockdownRemaining > 0;
+          const locked = roleLocked || memberLocked || respectLocked || crewLocked || lockdownLocked;
           const odds = getGangHeistOdds(game.player, effectivePlayer, game.gang, heist);
+          const ctaLabel = roleLocked
+            ? "Za niska ranga"
+            : lockdownLocked
+              ? "Ekipa lezy po wtapie"
+              : crewLocked
+                ? "Za malo wolnych ludzi"
+                : memberLocked || respectLocked
+                  ? "Za malo ludzi albo szacunu"
+                  : "Odpal napad gangu";
           return (
             <View key={heist.id} style={[styles.listCard, locked && styles.listCardLocked]}>
               <View style={styles.listCardHeader}>
@@ -6200,7 +6284,7 @@ function AppRuntime() {
               <View style={styles.inlineRow}>
                 <Text style={styles.costLabel}>Wplywy: {game.gang.influence} | Teren: {game.gang.territory}</Text>
                 <Pressable onPress={() => executeGangHeist(heist)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
-                  <Text style={styles.inlineButtonText}>{locked ? "Za malo ludzi albo szacunu" : "Odpal napad gangu"}</Text>
+                  <Text style={styles.inlineButtonText}>{ctaLabel}</Text>
                 </Pressable>
               </View>
             </View>
@@ -7260,6 +7344,7 @@ function AppRuntime() {
       runClubVisitorAction,
       buyDrugFromDealer,
       sellDrugToDealer,
+      consumeDrugFromClub,
       moveDrugToClub,
     },
   };
@@ -7386,7 +7471,7 @@ function AppRuntime() {
       case "empire:club":
         return <EmpireScreen section="club" {...empireScreenBaseProps} />;
       case "market:street":
-        return <MarketScreen section="street" {...marketScreenBaseProps} />;
+        return <MarketScreen section="drugs" {...marketScreenBaseProps} />;
       case "market:drugs":
         return <MarketScreen section="drugs" {...marketScreenBaseProps} />;
       case "market:boosts":

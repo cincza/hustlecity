@@ -145,6 +145,10 @@ export function EmpireScreen({
     0,
     Number(clubGuestState.lastActionAt || 0) + Number(clubSystemRules?.actionCooldownMs || 0) - Date.now()
   );
+  const clubConsumeCooldownRemaining = Math.max(
+    0,
+    Number(clubGuestState.lastConsumeAt || 0) + Number(clubSystemRules?.consumeCooldownMs || 0) - Date.now()
+  );
   const displayedTraffic = insideOwnClub ? Number(clubPolice.traffic || 0) : Number(currentClubVenue?.traffic || 0);
   const trafficLabel = insideOwnClub
     ? clubPolice.trafficLabel
@@ -167,12 +171,12 @@ export function EmpireScreen({
         : displayedPressure >= 24
           ? "Czuja ruch"
           : "Spokojnie";
-  const clubTradeDrugs = drugs.filter((drug) => safeGame.player.respect >= Number(drug.unlockRespect || 0));
   const clubStashDrugs = drugs.filter(
     (drug) => Number(safeGame.drugInventory?.[drug.id] || 0) > 0 || Number(safeGame.club?.stash?.[drug.id] || 0) > 0
   );
-  const getDealerPayoutValue = (drug) =>
-    helpers.getDealerPayoutForDrug?.(drug) || Math.max(20, Math.floor(Number(drug?.streetPrice || 0) * 0.72));
+  const guestClubStashDrugs = drugs.filter(
+    (drug) => Number(currentClubVenue?.stash?.[drug.id] || 0) > 0
+  );
 
   const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
     <SectionCard title={title} subtitle={subtitle}>
@@ -832,18 +836,50 @@ export function EmpireScreen({
         )}
       </SectionCard>
 
-      {currentClubVenue ? (
-        <SectionCard
-          title="Towar w klubie"
-          subtitle={insideOwnClub ? "Kupujesz, sprzedajesz i dorzucasz stash bez wychodzenia z lokalu." : "Handel masz pod reka, nawet jako gosc."}
-        >
+      {currentClubVenue && !insideOwnClub ? (
+        <SectionCard title="Towar w lokalu" subtitle="Jako gosc mozesz zarzucic to, co wlasciciel wrzucil na stash. Bez kupna i sprzedazy na miejscu.">
+          {clubConsumeCooldownRemaining > 0 ? (
+            <Text style={styles.listCardMeta}>{`Lokal musi chwile odpoczac. Kolejny strzal za ${formatCooldown(clubConsumeCooldownRemaining)}.`}</Text>
+          ) : null}
+          {guestClubStashDrugs.length ? (
+            guestClubStashDrugs.map((drug) => (
+              <View key={drug.id} style={styles.listCard}>
+                <View style={styles.inlineRow}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={drugVisuals[drug.id]} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{drug.name}</Text>
+                      <Text style={styles.listCardMeta}>
+                        Na stashu: {Number(currentClubVenue?.stash?.[drug.id] || 0)} | Efekt: {Math.round(Number(drug.durationSeconds || 0) / 60)} min
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={() => actions.consumeDrugFromClub(drug)}
+                    style={[styles.inlineButton, clubConsumeCooldownRemaining > 0 && styles.tileDisabled]}
+                  >
+                    <Text style={styles.inlineButtonText}>
+                      {clubConsumeCooldownRemaining > 0 ? `Za ${formatCooldown(clubConsumeCooldownRemaining)}` : "Zarzuc"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>Na stashu nic teraz nie lezy. Wpadasz tu wtedy glownie po kontakty i akcje na sali.</Text>
+          )}
+        </SectionCard>
+      ) : null}
+
+      {insideOwnClub ? (
+        <SectionCard title="Stash klubu" subtitle="Wlasciciel dorzuca tu towar do zaplecza. Goscie moga tylko zarzucic to, co tu lezy.">
           <View style={styles.listCard}>
             <View style={styles.entityHead}>
-              <EntityBadge visual={systemVisuals.dealer} />
+              <EntityBadge visual={businessVisuals.club} />
               <View style={styles.flexOne}>
-                <Text style={styles.listCardTitle}>Ilosc transakcji</Text>
+                <Text style={styles.listCardTitle}>Ilosc wrzutki</Text>
                 <Text style={styles.listCardMeta}>
-                  {insideOwnClub ? "Ta sama ilosc dziala do handlu i do wrzutki na stash." : "Kupujesz i sprzedajesz bez wychodzenia z sali."}
+                  Ustawiasz ile sztuk chcesz przerzucic do stashu przed kolejna noca. Klub zuzywa ten towar automatycznie podczas ruchu na sali.
                 </Text>
               </View>
             </View>
@@ -856,58 +892,6 @@ export function EmpireScreen({
               style={styles.chatInput}
             />
           </View>
-          {clubTradeDrugs.length ? (
-            clubTradeDrugs.map((drug) => {
-              const stock = Number(safeGame.dealerInventory?.[drug.id] || 0);
-              const ownCount = Number(safeGame.drugInventory?.[drug.id] || 0);
-              const stashCount = Number(safeGame.club?.stash?.[drug.id] || 0);
-              const buyTotal = Number(drug.streetPrice || 0) * clubTradeQuantity;
-              const sellTotal = getDealerPayoutValue(drug) * clubTradeQuantity;
-              const buyDisabled = stock < clubTradeQuantity || Number(safeGame.player.cash || 0) < buyTotal;
-              const sellDisabled = ownCount < clubTradeQuantity;
-
-              return (
-                <View key={`club-trade-${drug.id}`} style={styles.listCard}>
-                  <View style={styles.listCardHeader}>
-                    <View style={styles.entityHead}>
-                      <EntityBadge visual={drugVisuals[drug.id]} />
-                      <View style={styles.flexOne}>
-                        <Text style={styles.listCardTitle}>{drug.name}</Text>
-                        <Text style={styles.listCardMeta}>
-                          U dilera: {stock} | Przy Tobie: {ownCount} | W klubie: {stashCount}
-                        </Text>
-                      </View>
-                    </View>
-                    <Tag text={`Partia ${drug.batchSize}`} />
-                  </View>
-                  <Text style={styles.listCardMeta}>
-                    Cena {formatMoney(drug.streetPrice)} | Skup {formatMoney(getDealerPayoutValue(drug))}
-                  </Text>
-                  <View style={styles.marketButtons}>
-                    <Pressable
-                      onPress={() => actions.buyDrugFromDealer(drug, clubTradeDraft)}
-                      style={[styles.marketButton, buyDisabled && styles.tileDisabled]}
-                    >
-                      <Text style={styles.marketButtonText}>{`Kup za ${formatMoney(buyTotal)}`}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => actions.sellDrugToDealer(drug, clubTradeDraft)}
-                      style={[styles.marketButton, sellDisabled && styles.tileDisabled]}
-                    >
-                      <Text style={styles.marketButtonText}>{`Sprzedaj za ${formatMoney(sellTotal)}`}</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            })
-          ) : (
-            <Text style={styles.emptyText}>Na tym progu nie masz jeszcze odblokowanego towaru do handlu.</Text>
-          )}
-        </SectionCard>
-      ) : null}
-
-      {insideOwnClub ? (
-        <SectionCard title="Stash klubu" subtitle={`Wrzucasz x${clubTradeQuantity} do zaplecza przed kolejna noca.`}>
           {clubStashDrugs.length ? (
             clubStashDrugs.map((drug) => (
               <View key={drug.id} style={styles.listCard}>
@@ -931,7 +915,7 @@ export function EmpireScreen({
               </View>
             ))
           ) : (
-            <Text style={styles.emptyText}>Nie masz teraz nic do dorzucenia na stash. Kup towar w klubie albo dowiez go z fabryk.</Text>
+            <Text style={styles.emptyText}>Nie masz teraz nic do dorzucenia na stash. Dowiez towar z fabryk albo ogarnij go poza ekranem klubu.</Text>
           )}
         </SectionCard>
       ) : null}

@@ -215,20 +215,14 @@ export function sellDrugToDealerForPlayer(player, drugId, quantity = 1) {
   };
 }
 
-export function consumeDrugForPlayer(player, drugId, now = Date.now()) {
+export function applyDrugConsumptionToPlayer(player, drug, now = Date.now()) {
   ensurePlayerSocialState(player);
-  const drug = findDrugById(drugId);
   if (!drug) {
     fail("Drug not found", 404);
   }
   if (Number(player.profile?.jailUntil || 0) > now) {
     fail("Z celi nie zarzucisz towaru.");
   }
-  if (Number(player.drugInventory?.[drug.id] || 0) <= 0) {
-    fail(`Nie masz na stanie: ${drug.name}.`);
-  }
-
-  player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - 1);
 
   if (Math.random() < Number(drug.overdoseRisk || 0)) {
     const damage = randomBetween(28, 55);
@@ -262,6 +256,20 @@ export function consumeDrugForPlayer(player, drugId, now = Date.now()) {
     effect: { ...(drug.effect || {}) },
     logMessage: `Weszlo ${drug.name}. Staty podbite na ${Math.round(Number(drug.durationSeconds || 0) / 60)} min.`,
   };
+}
+
+export function consumeDrugForPlayer(player, drugId, now = Date.now()) {
+  ensurePlayerSocialState(player);
+  const drug = findDrugById(drugId);
+  if (!drug) {
+    fail("Drug not found", 404);
+  }
+  if (Number(player.drugInventory?.[drug.id] || 0) <= 0) {
+    fail(`Nie masz na stanie: ${drug.name}.`);
+  }
+
+  player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - 1);
+  return applyDrugConsumptionToPlayer(player, drug, now);
 }
 
 export function addFriendForPlayer(player, targetEntry, now = Date.now()) {
