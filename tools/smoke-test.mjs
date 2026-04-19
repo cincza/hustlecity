@@ -701,6 +701,46 @@ async function main() {
       throw new Error("Boss nie widzi pelnego skladu po dolaczeniu ludzi do gangu.");
     }
 
+    const trustedRoleResult = await request("/gang/members/role", {
+      method: "POST",
+      token,
+      body: { targetUserId: firstAttackTarget.id, role: "Zaufany" },
+    });
+
+    if (!trustedRoleResult?.user?.gang?.membersList?.some((member) => member.id === firstAttackTarget.id && member.role === "Zaufany")) {
+      throw new Error("Zmiana rangi na Zaufanego nie odswiezyla skladu gangu.");
+    }
+
+    const firstViceRoleResult = await request("/gang/members/role", {
+      method: "POST",
+      token,
+      body: { targetUserId: secondAttackTarget.id, role: "Vice Boss" },
+    });
+
+    if (!firstViceRoleResult?.user?.gang?.membersList?.some((member) => member.id === secondAttackTarget.id && member.role === "Vice Boss")) {
+      throw new Error("Zmiana rangi na Vice Bossa nie odswiezyla skladu gangu.");
+    }
+
+    const secondViceRoleResult = await request("/gang/members/role", {
+      method: "POST",
+      token,
+      body: { targetUserId: firstAttackTarget.id, role: "Vice Boss" },
+    });
+
+    const finalGangMembers = secondViceRoleResult?.user?.gang?.membersList || [];
+    if (!finalGangMembers.some((member) => member.id === firstAttackTarget.id && member.role === "Vice Boss")) {
+      throw new Error("Przerzut Vice Bossa na innego czlonka nie zadzialal.");
+    }
+    if (!finalGangMembers.some((member) => member.id === secondAttackTarget.id && member.role === "Zaufany")) {
+      throw new Error("Poprzedni Vice Boss nie zostal cofniety na Zaufanego.");
+    }
+
+    const liveGangDirectory = await request("/gangs", { token });
+    const smokeSyndicate = (liveGangDirectory?.gangs || []).find((entry) => entry.name === "Smoke Syndicate");
+    if (!smokeSyndicate?.membersList?.some((member) => member.id === firstAttackTarget.id && member.role === "Vice Boss")) {
+      throw new Error("Katalog gangow nie pokazuje nowego Vice Bossa.");
+    }
+
     const gangHeistResult = await request("/gang/heists/pharma/execute", {
       method: "POST",
       token,

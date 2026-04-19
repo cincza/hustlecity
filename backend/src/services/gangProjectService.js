@@ -3,12 +3,14 @@ import {
   createGangState,
   ensureGangWeeklyGoal,
   GANG_INVITE_RESPECT_MIN,
+  isGangManageableRole,
   getGangProjectById,
   getGangProjectCost,
   getGangProjectEffects,
   getGangProjectLevel,
   getGangWeeklyProgress,
   incrementGangGoalProgress,
+  normalizeGangManageableRole,
   normalizeGangState,
 } from "../../../shared/gangProjects.js";
 import { DISTRICTS, findDistrictById, getDistrictSummaries } from "../../../shared/districts.js";
@@ -17,6 +19,26 @@ function fail(message, statusCode = 400) {
   const error = new Error(message);
   error.statusCode = statusCode;
   throw error;
+}
+
+function applyRoleToMembersList(gangState, targetUserId, targetName, role) {
+  if (!Array.isArray(gangState?.membersList) || !gangState.membersList.length) {
+    return;
+  }
+  const safeId = String(targetUserId || "").trim();
+  const safeName = String(targetName || "").trim().toLowerCase();
+  gangState.membersList = gangState.membersList.map((member) => {
+    const memberId = String(member?.id || "").trim();
+    const memberName = String(member?.name || "").trim().toLowerCase();
+    if ((!safeId || memberId !== safeId) && (!safeName || memberName !== safeName)) {
+      return member;
+    }
+    return {
+      ...member,
+      role,
+      trusted: role !== "Czlonek",
+    };
+  });
 }
 
 export function ensurePlayerGangState(player, now = Date.now()) {
@@ -234,6 +256,99 @@ export function updateGangSettingsForPlayer(player, settings = {}, now = Date.no
   return {
     inviteRespectMin,
     logMessage: `Prog wejscia do gangu ustawiony na ${inviteRespectMin} RES.`,
+  };
+}
+
+export function updateGangMemberRoleForPlayers(
+  actor,
+  target,
+  nextRole,
+  now = Date.now(),
+  options = {}
+) {
+  ensurePlayerGangState(actor, now);
+  ensurePlayerGangState(target, now);
+
+  if (!actor.gang.joined) {
+    fail("Najpierw wejdz do gangu.");
+  }
+  if (actor.gang.role !== "Boss") {
+    fail("Tylko boss ustawia role w ekipie.", 403);
+  }
+  if (!target.gang.joined) {
+    fail("Ten gracz nie jest w zadnym gangu.", 404);
+  }
+
+  const actorGangName = String(actor.gang.name || "").trim().toLowerCase();
+  const targetGangName = String(target.gang.name || "").trim().toLowerCase();
+  if (!actorGangName || actorGangName !== targetGangName) {
+    fail("Mozesz ustawic range tylko swojemu skladowi.", 400);
+  }
+
+  const safeRole = normalizeGangManageableRole(nextRole, "");
+  if (!isGangManageableRole(safeRole)) {
+    fail("Nie ma takiej rangi do ustawienia.");
+  }
+  if (String(options?.actorUserId || "").trim() && String(options.actorUserId).trim() === String(options?.targetUserId || "").trim()) {
+    fail("Swojej rangi nie przerzucisz tym przyciskiem.");
+  }
+  if (String(target.gang.role || "").trim() === "Boss") {
+    fail("Bossa nie przerzucisz tym przyciskiem.");
+  }
+
+  const previousRole = String(target.gang.role || "Czlonek").trim() || "Czlonek";
+  if (previousRole === safeRole) {
+    fail("Ta ranga juz jest ustawiona.");
+  }
+
+  const targetName = target.profile?.name || "Gracz";
+  const displacedVice = options?.currentVice && options.currentVice !== target ? options.currentVice : null;
+  if (safeRole === "Vice Boss" && displacedVice) {
+    ensurePlayerGangState(displacedVice, now);
+    displacedVice.gang.role = "Zaufany";
+    applyRoleToMembersList(displacedVice.gang, options?.currentViceUserId, displacedVice.profile?.name || "Gracz", "Zaufany");
+    applyRoleToMembersList(actor.gang, options?.currentViceUserId, displacedVice.profile?.name || "Gracz", "Zaufany");
+    applyRoleToMembersList(target.gang, options?.currentViceUserId, displacedVice.profile?.name || "Gracz", "Zaufany");
+  }
+
+  target.gang.role = safeRole;
+  applyRoleToMembersList(actor.gang, options?.targetUserId, targetName, safeRole);
+  applyRoleToMembersList(target.gang, options?.targetUserId, targetName, safeRole);
+  if (displacedVice) {
+    applyRoleToMembersList(displacedVice.gang, options?.targetUserId, targetName, safeRole);
+  }
+
+  actor.gang.chat = [
+    {
+      id: `gang-role-${String(options?.targetUserId || targetName).trim() || now}-${now}`,
+      author: "System",
+      text:
+        safeRole === "Vice Boss" && displacedVice
+          ? `${targetName} wskakuje na Vice Bossa, a ${displacedVice.profile?.name || "stary vice"} wraca na Zaufanego.`
+          : `${targetName} dostaje range ${safeRole}.`,
+      time: new Date(now).toISOString(),
+    },
+    ...(Array.isArray(actor.gang.chat) ? actor.gang.chat : []),
+  ].slice(0, 20);
+  actor.gang = ensureGangWeeklyGoal(actor.gang, now);
+  target.gang = ensureGangWeeklyGoal(target.gang, now);
+  if (displacedVice) {
+    displacedVice.gang = ensureGangWeeklyGoal(displacedVice.gang, now);
+  }
+
+  return {
+    targetName,
+    role: safeRole,
+    previousRole,
+    displacedViceName: displacedVice?.profile?.name || null,
+    logMessage: `Ranga ${targetName} leci teraz na ${safeRole}.`,
+    targetLogMessage:
+      safeRole === "Vice Boss"
+        ? `Boss wrzuca Cie na Vice Bossa w ${actor.gang.name}.`
+        : `Boss ustawia Ci range ${safeRole} w ${actor.gang.name}.`,
+    displacedViceLogMessage: displacedVice
+      ? `Boss przerzuca Cie z Vice Bossa na Zaufanego.`
+      : null,
   };
 }
 

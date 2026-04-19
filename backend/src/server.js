@@ -113,6 +113,7 @@ import {
   leaveGangForPlayer,
   setGangFocusForPlayer,
   syncGangDerivedState,
+  updateGangMemberRoleForPlayers,
   updateGangSettingsForPlayer,
 } from "./services/gangProjectService.js";
 import { executeGangHeistForPlayer } from "./services/gangHeistService.js";
@@ -3556,6 +3557,123 @@ app.post("/gang/settings", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/gang/members/role", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const targetUserId = String(req.body?.targetUserId || "").trim();
+  const nextRole = String(req.body?.role || "").trim();
+
+  if (!targetUserId) {
+    res.status(400).json({ error: "targetUserId is required" });
+    return;
+  }
+  if (!nextRole) {
+    res.status(400).json({ error: "role is required" });
+    return;
+  }
+  if (targetUserId === req.user.id) {
+    res.status(400).json({ error: "Swojej rangi nie przerzucisz tym przyciskiem." });
+    return;
+  }
+
+  const actorPreview = await findUserById(req.user.id);
+  if (!actorPreview?.playerData) {
+    res.status(401).json({ error: "Authenticated player not found" });
+    return;
+  }
+
+  syncPlayerState(actorPreview.playerData, now);
+  ensurePlayerGangState(actorPreview.playerData, now);
+  if (!actorPreview.playerData.gang?.joined || !actorPreview.playerData.gang?.name) {
+    res.status(400).json({ error: "Najpierw wejdz do gangu." });
+    return;
+  }
+  if (actorPreview.playerData.gang.role !== "Boss") {
+    res.status(403).json({ error: "Tylko boss ustawia role w ekipie." });
+    return;
+  }
+
+  const gangName = String(actorPreview.playerData.gang.name || "").trim();
+  const gangUserIds = (await listUsers())
+    .filter((userRecord) => {
+      const player = userRecord?.playerData;
+      return (
+        player?.gang?.joined &&
+        String(player.gang.name || "").trim().toLowerCase() === gangName.toLowerCase()
+      );
+    })
+    .map((userRecord) => userRecord._id);
+  const affectedUserIds = [...new Set([...gangUserIds, req.user.id, targetUserId])];
+
+  let result = null;
+  await withUserMutationLocks(affectedUserIds, `gang-role:${gangName.toLowerCase()}`, async () => {
+    const refreshedUsers = await Promise.all(affectedUserIds.map((userId) => findUserById(userId)));
+    const actorRecord = refreshedUsers.find((userRecord) => userRecord?._id === req.user.id);
+    const targetRecord = refreshedUsers.find((userRecord) => userRecord?._id === targetUserId);
+
+    if (!actorRecord?.playerData || !targetRecord?.playerData) {
+      const error = new Error("Nie znaleziono jednego z graczy.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const actor = actorRecord.playerData;
+    const target = targetRecord.playerData;
+    syncPlayerState(actor, now);
+    syncPlayerState(target, now);
+    ensurePlayerGangState(actor, now);
+    ensurePlayerGangState(target, now);
+
+    if (!actor.gang.joined || actor.gang.role !== "Boss") {
+      const error = new Error("Tylko boss ustawia role w ekipie.");
+      error.statusCode = 403;
+      throw error;
+    }
+    if (
+      !target.gang.joined ||
+      String(target.gang.name || "").trim().toLowerCase() !== String(actor.gang.name || "").trim().toLowerCase()
+    ) {
+      const error = new Error("Ten gracz nie siedzi w Twoim gangu.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const currentViceRecord = refreshedUsers.find(
+      (userRecord) =>
+        userRecord?._id !== targetUserId &&
+        userRecord?.playerData?.gang?.joined &&
+        String(userRecord.playerData.gang.name || "").trim().toLowerCase() === String(actor.gang.name || "").trim().toLowerCase() &&
+        String(userRecord.playerData.gang.role || "").trim() === "Vice Boss"
+    ) || null;
+
+    result = updateGangMemberRoleForPlayers(actor, target, nextRole, now, {
+      actorUserId: actorRecord._id,
+      targetUserId: targetRecord._id,
+      currentVice: currentViceRecord?.playerData || null,
+      currentViceUserId: currentViceRecord?._id || null,
+    });
+    pushLog(actor, result.logMessage);
+    pushLog(target, result.targetLogMessage);
+    if (currentViceRecord?.playerData && result.displacedViceLogMessage) {
+      pushLog(currentViceRecord.playerData, result.displacedViceLogMessage);
+    }
+
+    const recordsToPersist = [
+      actorRecord,
+      targetRecord,
+      ...(currentViceRecord ? [currentViceRecord] : []),
+    ].filter(Boolean);
+    const persistedRecords = await Promise.all(
+      recordsToPersist.map((userRecord) => persistPlayerForUser(userRecord._id, userRecord.playerData))
+    );
+    const updatedActorRecord =
+      persistedRecords.find((userRecord) => userRecord?._id === req.user.id) || actorRecord;
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
+  });
+
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 

@@ -87,6 +87,7 @@ import {
   sendDirectMessageOnline,
   setClubPlanOnline,
   setGangFocusOnline,
+  updateGangMemberRoleOnline,
   updateGangSettingsOnline,
   startOperationOnline,
   startBlackjackOnline,
@@ -159,6 +160,7 @@ import {
   createGangState,
   GANG_INVITE_RESPECT_MAX,
   GANG_INVITE_RESPECT_MIN,
+  GANG_MEMBER_MANAGEABLE_ROLES,
   getGangProjectCost,
   getGangProjectEffects,
   getGangProjectLevel,
@@ -218,6 +220,11 @@ const GANG_INVITE_THRESHOLD_PRESETS = [
   100,
   GANG_INVITE_RESPECT_MAX,
 ].filter((value, index, values) => values.indexOf(value) === index);
+const GANG_ROLE_BUTTON_LABELS = {
+  Czlonek: "Zwykly",
+  Zaufany: "Zaufany",
+  "Vice Boss": "Vice",
+};
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
 const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
 const PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.sameTargetRepeatCooldownSeconds || 0) * 1000;
@@ -1642,6 +1649,7 @@ function AppRuntime() {
   const [quickActionModal, setQuickActionModal] = useState(null);
   const [adminDeleteBusyLogin, setAdminDeleteBusyLogin] = useState("");
   const [gangSettingsBusy, setGangSettingsBusy] = useState(false);
+  const [gangRoleBusyMemberId, setGangRoleBusyMemberId] = useState("");
   const noticeOpacity = useRef(new Animated.Value(0)).current;
   const noticeTranslateY = useRef(new Animated.Value(-12)).current;
   const previousGameRef = useRef(INITIAL);
@@ -4625,36 +4633,92 @@ function AppRuntime() {
     }));
   };
 
-  const promoteGangMember = (targetRole) => {
-    if (!game.gang.joined) return;
-    if (game.gang.role !== "Boss") return pushLog("Tylko boss ustawia role w ekipie.");
-
+  const applyGangMemberRoleLocally = (member, nextRole) => {
     setGame((prev) => {
-      const members = [...prev.gang.membersList];
-      if (targetRole === "Vice Boss") {
-        const candidate = members.find((member) => member.role === "Zaufany");
-        if (!candidate) return prev;
-        const currentVice = members.find((member) => member.role === "Vice Boss");
-        if (currentVice) currentVice.role = "Zaufany";
-        candidate.role = "Vice Boss";
-        candidate.trusted = true;
-      } else {
-        const candidate = members.find((member) => member.role === "Czlonek");
-        if (!candidate) return prev;
-        candidate.role = "Zaufany";
-        candidate.trusted = true;
+      const safeRole = GANG_MEMBER_MANAGEABLE_ROLES.includes(nextRole) ? nextRole : "Czlonek";
+      const targetIndex = (prev.gang.membersList || []).findIndex(
+        (entry) => entry.id === member.id || entry.name === member.name
+      );
+      if (targetIndex < 0) return prev;
+
+      const members = (prev.gang.membersList || []).map((entry) => ({ ...entry }));
+      const targetMember = members[targetIndex];
+      const selfMember =
+        targetMember.id === prev.player.id ||
+        String(targetMember.name || "").trim().toLowerCase() === String(prev.player.name || "").trim().toLowerCase();
+      if (selfMember || targetMember.role === safeRole) {
+        return prev;
       }
+
+      if (safeRole === "Vice Boss") {
+        const currentViceIndex = members.findIndex(
+          (entry, index) => index !== targetIndex && entry.role === "Vice Boss"
+        );
+        if (currentViceIndex >= 0) {
+          members[currentViceIndex] = {
+            ...members[currentViceIndex],
+            role: "Zaufany",
+            trusted: true,
+          };
+        }
+      }
+
+      members[targetIndex] = {
+        ...targetMember,
+        role: safeRole,
+        trusted: safeRole !== "Czlonek",
+      };
 
       return {
         ...prev,
-        gang: {
+        gang: normalizeGangState({
           ...prev.gang,
           membersList: members,
-          chat: [{ id: `gang-${Date.now()}`, author: "System", text: `Boss ustawia role: ${targetRole}.`, time: nowTimeLabel() }, ...prev.gang.chat].slice(0, 14),
-        },
-        log: [`Awans w gangu: ${targetRole}.`, ...prev.log].slice(0, 16),
+          chat: [
+            {
+              id: `gang-role-local-${member.id || member.name}-${Date.now()}`,
+              author: "System",
+              text: `${member.name} dostaje range ${safeRole}.`,
+              time: nowTimeLabel(),
+            },
+            ...(prev.gang.chat || []),
+          ].slice(0, 20),
+        }),
+        log: [`Ranga ${member.name} leci na ${safeRole}.`, ...prev.log].slice(0, 16),
       };
     });
+  };
+
+  const updateGangMemberRole = async (member, nextRole) => {
+    if (!game.gang.joined) return;
+    if (game.gang.role !== "Boss") return pushLog("Tylko boss ustawia role w ekipie.");
+    if (!member?.id) return pushLog("Nie znaleziono czlonka do zmiany rangi.");
+    if (
+      member.id === game.player.id ||
+      String(member.name || "").trim().toLowerCase() === String(game.player.name || "").trim().toLowerCase()
+    ) {
+      return pushLog("Swojej rangi nie przerzucisz tym przyciskiem.");
+    }
+
+    const safeRole = GANG_MEMBER_MANAGEABLE_ROLES.includes(nextRole) ? nextRole : "Czlonek";
+    if (member.role === safeRole) return;
+
+    if (hasOnlineAuthority) {
+      setGangRoleBusyMemberId(member.id);
+      try {
+        const result = await updateGangMemberRoleOnline(sessionToken, member.id, safeRole);
+        mergeServerUser(result.user, result);
+        pushLog(result?.result?.logMessage || `Ranga ${member.name} leci na ${safeRole}.`);
+      } catch (error) {
+        pushLog(error.message);
+      } finally {
+        setGangRoleBusyMemberId("");
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Rangi w gangu")) return;
+    applyGangMemberRoleLocally(member, safeRole);
   };
 
   const collectGangTribute = () => {
@@ -5280,6 +5344,33 @@ function AppRuntime() {
         selectedGangId: null,
       },
     }));
+  };
+
+  const renderGangRoleControls = (member) => {
+    if (!game.gang.joined || game.gang.role !== "Boss") return null;
+    const isSelf =
+      member?.id === game.player.id ||
+      String(member?.name || "").trim().toLowerCase() === String(game.player.name || "").trim().toLowerCase();
+    if (isSelf) return null;
+
+    const busy = gangRoleBusyMemberId === member?.id;
+    return (
+      <View style={styles.listActionsRow}>
+        {GANG_MEMBER_MANAGEABLE_ROLES.map((role) => (
+          <Pressable
+            key={`${member.id}-${role}`}
+            onPress={() => updateGangMemberRole(member, role)}
+            disabled={busy || member.role === role}
+            style={[
+              styles.inlineButton,
+              (busy || member.role === role) && styles.tileDisabled,
+            ]}
+          >
+            <Text style={styles.inlineButtonText}>{GANG_ROLE_BUTTON_LABELS[role] || role}</Text>
+          </Pressable>
+        ))}
+      </View>
+    );
   };
 
   const sendGangAllianceOffer = (gangProfile) => {
@@ -6560,7 +6651,9 @@ function AppRuntime() {
             {gangProfileView === "members" ? (
               <View style={styles.listCard}>
                 <Text style={styles.listCardTitle}>Sklad gangu</Text>
-                <Text style={styles.listCardMeta}>Boss, zaufani i zwykli ludzie ekipy.</Text>
+                <Text style={styles.listCardMeta}>
+                  Boss ustawia role lekkim panelem. Vice Boss jest tylko jeden.
+                </Text>
                 {selectedGangProfile.membersList?.map((member) => (
                   <View key={member.id} style={styles.listCard}>
                     <View style={styles.inlineRow}>
@@ -6570,6 +6663,7 @@ function AppRuntime() {
                       </View>
                       <Tag text={member.trusted ? "Zaufany" : "Czlonek"} warning={!member.trusted} />
                     </View>
+                    {selectedGangProfile.self ? renderGangRoleControls(member) : null}
                   </View>
                 ))}
               </View>
@@ -6775,6 +6869,7 @@ function AppRuntime() {
                   </View>
                   <Tag text={member.trusted ? "Zaufany" : "Zwykly"} warning={!member.trusted} />
                 </View>
+                {renderGangRoleControls(member)}
               </View>
             ))}
           </SectionCard>

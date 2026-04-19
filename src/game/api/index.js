@@ -517,6 +517,14 @@ export async function updateGangSettingsOnline(token, settings) {
   });
 }
 
+export async function updateGangMemberRoleOnline(token, targetUserId, role) {
+  return request("/gang/members/role", {
+    method: "POST",
+    token,
+    body: { targetUserId, role },
+  });
+}
+
 export async function deleteGangOnline(token) {
   return request("/gang/delete", {
     method: "POST",

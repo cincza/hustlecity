@@ -7,6 +7,13 @@ export const GANG_INVITE_RESPECT_MIN = 5;
 export const GANG_INVITE_RESPECT_MAX = 200;
 export const clampGangInviteRespectMin = (value) =>
   clampGangValue(value, GANG_INVITE_RESPECT_MIN, GANG_INVITE_RESPECT_MAX);
+export const GANG_MEMBER_MANAGEABLE_ROLES = ["Czlonek", "Zaufany", "Vice Boss"];
+export const normalizeGangManageableRole = (value, fallback = "Czlonek") => {
+  const role = String(value || "").trim();
+  return GANG_MEMBER_MANAGEABLE_ROLES.includes(role) ? role : fallback;
+};
+export const isGangManageableRole = (value) =>
+  GANG_MEMBER_MANAGEABLE_ROLES.includes(String(value || "").trim());
 
 export const DEMO_GANG_INVITES = [];
 const LEGACY_DEMO_GANG_INVITE_IDS = new Set(["inv-1", "inv-2"]);
