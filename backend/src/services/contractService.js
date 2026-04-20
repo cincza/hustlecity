@@ -265,7 +265,7 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     now,
     source: `spalonym kontrakcie ${contract.name}`,
     allowCriticalCare: true,
-    minimumHp: 1,
+    minimumHp: 0,
   });
   player.profile.heat = clamp(Number(player.profile.heat || 0) + Number(preview.heatGain || 0) + 4, 0, 100);
   const finalJailSeconds = damageState.criticalCareTriggered ? 0 : jailSeconds;

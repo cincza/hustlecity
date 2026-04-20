@@ -5495,7 +5495,7 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
         now,
         source: `wtopie na napadzie ${heist.name}`,
         allowCriticalCare: Number(heist.tier || 0) >= 4,
-        minimumHp: 1,
+        minimumHp: 0,
       });
       currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnFailure, 0, 100);
       applyHeistDistrictOutcome(currentPlayer, heist, { success: false, now });

@@ -42,7 +42,7 @@ export const CRITICAL_CARE_RULES = {
     id: "private",
     label: "Prywatna klinika",
     durationMs: 5 * 60 * 1000,
-    cost: 6500,
+    cost: 10000,
     returnHpRatio: 0.66,
     heatRelief: 4,
   },

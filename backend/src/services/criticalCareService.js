@@ -53,7 +53,7 @@ export function syncPlayerCriticalCare(player, now = Date.now()) {
 
   if (isCriticalCareActive(profile, now)) {
     player.timers.hpUpdatedAt = now;
-    profile.hp = Math.max(1, Math.min(Number(profile.maxHp || 100), Number(profile.hp || 1)));
+    profile.hp = 0;
     return {
       active: true,
       released: false,
@@ -113,7 +113,7 @@ export function enterPlayerCriticalCare(player, { source = "robota", now = Date.
   }
 
   const mode = getCriticalCareMode(modeId);
-  profile.hp = Math.max(1, Math.min(Number(profile.maxHp || 100), Number(profile.hp || 1)));
+  profile.hp = 0;
   profile.criticalCareUntil = now + Number(mode.durationMs || 0);
   profile.criticalCareSource = String(source || "robota").trim() || "robota";
   profile.criticalCareMode = mode.id;
@@ -149,7 +149,7 @@ export function applyCriticalCareDamage(
     const criticalCare = enterPlayerCriticalCare(player, { source, now });
     return {
       damage: safeDamage,
-      hpAfter: Number(player.profile.hp || 1),
+      hpAfter: Number(player.profile.hp || 0),
       criticalCareTriggered: Boolean(criticalCare.entered),
       mode: criticalCare.mode,
       status: criticalCare.status,

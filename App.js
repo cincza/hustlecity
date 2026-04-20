@@ -1846,6 +1846,7 @@ function AppRuntime() {
   const lastExplicitNoticeAtRef = useRef(0);
   const handledNoticeLogsRef = useRef(new Map());
   const didHydrateSessionRef = useRef(false);
+  const previousCriticalCareStateRef = useRef({ active: false, protected: false });
   const [gangProfileView, setGangProfileView] = useState("actions");
   const [casinoState, setCasinoState] = useState(createInitialCasinoState);
   const [gangRaidPreviewState, setGangRaidPreviewState] = useState({
@@ -2990,6 +2991,22 @@ function AppRuntime() {
     });
   };
 
+  const showCriticalCareBlockedNotice = (actionLabel = "Ta akcja") => {
+    if (!criticalCareStatus.active) return false;
+    showExplicitNotice({
+      tone: "failure",
+      title: "STAN KRYTYCZNY",
+      message: `Jestes na ${criticalCareStatus.mode.label.toLowerCase()} jeszcze ${formatCooldown(
+        criticalCareStatus.remainingMs
+      )}. ${actionLabel} jest teraz zablokowane. Wejdz do Szpitala w Miescie, jesli chcesz przepisac sie do prywatnej kliniki.`,
+    });
+    setQuickActionModal(null);
+    setSectionByTab((prev) => ({ ...prev, city: "hospital" }));
+    setTab("city");
+    setIsHubActive(false);
+    return true;
+  };
+
   const openQuickAction = (action) => {
     setNotice(null);
     setQuickActionModal(action);
@@ -3061,6 +3078,43 @@ function AppRuntime() {
   };
 
   useEffect(() => {
+    const previous = previousCriticalCareStateRef.current;
+    if (criticalCareStatus.active && !previous.active) {
+      showExplicitNotice({
+        tone: "failure",
+        title: "STAN KRYTYCZNY",
+        message: `Po ${criticalCareStatus.source || "ciezkiej akcji"} trafiles na ${criticalCareStatus.mode.label.toLowerCase()}. Przez ${formatCooldown(
+          criticalCareStatus.remainingMs
+        )} nie zrobisz napadow, kontraktow, PvP ani treningu.`,
+      });
+      setQuickActionModal(null);
+      setSectionByTab((prev) => ({ ...prev, city: "hospital" }));
+      setTab("city");
+      setIsHubActive(false);
+    } else if (!criticalCareStatus.active && previous.active && criticalCareStatus.protected) {
+      showExplicitNotice({
+        tone: "warning",
+        title: "WRACASZ DO GRY",
+        message: `Wyszedles z terapii z okolo ${criticalCareStatus.expectedRecoveryHp || 0} HP. Przez ${formatCooldown(
+          criticalCareStatus.protectionRemainingMs || 0
+        )} masz jeszcze oslone przed dobijaniem w PvP.`,
+      });
+    }
+    previousCriticalCareStateRef.current = {
+      active: Boolean(criticalCareStatus.active),
+      protected: Boolean(criticalCareStatus.protected),
+    };
+  }, [
+    criticalCareStatus.active,
+    criticalCareStatus.expectedRecoveryHp,
+    criticalCareStatus.mode?.label,
+    criticalCareStatus.protected,
+    criticalCareStatus.protectionRemainingMs,
+    criticalCareStatus.remainingMs,
+    criticalCareStatus.source,
+  ]);
+
+  useEffect(() => {
     pageScrollRef.current?.scrollTo?.({ y: 0, animated: false });
   }, [tab, activeSectionId, isPhone]);
 
@@ -3074,11 +3128,7 @@ function AppRuntime() {
 
   const canDoCriticalAction = (actionLabel = "Ta akcja") => {
     if (!criticalCareStatus.active) return true;
-    pushLog(
-      `${actionLabel} wraca po wyjsciu z ${criticalCareStatus.mode.label.toLowerCase()}. Zostalo ${formatCooldown(
-        criticalCareStatus.remainingMs
-      )}.`
-    );
+    showCriticalCareBlockedNotice(actionLabel);
     return false;
   };
 
@@ -3773,7 +3823,7 @@ function AppRuntime() {
           ...prev.player,
           cash: Math.max(0, Number(prev.player.cash || 0) - entryCost - extraLoss),
           energy: Math.max(0, Number(prev.player.energy || 0) - Number(contract.energyCost || 0)),
-          hp: clamp(Number(prev.player.hp || 0) - failDamage, 1, Number(prev.player.maxHp || 100)),
+          hp: clamp(Number(prev.player.hp || 0) - failDamage, 0, Number(prev.player.maxHp || 100)),
           heat: clamp(Number(prev.player.heat || 0) + Number(preview.heatGain || 0) + 4, 0, 100),
           jailUntil: jailSeconds > 0 ? Math.max(Number(prev.player.jailUntil || 0), Date.now() + jailSeconds * 1000) : prev.player.jailUntil,
         },
@@ -5035,7 +5085,7 @@ function AppRuntime() {
         drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - 1 },
         player: {
           ...prev.player,
-          hp: clamp(prev.player.hp - randomBetween(28, 55), 1, prev.player.maxHp),
+          hp: clamp(prev.player.hp - randomBetween(28, 55), 0, prev.player.maxHp),
           heat: clamp(prev.player.heat + 8, 0, 100),
         },
         log: [`Przedawkowanie po ${drug.name}. Ledwo stoisz na nogach.`, ...prev.log].slice(0, 16),
@@ -5359,7 +5409,7 @@ function AppRuntime() {
       player: overdosed
         ? {
             ...prev.player,
-            hp: clamp(prev.player.hp - damage, 1, prev.player.maxHp),
+            hp: clamp(prev.player.hp - damage, 0, prev.player.maxHp),
             heat: clamp(prev.player.heat + 8, 0, 100),
           }
         : prev.player,
@@ -8842,6 +8892,8 @@ function AppRuntime() {
     onStartOperation: startOperation,
     onAdvanceOperation: advanceOperation,
     onExecuteOperation: executeOperationPlan,
+    onBlockedByCriticalCare: showCriticalCareBlockedNotice,
+    onOpenHospital: () => setActiveSection("city", "hospital"),
     sceneBackgrounds: SCENE_BACKGROUNDS,
   };
 
@@ -9020,6 +9072,8 @@ function AppRuntime() {
               energy={game.player.energy}
               maxEnergy={game.player.maxEnergy}
               activeAvatar={activeAvatar}
+              criticalCareStatus={criticalCareStatus}
+              formatCooldown={formatCooldown}
             />
 
             {notice && !isPhone ? (

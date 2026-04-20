@@ -234,7 +234,7 @@ export function applyDrugConsumptionToPlayer(player, drug, now = Date.now()) {
       now,
       source: `przedawkowaniu po ${drug.name}`,
       allowCriticalCare: true,
-      minimumHp: 1,
+      minimumHp: 0,
     });
     player.profile.heat = clampSocialValue(Number(player.profile?.heat || 0) + 8, 0, 100);
 

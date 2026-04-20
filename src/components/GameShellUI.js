@@ -30,9 +30,10 @@ function IconChip({ icon, accent = "#f0c24d", size = 18 }) {
 
 function ProgressBar({ value, max, fillColor }) {
   const progress = Math.max(0, Math.min(1, max > 0 ? value / max : 0));
+  const width = progress <= 0 ? "0%" : `${Math.max(6, progress * 100)}%`;
   return (
     <View style={styles.statBarTrack}>
-      <View style={[styles.statBarFill, { width: `${Math.max(6, progress * 100)}%`, backgroundColor: fillColor }]} />
+      <View style={[styles.statBarFill, { width, backgroundColor: fillColor }]} />
     </View>
   );
 }
@@ -99,9 +100,20 @@ export function GameHeader({
   energy,
   maxEnergy,
   activeAvatar,
+  criticalCareStatus,
+  formatCooldown,
 }) {
   const { width } = useWindowDimensions();
   const compact = width <= 430;
+  const criticalCareActive = Boolean(criticalCareStatus?.active);
+  const criticalCareProtected = Boolean(criticalCareStatus?.protected);
+  const criticalCareTimer = formatCooldown
+    ? formatCooldown(
+        criticalCareActive
+          ? criticalCareStatus?.remainingMs || 0
+          : criticalCareStatus?.protectionRemainingMs || 0
+      )
+    : null;
 
   return (
     <ImageBackground source={PLAYER_HUD_BG} style={[styles.headerWrap, compact && styles.headerWrapCompact]} imageStyle={styles.headerBackgroundImage}>
@@ -128,6 +140,31 @@ export function GameHeader({
           <Text style={[styles.headerRespectLabel, compact && styles.headerRespectLabelCompact]}>SZACUNEK</Text>
         </LinearGradient>
       </View>
+
+      {criticalCareActive || criticalCareProtected ? (
+        <LinearGradient
+          colors={
+            criticalCareActive
+              ? ["rgba(105,22,30,0.96)", "rgba(52,11,17,0.98)"]
+              : ["rgba(78,58,18,0.94)", "rgba(37,27,9,0.98)"]
+          }
+          style={[styles.headerAlertStrip, compact && styles.headerAlertStripCompact]}
+        >
+          <View style={styles.headerAlertTopRow}>
+            <Text style={[styles.headerAlertEyebrow, compact && styles.headerAlertEyebrowCompact]}>
+              {criticalCareActive ? "STAN KRYTYCZNY" : "OSLONA PO TERAPII"}
+            </Text>
+            {criticalCareTimer ? (
+              <Text style={[styles.headerAlertTimer, compact && styles.headerAlertTimerCompact]}>{criticalCareTimer}</Text>
+            ) : null}
+          </View>
+          <Text style={[styles.headerAlertText, compact && styles.headerAlertTextCompact]}>
+            {criticalCareActive
+              ? `Jestes na ${criticalCareStatus?.mode?.label?.toLowerCase() || "intensywnej terapii"}. Napady, kontrakty, PvP i trening sa chwilowo zablokowane.`
+              : "Dopiero wyszedles ze szpitala. Przez chwile PvP przeciwko Tobie jest zablokowane."}
+          </Text>
+        </LinearGradient>
+      ) : null}
 
       <View style={styles.headerStatsColumn}>
         <StatBar icon="hp" label="HP" value={hp} max={maxHp} fillColor="#ff3659" accent="rgba(255,54,89,0.45)" compact={compact} />
@@ -204,7 +241,8 @@ export function HeistTabs({ tabs, selected, onSelect }) {
   );
 }
 
-export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel, onPress, disabled }) {
+export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel, onPress, disabled, onDisabledPress }) {
+  const handlePress = disabled ? onDisabledPress : onPress;
   return (
     <LinearGradient colors={["#17191e", "#0f1014"]} style={[styles.heistCard, disabled && styles.heistCardDisabled]}>
       <View style={styles.heistCardHeader}>
@@ -230,7 +268,7 @@ export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel
           </View>
         ) : null}
       </View>
-      <Pressable disabled={disabled} onPress={disabled ? undefined : onPress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
+      <Pressable disabled={!handlePress} onPress={handlePress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
         <Text style={styles.heistActionText}>{lockedLabel || "Wykonaj"}</Text>
       </Pressable>
     </LinearGradient>
@@ -313,6 +351,15 @@ const styles = StyleSheet.create({
   headerRespectLabel: { color: "#d9b257", fontSize: 10, fontWeight: "900", marginTop: 2, textAlign: "center" },
   headerRespectLabelCompact: { fontSize: 8 },
   headerStatsColumn: { gap: 8 },
+  headerAlertStrip: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
+  headerAlertStripCompact: { paddingHorizontal: 10, paddingVertical: 9, gap: 5 },
+  headerAlertTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  headerAlertEyebrow: { color: "#ffe5ca", fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },
+  headerAlertEyebrowCompact: { fontSize: 9 },
+  headerAlertTimer: { color: "#fff6ea", fontSize: 12, fontWeight: "900" },
+  headerAlertTimerCompact: { fontSize: 10 },
+  headerAlertText: { color: "#fff1e3", fontSize: 12, lineHeight: 17, fontWeight: "700" },
+  headerAlertTextCompact: { fontSize: 10, lineHeight: 14 },
   headerStatCard: { backgroundColor: "rgba(18,19,23,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(237,181,74,0.18)", paddingHorizontal: 12, paddingVertical: 10 },
   headerStatCardCompact: { paddingHorizontal: 10, paddingVertical: 9 },
   headerStatMeta: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },

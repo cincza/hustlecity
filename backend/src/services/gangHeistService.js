@@ -457,7 +457,7 @@ export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()
       now,
       source: `wtopie na napadzie gangu ${heist.name}`,
       allowCriticalCare: true,
-      minimumHp: 1,
+      minimumHp: 0,
     });
     player.profile.heat = clamp(Number(player.profile.heat || 0) + heatGain, 0, 100);
     const finalJailed = jailed && !damageState.criticalCareTriggered;
