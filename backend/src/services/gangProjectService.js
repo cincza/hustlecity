@@ -3,6 +3,7 @@ import {
   createGangState,
   ensureGangWeeklyGoal,
   GANG_INVITE_RESPECT_MIN,
+  getGangMemberCapForLevel,
   isGangManageableRole,
   getGangProjectById,
   getGangProjectCost,
@@ -12,6 +13,7 @@ import {
   incrementGangGoalProgress,
   normalizeGangManageableRole,
   normalizeGangState,
+  recordGangJobProgress,
 } from "../../../shared/gangProjects.js";
 import { DISTRICTS, findDistrictById, getDistrictSummaries } from "../../../shared/districts.js";
 
@@ -105,12 +107,15 @@ export function createGangForPlayer(player, gangName, now = Date.now(), options 
   }
 
   player.profile.cash = Number(player.profile.cash || 0) - Number(player.gang.createCost || 0);
+  const maxMembers = getGangMemberCapForLevel(0);
   player.gang = ensureGangWeeklyGoal(
     createGangState({
       joined: true,
       role: "Boss",
       name: cleanName,
       members: 1,
+      memberCapLevel: 0,
+      maxMembers,
       vault: 4000,
       gearScore: 68,
       membersList: [{ id: "gm-self", name: player.profile?.name || "Gracz", role: "Boss", trusted: true }],
@@ -155,6 +160,9 @@ export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot
   if (Number(player?.profile?.respect || 0) < requiredRespect) {
     fail(`Ten gang bierze od ${requiredRespect} szacunu.`);
   }
+  if (Math.max(0, Number(gangSnapshot?.members || safeInvite.members || 0)) >= Math.max(1, Number(gangSnapshot?.maxMembers || 8))) {
+    fail("Ten gang jest juz pelny.");
+  }
 
   const previousInvites = Array.isArray(player.gang?.invites) ? player.gang.invites : [];
   const rosterFromGang = Array.isArray(gangSnapshot?.membersList)
@@ -183,6 +191,8 @@ export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot
       role: "Czlonek",
       name: gangName,
       members: Math.max(2, Number(gangSnapshot?.members || safeInvite.members || 1) + 1),
+      memberCapLevel: Math.max(0, Math.floor(Number(gangSnapshot?.memberCapLevel || 0))),
+      maxMembers: Math.max(1, Math.floor(Number(gangSnapshot?.maxMembers || 8))),
       territory: Math.max(0, Number(gangSnapshot?.territory || safeInvite.territory || 0)),
       influence: Math.max(0, Number(gangSnapshot?.influence || 0)),
       vault: Math.max(0, Number(gangSnapshot?.vault || 3200 + Math.max(0, Number(safeInvite.members || 0)) * 180)),
@@ -202,6 +212,30 @@ export function joinGangForPlayer(player, invite, now = Date.now(), gangSnapshot
           ? { ...gangSnapshot.weeklyProgress }
           : undefined,
       weeklyGoalClaimedAt: gangSnapshot?.weeklyGoalClaimedAt ?? null,
+      jobBoard:
+        Array.isArray(gangSnapshot?.jobBoard) && gangSnapshot.jobBoard.length
+          ? gangSnapshot.jobBoard.map((entry) => ({ ...entry }))
+          : undefined,
+      jobProgress:
+        gangSnapshot?.jobProgress && typeof gangSnapshot.jobProgress === "object" && !Array.isArray(gangSnapshot.jobProgress)
+          ? { ...gangSnapshot.jobProgress }
+          : undefined,
+      jobRewardedAt:
+        gangSnapshot?.jobRewardedAt && typeof gangSnapshot.jobRewardedAt === "object" && !Array.isArray(gangSnapshot.jobRewardedAt)
+          ? { ...gangSnapshot.jobRewardedAt }
+          : undefined,
+      activeHeistLobby:
+        gangSnapshot?.activeHeistLobby && typeof gangSnapshot.activeHeistLobby === "object" && !Array.isArray(gangSnapshot.activeHeistLobby)
+          ? { ...gangSnapshot.activeHeistLobby }
+          : undefined,
+      lastHeistReport:
+        gangSnapshot?.lastHeistReport && typeof gangSnapshot.lastHeistReport === "object" && !Array.isArray(gangSnapshot.lastHeistReport)
+          ? { ...gangSnapshot.lastHeistReport }
+          : undefined,
+      protectedClub:
+        gangSnapshot?.protectedClub && typeof gangSnapshot.protectedClub === "object" && !Array.isArray(gangSnapshot.protectedClub)
+          ? { ...gangSnapshot.protectedClub }
+          : undefined,
       membersList: rosterFromGang,
       chat: [
         {
@@ -372,6 +406,9 @@ export function setGangFocusForPlayer(player, districtId, now = Date.now()) {
   if (!player.gang.joined) {
     fail("Najpierw wejdz do gangu.");
   }
+  if (!["Boss", "Vice Boss"].includes(String(player.gang.role || "").trim())) {
+    fail("Fokus gangu przerzuca Boss albo Vice Boss.", 403);
+  }
   const district = findDistrictById(districtId || player.gang.focusDistrictId || DISTRICTS[0].id);
   player.gang.focusDistrictId = district.id;
   player.gang = ensureGangWeeklyGoal(player.gang, now);
@@ -396,6 +433,7 @@ export function contributeGangVaultForPlayer(player, amount, now = Date.now()) {
   player.profile.cash = Number(player.profile.cash || 0) - safeAmount;
   player.gang.vault = Math.max(0, Number(player.gang.vault || 0) + safeAmount);
   player.gang = incrementGangGoalProgress(player.gang, "projectInvestments", 1, now);
+  player.gang = recordGangJobProgress(player.gang, "vaultContributed", safeAmount, now).gang;
 
   return {
     amount: safeAmount,
@@ -407,6 +445,9 @@ export function investGangProjectForPlayer(player, projectId, now = Date.now()) 
   ensurePlayerGangState(player, now);
   if (!player.gang.joined) {
     fail("Najpierw wejdz do gangu.");
+  }
+  if (String(player.gang.role || "").trim() !== "Boss") {
+    fail("Projektami gangu zarzadza Boss.", 403);
   }
   const project = getGangProjectById(projectId);
   if (!project) {

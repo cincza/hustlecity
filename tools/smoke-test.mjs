@@ -397,11 +397,20 @@ async function main() {
     const gangTribute = await request("/gang/tribute", {
       method: "POST",
       token,
-      body: { amount: 12000 },
+      body: { amount: 24000 },
     });
 
-    if (Number(gangTribute?.user?.gang?.vault || 0) < 16000) {
+    if (Number(gangTribute?.user?.gang?.vault || 0) < 28000) {
       throw new Error("Wrzutka do skarbca nie podniosla vaultu gangu.");
+    }
+
+    const upgradedGangMembers = await request("/gang/members/upgrade", {
+      method: "POST",
+      token,
+    });
+
+    if (Number(upgradedGangMembers?.user?.gang?.maxMembers || 0) !== 12) {
+      throw new Error("Rozbudowa skladu gangu nie wbila pierwszego progu 12 slotow.");
     }
 
     const investedGangProject = await request("/gang/projects/invest", {
@@ -885,19 +894,80 @@ async function main() {
       throw new Error("Katalog gangow nie pokazuje nowego Vice Bossa.");
     }
 
-    const gangHeistResult = await request("/gang/heists/pharma/execute", {
+    const openedGangHeist = await request("/gang/heists/pharma/open", {
       method: "POST",
       token,
+      body: { note: "Pelna energia i trzymamy sklad." },
+    });
+
+    if (openedGangHeist?.result?.lobby?.heistId !== "pharma") {
+      throw new Error("Otwarcie lobby napadu gangu nie zwrocilo aktywnego lobby.");
+    }
+    if (!Array.isArray(openedGangHeist?.user?.gang?.activeHeistLobby?.participantIds) || openedGangHeist.user.gang.activeHeistLobby.participantIds.length !== 1) {
+      throw new Error("Otwarcie lobby nie zapisalo pierwszego uczestnika.");
+    }
+
+    const joinedLobbyOne = await request("/gang/heists/pharma/join", {
+      method: "POST",
+      token: invitedUserLogin.token,
+    });
+
+    if (Number(joinedLobbyOne?.result?.lobby?.summary?.memberCount || 0) < 2) {
+      throw new Error("Dolaczenie pierwszego czlonka do lobby nie podnioslo skladu.");
+    }
+
+    const joinedLobbyTwo = await request("/gang/heists/pharma/join", {
+      method: "POST",
+      token: noEmailRegisterTwo.token,
+    });
+
+    if (Number(joinedLobbyTwo?.result?.lobby?.summary?.memberCount || 0) !== 3) {
+      throw new Error("Dolaczenie drugiego czlonka do lobby nie dalo pelnego skladu.");
+    }
+
+    const gangHeistResult = await request("/gang/heists/pharma/start", {
+      method: "POST",
+      token: noEmailRegisterTwo.token,
     });
 
     if (!/success|failure/i.test(String(gangHeistResult?.result?.result || ""))) {
-      throw new Error("Napad gangu nie zwrocil poprawnego wyniku backendowego.");
+      throw new Error("Start lobby napadu gangu nie zwrocil poprawnego wyniku backendowego.");
+    }
+    if (gangHeistResult?.user?.gang?.activeHeistLobby) {
+      throw new Error("Start lobby napadu gangu nie wyczyscil aktywnego lobby.");
+    }
+    if (!Array.isArray(gangHeistResult?.result?.report?.participants) || gangHeistResult.result.report.participants.length !== 3) {
+      throw new Error("Raport napadu gangu nie zawiera pelnego skladu uczestnikow.");
     }
     if (gangHeistResult?.user?.gang?.name !== "Smoke Syndicate") {
       throw new Error("Napad gangu nie zwrocil zsynchronizowanego stanu gangu.");
     }
     if (!Array.isArray(gangHeistResult?.gangs) || !gangHeistResult.gangs.some((entry) => entry.name === "Smoke Syndicate")) {
       throw new Error("Napad gangu nie odswiezyl katalogu gangow.");
+    }
+    if (!Array.isArray(gangHeistResult?.user?.gang?.jobBoard) || gangHeistResult.user.gang.jobBoard.length < 2) {
+      throw new Error("Gang nie zwrocil zywej tablicy robot po starcie napadu.");
+    }
+
+    if (!gangHeistResult?.result?.report?.success && Array.isArray(gangHeistResult?.result?.report?.jailedParticipantIds) && gangHeistResult.result.report.jailedParticipantIds.length > 0) {
+      await request("/gang/tribute", {
+        method: "POST",
+        token,
+        body: { amount: 25000 },
+      });
+
+      const rescueResult = await request("/gang/heists/rescue", {
+        method: "POST",
+        token,
+        body: { optionId: "contact" },
+      });
+
+      if (typeof rescueResult?.result?.success !== "boolean") {
+        throw new Error("Ratunek po wtopie gangu nie zwrocil wyniku backendowego.");
+      }
+      if (Number(rescueResult?.result?.cost || 0) <= 0) {
+        throw new Error("Ratunek po wtopie gangu nie policzyl kosztu.");
+      }
     }
     if (Number(gangHeistResult?.user?.profile?.jailUntil || 0) > Date.now()) {
       const bribeAfterGangHeist = await request("/player/jail/bribe", {
@@ -1035,8 +1105,11 @@ async function main() {
       body: { venueId: "club-1", actionId: "scout" },
     });
 
-    if (escortSearchResult?.result?.actionId !== "scout" || !escortSearchResult?.result?.outcome) {
+    if (escortSearchResult?.result?.actionId !== "scout" || escortSearchResult?.result?.outcome !== "network") {
       throw new Error("Akcji klubowej nie rozliczono na backendzie.");
+    }
+    if (!Number.isFinite(escortSearchResult?.result?.networkBoost) || escortSearchResult.result.networkBoost <= 0) {
+      throw new Error("Wejscie w obieg nie zwrocilo bonusu do kontaktu.");
     }
 
     const cornerEscortCountBefore = Number(
@@ -1129,6 +1202,16 @@ async function main() {
       throw new Error("Plan nocy nie zapisal sie po stronie backendu.");
     }
 
+    const clubSettings = await request("/clubs/settings", {
+      method: "POST",
+      token,
+      body: { entryFee: 80 },
+    });
+
+    if (Number(clubSettings?.user?.club?.entryFee || 0) !== 80) {
+      throw new Error("Ustawienia wejscia klubu nie zapisaly bramki.");
+    }
+
     const fortifiedClub = await request("/clubs/fortify", {
       method: "POST",
       token,
@@ -1151,15 +1234,19 @@ async function main() {
       throw new Error("Stash klubu nie przyjal towaru po stronie backendu.");
     }
 
-    await request("/clubs/visit", {
+    const guestClubEntry = await request("/clubs/visit", {
       method: "POST",
-      token: noEmailRegisterTwo.token,
+      token: rivalRegister.token,
       body: { mode: "enter", venueId: "club-2" },
     });
 
+    if (Number(guestClubEntry?.result?.entryFeePaid || 0) !== 80) {
+      throw new Error("Wejscie do klubu nie pobralo ustawionej wejsciowki.");
+    }
+
     const clubConsume = await request("/clubs/stash/consume", {
       method: "POST",
-      token: noEmailRegisterTwo.token,
+      token: rivalRegister.token,
       body: { venueId: "club-2", drugId: "smokes" },
     });
 
@@ -1182,10 +1269,29 @@ async function main() {
     });
 
     if (!Number.isFinite(clubNight?.result?.payout) || clubNight.result.payout <= 0) {
-      throw new Error("Run night klubu nie zwrocil dodatniego payoutu.");
+      throw new Error("Raport klubu nie zwrocil dodatniego payoutu.");
     }
-    if (!clubNight?.user?.club?.lastNightSummary || Number(clubNight.user.club.lastNightSummary.payout || 0) <= 0) {
-      throw new Error("Run night klubu nie zapisuje czytelnego podsumowania nocy.");
+    if (!clubNight?.user?.club?.lastReportSummary || Number(clubNight.user.club.lastReportSummary.payout || 0) <= 0) {
+      throw new Error("Raport klubu nie zapisuje czytelnego podsumowania lokalu.");
+    }
+    if (Number(clubNight?.user?.club?.safeCash || 0) <= 0) {
+      throw new Error("Raport klubu nie odklada payoutu do sejfu.");
+    }
+
+    const clubSafeBeforeCollect = Number(clubNight.user.club.safeCash || 0);
+    const collectedClubSafe = await request("/clubs/safe/collect", {
+      method: "POST",
+      token,
+    });
+
+    if (!Number.isFinite(collectedClubSafe?.result?.amount) || collectedClubSafe.result.amount <= 0) {
+      throw new Error("Odbior z sejfu klubu nie zwrocil dodatniej kwoty.");
+    }
+    if (Number(collectedClubSafe?.user?.club?.safeCash || 0) !== 0) {
+      throw new Error("Sejf klubu nie wyzerowal sie po odbiorze.");
+    }
+    if (Number(collectedClubSafe?.result?.amount || 0) !== clubSafeBeforeCollect) {
+      throw new Error("Odbior z sejfu klubu nie zgadza sie z odlozonym payoutem.");
     }
 
     const districtsAfterClub = await request("/districts", { token });
@@ -1248,6 +1354,92 @@ async function main() {
     }
     if (!Array.isArray(executedOperation?.user?.operations?.history) || !executedOperation.user.operations.history.length) {
       throw new Error("Operacja nie zapisala sie do historii backendowej.");
+    }
+
+    const contractsSnapshot = await request("/contracts", { token });
+    if (!Array.isArray(contractsSnapshot?.active) || contractsSnapshot.active.length !== 3) {
+      throw new Error("Kontrakty nie zwrocily aktywnej tablicy trzech robot.");
+    }
+
+    const boughtContractWeapon = await request("/contracts/items/buy", {
+      method: "POST",
+      token,
+      body: { itemId: "compact-pistol" },
+    });
+    const boughtContractArmor = await request("/contracts/items/buy", {
+      method: "POST",
+      token,
+      body: { itemId: "plated-jacket" },
+    });
+    const boughtContractTool = await request("/contracts/items/buy", {
+      method: "POST",
+      token,
+      body: { itemId: "glass-cutter" },
+    });
+    const boughtContractElectronics = await request("/contracts/items/buy", {
+      method: "POST",
+      token,
+      body: { itemId: "signal-jammer" },
+    });
+    const boughtContractCar = await request("/contracts/cars/buy", {
+      method: "POST",
+      token,
+      body: { carId: "burner-sedan" },
+    });
+
+    if (!boughtContractWeapon?.user?.contracts?.ownedItems?.["compact-pistol"]) {
+      throw new Error("Kupno itemu kontraktowego nie zapisalo ownership.");
+    }
+    if (!boughtContractCar?.user?.contracts?.ownedCars?.["burner-sedan"]) {
+      throw new Error("Kupno auta kontraktowego nie zapisalo ownership.");
+    }
+
+    await request("/contracts/loadout/equip", {
+      method: "POST",
+      token,
+      body: { slotId: "weapon", assetId: "compact-pistol" },
+    });
+    await request("/contracts/loadout/equip", {
+      method: "POST",
+      token,
+      body: { slotId: "armor", assetId: "plated-jacket" },
+    });
+    await request("/contracts/loadout/equip", {
+      method: "POST",
+      token,
+      body: { slotId: "tool", assetId: "glass-cutter" },
+    });
+    await request("/contracts/loadout/equip", {
+      method: "POST",
+      token,
+      body: { slotId: "electronics", assetId: "signal-jammer" },
+    });
+    const equippedContractCar = await request("/contracts/loadout/equip", {
+      method: "POST",
+      token,
+      body: { slotId: "car", assetId: "burner-sedan" },
+    });
+
+    if (equippedContractCar?.user?.contracts?.loadout?.car !== "burner-sedan") {
+      throw new Error("Loadout kontraktowy nie zapisal auta.");
+    }
+
+    const runnableContract = contractsSnapshot.active.find((entry) => Number(entry?.respect || 0) <= 30);
+    if (!runnableContract) {
+      throw new Error("Smoke nie znalazl aktywnego kontraktu pod startowy respect.");
+    }
+
+    const executedContract = await request("/contracts/execute", {
+      method: "POST",
+      token,
+      body: { contractId: runnableContract.id },
+    });
+
+    if (!Array.isArray(executedContract?.contractsBoard?.history) || !executedContract.contractsBoard.history.length) {
+      throw new Error("Execute kontraktu nie zapisalo raportu do historii.");
+    }
+    if (!Array.isArray(executedContract?.contractsBoard?.active) || executedContract.contractsBoard.active.length !== 3) {
+      throw new Error("Execute kontraktu nie zwrocil aktywnej tablicy kontraktow.");
     }
 
     const friendsSnapshot = await request("/social/friends", { token });
@@ -1469,10 +1661,11 @@ async function main() {
       gangDelete: "ok",
       districts: districtsAfterClub.districts.length,
         gangProject: investedGangProject.result.level,
-        adminGrant: "ok",
-        adminRespectGrant: "ok",
-        clubOwnership: claimedClub.user.club.sourceId,
-      clubNight: clubNight.result.payout,
+      adminGrant: "ok",
+      adminRespectGrant: "ok",
+      clubOwnership: claimedClub.user.club.sourceId,
+      clubReport: clubNight.result.payout,
+      clubSafe: collectedClubSafe.result.amount,
       operation: executedOperation.result.success ? "ok-success" : "ok-failed",
       prisonChat: "ok",
       clientStateAuthority: "ok",

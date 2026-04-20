@@ -4,6 +4,7 @@ import {
   CLUB_SYSTEM_RULES,
   CLUB_VISITOR_ACTIONS,
   CLUB_MARKET,
+  createClubGuestVenueState,
   createClubState,
   DRUGS,
   ESCORTS,
@@ -25,6 +26,7 @@ import {
   getClubVisitDiminishing,
   getClubVisitorAction,
   getDealerPayoutForDrug,
+  hasClubGuestAccess,
   getLeadTargetEscortForVenue,
   normalizeClubState,
 } from "../../../shared/socialGameplay.js";
@@ -406,21 +408,19 @@ function syncClubPassiveState(club, now = Date.now()) {
 function getVenueAffinity(player, venueId, now = Date.now()) {
   const guestState = player.club.guestState;
   if (!guestState.affinity[venueId]) {
-    guestState.affinity[venueId] = {
-      visits: 0,
-      lastVisitAt: 0,
-      tipDayKey: getDayKey(now),
-      tipValueToday: 0,
-      tipCountToday: 0,
-    };
+    guestState.affinity[venueId] = createClubGuestVenueState();
   }
-  const entry = guestState.affinity[venueId];
+  const entry = {
+    ...createClubGuestVenueState(),
+    ...guestState.affinity[venueId],
+  };
   const dayKey = getDayKey(now);
   if (entry.tipDayKey !== dayKey) {
     entry.tipDayKey = dayKey;
     entry.tipValueToday = 0;
     entry.tipCountToday = 0;
   }
+  guestState.affinity[venueId] = entry;
   return entry;
 }
 
@@ -516,48 +516,47 @@ export function performClubActionForPlayer(
     (player.club.owned && player.club.sourceId === targetVenue.id ? player.club.nightPlanId : getClubNightPlan().id);
   const profile = getClubVenueProfile(targetVenue, { planId: venuePlanId });
   const affinity = getVenueAffinity(player, targetVenue.id, now);
+  const hasAccess = ownerSelfVisit || hasClubGuestAccess(guestState, targetVenue.id, now);
+  if (!hasAccess) {
+    fail("Najpierw ogarnij wejscie do lokalu. Bez opaski nie ruszysz sali.");
+  }
   const nextVisitCount = affinity.visits + 1;
   const diminishing = getClubVisitDiminishing(nextVisitCount, ownerSelfVisit);
 
   let result = null;
   if (action.id === "scout") {
-    const dailyBudgetLeft = Math.max(0, CLUB_SYSTEM_RULES.scoutTipDailyCapPerVenue - Number(affinity.tipValueToday || 0));
-    const tipSlotsLeft = Math.max(0, CLUB_SYSTEM_RULES.scoutTipCountCapPerVenue - Number(affinity.tipCountToday || 0));
-    const rawTip = Math.max(0, Math.floor(profile.scoutTipValue * diminishing));
-    const cashTip =
-      dailyBudgetLeft > 0 && tipSlotsLeft > 0
-        ? Math.max(0, Math.min(rawTip, dailyBudgetLeft, 180))
-        : 0;
-
-    if (cashTip > 0) {
-      player.profile.cash = Number(player.profile.cash || 0) + cashTip;
-      affinity.tipValueToday = Number(affinity.tipValueToday || 0) + cashTip;
-      affinity.tipCountToday = Number(affinity.tipCountToday || 0) + 1;
-      appendPlayerMessage(player, {
-        from: targetVenue.ownerLabel || "Miasto",
-        subject: `Scout: ${targetVenue.name}`,
-        preview: `Sala puszcza dyskretny tip. Wpada $${cashTip}.`,
-        time: createTimeLabel(now),
-      });
-    }
+    const networkUntil = Math.max(Number(affinity.networkUntil || 0), now) + CLUB_SYSTEM_RULES.networkBoostWindowMs;
+    affinity.networkUntil = networkUntil;
+    const networkBoost = Math.max(
+      10,
+      Math.min(
+        30,
+        Math.round(
+          (Number(profile.networkBoostValue || 0) + Number(player.profile?.charisma || 0) * 0.24) *
+            Math.max(0.8, diminishing + 0.12)
+        )
+      )
+    );
 
     result = {
       actionId: action.id,
       venueId: targetVenue.id,
       venueName: targetVenue.name,
-      outcome: cashTip > 0 ? "tip" : "intel",
-      cashTip,
+      outcome: "network",
+      cashTip: 0,
       leadGain: 0,
+      networkBoost,
+      networkUntil,
+      accessUntil: Number(affinity.accessUntil || 0),
       heatReduced: 0,
       hpRecovered: 0,
       ownerDelta: {
-        trafficGain: Number((action.baseTraffic * profile.trafficScale * diminishing).toFixed(3)),
-        pressureGain: Number((0.9 * profile.pressureScale).toFixed(3)),
+        trafficGain: Number(
+          (action.baseTraffic * profile.trafficScale * Math.max(0.86, diminishing + 0.1)).toFixed(3)
+        ),
+        pressureGain: Number((0.55 * profile.pressureScale).toFixed(3)),
       },
-      logMessage:
-        cashTip > 0
-          ? `${targetVenue.name} rzuca maly tip. Wpada $${cashTip}.`
-          : `${targetVenue.name} daje czysty odczyt sali, ale dzis bez koperty.`,
+      logMessage: `${targetVenue.name}: wchodzisz w obieg. Kolejne szukanie kontaktu siada mocniej.`,
     };
   } else if (action.id === "hunt") {
     if (Number(player.profile?.cash || 0) < action.costCash) {
@@ -583,18 +582,23 @@ export function performClubActionForPlayer(
       guestState.leadProgress = 0;
     }
 
+    const networkBonusApplied = Number(affinity.networkUntil || 0) > now;
     const progressGain = Math.max(
       12,
       Math.min(
-        46,
+        54,
         Math.round(
           (profile.huntProgressValue +
             Number(player.profile?.charisma || 0) * 0.42 +
             Number(player.profile?.dexterity || 0) * 0.28) *
+            (networkBonusApplied ? 1.24 : 1) *
             diminishing
         )
       )
     );
+    if (networkBonusApplied) {
+      affinity.networkUntil = 0;
+    }
 
     player.profile.cash = Number(player.profile.cash || 0) - action.costCash;
     guestState.leadProgress = Math.min(guestState.leadRequired, Number(guestState.leadProgress || 0) + progressGain);
@@ -625,6 +629,8 @@ export function performClubActionForPlayer(
       leadTargetName: leadTarget.name,
       leadProgress: guestState.leadProgress,
       leadRequired: guestState.leadRequired,
+      leadRemaining: Math.max(0, Number(guestState.leadRequired || 0) - Number(guestState.leadProgress || 0)),
+      networkBonusApplied,
       escort: unlockedEscort,
       heatReduced: 0,
       hpRecovered: 0,
@@ -634,7 +640,7 @@ export function performClubActionForPlayer(
       },
       logMessage: unlockedEscort
         ? `${targetVenue.name}: kontakt domkniety. Wpada ${unlockedEscort.name}.`
-        : `${targetVenue.name}: kontakt ruszyl o ${progressGain} pkt.`,
+        : `${targetVenue.name}: kontakt ruszyl o ${progressGain} pkt.${networkBonusApplied ? " Wszedles juz w obieg, wiec sala pchnela to mocniej." : ""}`,
     };
   } else {
     const heatReduced = Math.min(
@@ -666,6 +672,7 @@ export function performClubActionForPlayer(
       outcome: heatReduced || hpRecovered ? "reset" : "calm",
       cashTip: 0,
       leadGain: 0,
+      accessUntil: Number(affinity.accessUntil || 0),
       heatReduced,
       hpRecovered,
       ownerDelta: {

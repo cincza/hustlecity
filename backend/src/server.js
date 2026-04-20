@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+﻿import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -94,14 +94,19 @@ import {
   applyHeistDistrictOutcome,
   applyClubActionDistrictOutcome,
   applyOperationDistrictOutcome,
+  collectClubSafeForPlayer,
+  enterClubVenueForPlayer,
   ensurePlayerCityState,
   foundClubForPlayer,
   fortifyClubForPlayer,
   consumeClubStashDrugForPlayer,
+  leaveClubVenueForPlayer,
   moveDrugToClubForPlayer,
   resolveClubDistrictId,
   runClubNightForPlayer,
+  setClubEntryFeeForPlayer,
   setClubNightPlanForPlayer,
+  settleClubPassiveReportForPlayer,
   syncCityStateForPlayer,
 } from "./services/districtService.js";
 import {
@@ -117,7 +122,14 @@ import {
   updateGangMemberRoleForPlayers,
   updateGangSettingsForPlayer,
 } from "./services/gangProjectService.js";
-import { executeGangHeistForPlayer } from "./services/gangHeistService.js";
+import {
+  joinGangHeistLobbyForGang,
+  leaveGangHeistLobbyForGang,
+  openGangHeistLobbyForGang,
+  rescueGangHeistCrewForGang,
+  startGangHeistForGang,
+  upgradeGangCapacityForGang,
+} from "./services/gangHeistService.js";
 import {
   buildGangRaidPreview,
   executeGangRaidForPlayers,
@@ -130,6 +142,14 @@ import {
   startOperationForPlayer,
 } from "./services/operationService.js";
 import {
+  buildContractBoardForPlayer,
+  buyContractCarForPlayer,
+  buyContractItemForPlayer,
+  ensurePlayerContractState,
+  equipContractLoadoutForPlayer,
+  executeContractForPlayer,
+} from "./services/contractService.js";
+import {
   applyAdminProfileFloors,
   buildAdminPublicState,
   grantCashToPlayerByAdmin,
@@ -137,7 +157,12 @@ import {
 } from "./services/adminActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
-import { clampGangInviteRespectMin, GANG_INVITE_RESPECT_MIN } from "../../shared/gangProjects.js";
+import {
+  clampGangInviteRespectMin,
+  GANG_INVITE_RESPECT_MIN,
+  normalizeGangState,
+  getGangProjectEffects,
+} from "../../shared/gangProjects.js";
 import { GANG_HEISTS, getGangHeistById } from "../../shared/gangHeists.js";
 import {
   createAuthMiddleware,
@@ -153,6 +178,7 @@ import {
   createDrugCounterMap,
   createOnlineSocialState,
   findClubVenueById,
+  getDefaultClubEntryFee,
   getClubNightPlan,
   getClubPressureAfterDecay,
   getClubTrafficAfterDecay,
@@ -165,6 +191,7 @@ import { normalizeEscortsOwned } from "../../shared/street.js";
 import { createCityState, findDistrictById, getDistrictSummaries } from "../../shared/districts.js";
 import { createGangState } from "../../shared/gangProjects.js";
 import { createOperationsState, getOperationById, OPERATION_CATALOG } from "../../shared/operations.js";
+import { createContractState } from "../../shared/contracts.js";
 import {
   ADMIN_CASH_GRANT_MAX,
   ADMIN_DEFAULT_USERNAME,
@@ -462,6 +489,7 @@ function createInitialPlayerData(username = "gracz") {
     club: createClubState(),
     city: createCityState(),
     operations: createOperationsState(),
+    contracts: createContractState(),
     businessesOwned: [],
     businessUpgrades: {},
     factoriesOwned: {},
@@ -562,6 +590,7 @@ function ensurePlayerExtendedState(player) {
   ensurePlayerGangState(player);
   ensurePlayerCityState(player);
   ensurePlayerOperationState(player);
+  ensurePlayerContractState(player);
   if (player.club?.owned && !player.club.districtId) {
     player.club.districtId = resolveClubDistrictId(player, player.club.sourceId);
   }
@@ -772,6 +801,18 @@ function buildGangDirectoryEntry(gangName, memberRecords, now = Date.now()) {
   const respectPeak = members.reduce((best, member) => Math.max(best, Number(member.respect || 0)), 0);
   const trustedCount = members.filter((member) => member.role === "Zaufany").length;
   const focusDistrictId = String(canonicalGang?.focusDistrictId || "").trim() || "oldtown";
+  const protectedClub =
+    bossMember.userRecord?.playerData?.club?.owned &&
+    String(bossMember.userRecord.playerData.club.sourceId || "").trim()
+      ? {
+          id: String(bossMember.userRecord.playerData.club.sourceId || "").trim(),
+          name: bossMember.userRecord.playerData.club.name || "Klub",
+          districtId: bossMember.userRecord.playerData.club.districtId || focusDistrictId,
+          threat: Math.max(0, Math.floor(Number(bossMember.userRecord.playerData.club.threatLevel || 0))),
+          stability: Math.max(0, Math.floor(Number(bossMember.userRecord.playerData.club.defenseReadiness || 0))),
+          influenceBonus: Number(getGangProjectEffects(canonicalGang).influenceGain || 0),
+        }
+      : null;
 
   return {
     id: `gang-${slugifyGangName(gangName) || bossMember.id}`,
@@ -782,6 +823,8 @@ function buildGangDirectoryEntry(gangName, memberRecords, now = Date.now()) {
     viceBossUserId: viceBossMember?.id || null,
     trusted: trustedCount,
     members: members.length,
+    memberCapLevel: Math.max(0, Math.floor(Number(canonicalGang?.memberCapLevel || 0))),
+    maxMembers: Math.max(members.length, Math.floor(Number(canonicalGang?.maxMembers || 8))),
     respect: respectPeak,
     territory,
     influence,
@@ -805,6 +848,27 @@ function buildGangDirectoryEntry(gangName, memberRecords, now = Date.now()) {
         ? { ...canonicalGang.weeklyProgress }
         : {},
     weeklyGoalClaimedAt: Number.isFinite(canonicalGang?.weeklyGoalClaimedAt) ? canonicalGang.weeklyGoalClaimedAt : null,
+    jobBoard:
+      Array.isArray(canonicalGang?.jobBoard) && canonicalGang.jobBoard.length
+        ? canonicalGang.jobBoard.map((entry) => ({ ...entry }))
+        : [],
+    jobProgress:
+      canonicalGang?.jobProgress && typeof canonicalGang.jobProgress === "object" && !Array.isArray(canonicalGang.jobProgress)
+        ? { ...canonicalGang.jobProgress }
+        : {},
+    jobRewardedAt:
+      canonicalGang?.jobRewardedAt && typeof canonicalGang.jobRewardedAt === "object" && !Array.isArray(canonicalGang.jobRewardedAt)
+        ? { ...canonicalGang.jobRewardedAt }
+        : {},
+    activeHeistLobby:
+      canonicalGang?.activeHeistLobby && typeof canonicalGang.activeHeistLobby === "object" && !Array.isArray(canonicalGang.activeHeistLobby)
+        ? { ...canonicalGang.activeHeistLobby }
+        : null,
+    lastHeistReport:
+      canonicalGang?.lastHeistReport && typeof canonicalGang.lastHeistReport === "object" && !Array.isArray(canonicalGang.lastHeistReport)
+        ? { ...canonicalGang.lastHeistReport }
+        : null,
+    protectedClub,
     membersList: members.map((member) => ({
       id: member.id,
       name: member.name,
@@ -882,6 +946,11 @@ function syncResponseGangEntryWithPlayerState(gangs, user) {
 
     return {
       ...gangEntry,
+      memberCapLevel: Math.max(0, Math.floor(Number(user.gang.memberCapLevel || gangEntry.memberCapLevel || 0))),
+      maxMembers: Math.max(
+        Number(gangEntry.members || 0),
+        Math.floor(Number(user.gang.maxMembers || gangEntry.maxMembers || 8))
+      ),
       vault: Math.max(0, Math.floor(Number(user.gang.vault || gangEntry.vault || 0))),
       inviteRespectMin: clampGangInviteRespectMin(
         user.gang.inviteRespectMin ?? gangEntry.inviteRespectMin ?? GANG_INVITE_RESPECT_MIN
@@ -902,6 +971,30 @@ function syncResponseGangEntryWithPlayerState(gangs, user) {
           ? { ...user.gang.weeklyProgress }
           : gangEntry.weeklyProgress,
       weeklyGoalClaimedAt: user.gang.weeklyGoalClaimedAt ?? gangEntry.weeklyGoalClaimedAt ?? null,
+      jobBoard:
+        Array.isArray(user.gang.jobBoard) && user.gang.jobBoard.length
+          ? user.gang.jobBoard.map((entry) => ({ ...entry }))
+          : gangEntry.jobBoard,
+      jobProgress:
+        user.gang.jobProgress && typeof user.gang.jobProgress === "object" && !Array.isArray(user.gang.jobProgress)
+          ? { ...user.gang.jobProgress }
+          : gangEntry.jobProgress,
+      jobRewardedAt:
+        user.gang.jobRewardedAt && typeof user.gang.jobRewardedAt === "object" && !Array.isArray(user.gang.jobRewardedAt)
+          ? { ...user.gang.jobRewardedAt }
+          : gangEntry.jobRewardedAt,
+      activeHeistLobby:
+        user.gang.activeHeistLobby && typeof user.gang.activeHeistLobby === "object" && !Array.isArray(user.gang.activeHeistLobby)
+          ? { ...user.gang.activeHeistLobby }
+          : gangEntry.activeHeistLobby,
+      lastHeistReport:
+        user.gang.lastHeistReport && typeof user.gang.lastHeistReport === "object" && !Array.isArray(user.gang.lastHeistReport)
+          ? { ...user.gang.lastHeistReport }
+          : gangEntry.lastHeistReport,
+      protectedClub:
+        user.gang.protectedClub && typeof user.gang.protectedClub === "object" && !Array.isArray(user.gang.protectedClub)
+          ? { ...user.gang.protectedClub }
+          : gangEntry.protectedClub,
       eventLog: Array.isArray(user.gang.chat) && user.gang.chat.length ? user.gang.chat.slice(0, 20) : gangEntry.eventLog,
     };
   });
@@ -938,6 +1031,13 @@ function syncGangInvitesWithLiveDirectory(invites, gangs) {
 
 function buildClubVenueFromPlayer(player) {
   const club = normalizeClubState(player?.club);
+  const protectorActive = Boolean(
+    club?.owned &&
+      player?.gang?.joined &&
+      String(player?.gang?.role || "").trim() === "Boss" &&
+      String(player?.gang?.name || "").trim()
+  );
+  const protectorEffects = protectorActive ? getGangProjectEffects(player?.gang) : null;
   const ownerLabel =
     club.ownerLabel ||
     (typeof player?.profile?.name === "string" && player.profile.name.trim()
@@ -957,9 +1057,25 @@ function buildClubVenueFromPlayer(player) {
     policePressure: Number(club.policePressure || 0),
     traffic: Number(club.traffic || 0),
     nightPlanId: club.nightPlanId,
+    entryFee: Math.max(0, Math.floor(Number(club.entryFee || 0))),
+    safeCash: Math.max(0, Math.floor(Number(club.safeCash || 0))),
+    lastReportSummary:
+      club.lastReportSummary && typeof club.lastReportSummary === "object" && !Array.isArray(club.lastReportSummary)
+        ? { ...club.lastReportSummary }
+        : null,
     securityLevel: Number(club.securityLevel || 0),
     defenseReadiness: Number(club.defenseReadiness || 0),
     threatLevel: Number(club.threatLevel || 0),
+    protectorGangName: protectorActive ? String(player.gang.name || "").trim() : null,
+    protectorFocusDistrictId: protectorActive ? player.gang.focusDistrictId || null : null,
+    protectorEffects: protectorEffects
+      ? {
+          clubSecurity: Number(protectorEffects.clubSecurity || 0),
+          clubThreatMitigation: Number(protectorEffects.clubThreatMitigation || 0),
+          pressureMitigation: Number(protectorEffects.pressureMitigation || 0),
+          influenceGain: Number(protectorEffects.influenceGain || 0),
+        }
+      : null,
     stash: { ...(club.stash || {}) },
     note: club.note || "Prywatny lokal gracza. Ruch i presja licza sie z wizyt.",
   };
@@ -999,11 +1115,17 @@ function resolveClubVenueSnapshot(venueId, { ownerRecord = null, fallbackPlayer 
   return {
     ...staticVenue,
     nightPlanId: getClubNightPlan().id,
+    entryFee: getDefaultClubEntryFee(staticVenue.respect || 0),
+    safeCash: 0,
+    lastReportSummary: null,
     traffic: 0,
     policePressure: Math.max(0, Number(staticVenue.policeBase || 0) * 3),
     securityLevel: 0,
     defenseReadiness: 44,
     threatLevel: 0,
+    protectorGangName: null,
+    protectorFocusDistrictId: null,
+    protectorEffects: null,
   };
 }
 
@@ -1142,6 +1264,126 @@ async function withUserMutationLocks(userIds, actionKey, handler) {
       state.actionLocks.delete(key);
     });
   }
+}
+
+function buildSharedGangPatch(gangState) {
+  const gang = normalizeGangState(gangState);
+  return {
+    memberCapLevel: gang.memberCapLevel,
+    maxMembers: gang.maxMembers,
+    territory: gang.territory,
+    influence: gang.influence,
+    vault: gang.vault,
+    inviteRespectMin: gang.inviteRespectMin,
+    gearScore: gang.gearScore,
+    jailedCrew: gang.jailedCrew,
+    crewLockdownUntil: gang.crewLockdownUntil,
+    focusDistrictId: gang.focusDistrictId,
+    projects: { ...(gang.projects || {}) },
+    weeklyGoal: gang.weeklyGoal ? { ...gang.weeklyGoal } : null,
+    weeklyProgress: { ...(gang.weeklyProgress || {}) },
+    weeklyGoalClaimedAt: gang.weeklyGoalClaimedAt ?? null,
+    jobBoard: Array.isArray(gang.jobBoard) ? gang.jobBoard.map((entry) => ({ ...entry })) : [],
+    jobProgress: { ...(gang.jobProgress || {}) },
+    jobRewardedAt: { ...(gang.jobRewardedAt || {}) },
+    activeHeistLobby: gang.activeHeistLobby ? { ...gang.activeHeistLobby } : null,
+    lastHeistReport: gang.lastHeistReport ? { ...gang.lastHeistReport } : null,
+    protectedClub: gang.protectedClub ? { ...gang.protectedClub } : null,
+    chat: Array.isArray(gang.chat) ? gang.chat.slice(0, 20) : [],
+  };
+}
+
+function syncSharedGangPatchToPlayer(player, sharedPatch, totalMembers, now = Date.now()) {
+  const currentGang = normalizeGangState(player?.gang || createGangState());
+  player.gang = normalizeGangState({
+    ...currentGang,
+    ...sharedPatch,
+    joined: currentGang.joined,
+    role: currentGang.role,
+    name: currentGang.name,
+    members: Math.max(0, Math.floor(Number(totalMembers || currentGang.members || 0))),
+  });
+  syncGangDerivedState(player, now);
+}
+
+async function loadGangMemberRecordsByName(gangName) {
+  const safeGangName = String(gangName || "").trim().toLowerCase();
+  if (!safeGangName) return [];
+  const users = await listUsers();
+  return users.filter((userRecord) => {
+    const playerGangName = String(userRecord?.playerData?.gang?.name || "").trim().toLowerCase();
+    return Boolean(userRecord?.playerData?.gang?.joined) && playerGangName === safeGangName;
+  });
+}
+
+async function withGangMutation(req, actionKey, handler) {
+  const actorGangName = String(req?.player?.gang?.name || "").trim();
+  if (!req?.player?.gang?.joined || !actorGangName) {
+    const error = new Error("Najpierw wejdz do gangu.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const previewMembers = await loadGangMemberRecordsByName(actorGangName);
+  const userIds = previewMembers.map((entry) => entry._id).filter(Boolean);
+  if (!userIds.length) {
+    const error = new Error("Nie znaleziono zywego skladu tego gangu.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return withUserMutationLocks(userIds, actionKey, async () => {
+    const liveRecords = (
+      await Promise.all(
+        userIds.map(async (userId) => {
+          const userRecord = await findUserById(userId);
+          return userRecord?.playerData ? userRecord : null;
+        })
+      )
+    ).filter(Boolean);
+
+    const entries = liveRecords.map((userRecord) => {
+      ensureAlphaTestGrant(userRecord.playerData, userRecord);
+      syncPlayerState(userRecord.playerData, Date.now());
+      return {
+        userId: userRecord._id,
+        username: userRecord.username,
+        userRecord,
+        player: userRecord.playerData,
+      };
+    });
+
+    const result = await handler(entries);
+
+    await Promise.all(
+      entries.map((entry) => persistPlayerForUser(entry.userId, entry.player))
+    );
+
+    const actorEntry = entries.find((entry) => entry.userId === req.user.id) || entries[0];
+    if (actorEntry?.player) {
+      req.player = actorEntry.player;
+    }
+
+    return {
+      entries,
+      actorEntry,
+      result,
+    };
+  });
+}
+
+function getGangMutationActor(entries, actorUserId, now = Date.now()) {
+  const actorEntry = (Array.isArray(entries) ? entries : []).find(
+    (entry) => entry?.userId === actorUserId
+  );
+  if (!actorEntry?.player) {
+    const error = new Error("Nie znaleziono aktywnego czlonka tego gangu.");
+    error.statusCode = 404;
+    throw error;
+  }
+  syncPlayerState(actorEntry.player, now);
+  ensurePlayerGangState(actorEntry.player, now);
+  return actorEntry;
 }
 
 function parsePositiveInteger(rawValue, { min = 1, max = Number.MAX_SAFE_INTEGER, field = "value" } = {}) {
@@ -1296,6 +1538,7 @@ function publicPlayer(player, now = Date.now()) {
     gang: player.gang,
     city: player.city,
     operations: player.operations,
+    contracts: player.contracts,
     businessesOwned: player.businessesOwned,
     businessUpgrades: player.businessUpgrades,
     factoriesOwned: player.factoriesOwned,
@@ -1330,6 +1573,8 @@ async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
     user.gang = {
       ...user.gang,
       members: liveGang.members,
+      memberCapLevel: liveGang.memberCapLevel ?? user.gang.memberCapLevel ?? 0,
+      maxMembers: liveGang.maxMembers ?? user.gang.maxMembers ?? 8,
       territory: liveGang.territory,
       influence: liveGang.influence,
       vault: liveGang.vault,
@@ -1348,6 +1593,30 @@ async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
           ? { ...liveGang.weeklyProgress }
           : user.gang.weeklyProgress,
       weeklyGoalClaimedAt: liveGang.weeklyGoalClaimedAt ?? user.gang.weeklyGoalClaimedAt ?? null,
+      jobBoard:
+        Array.isArray(liveGang.jobBoard) && liveGang.jobBoard.length
+          ? liveGang.jobBoard.map((entry) => ({ ...entry }))
+          : user.gang.jobBoard,
+      jobProgress:
+        liveGang.jobProgress && typeof liveGang.jobProgress === "object" && !Array.isArray(liveGang.jobProgress)
+          ? { ...liveGang.jobProgress }
+          : user.gang.jobProgress,
+      jobRewardedAt:
+        liveGang.jobRewardedAt && typeof liveGang.jobRewardedAt === "object" && !Array.isArray(liveGang.jobRewardedAt)
+          ? { ...liveGang.jobRewardedAt }
+          : user.gang.jobRewardedAt,
+      activeHeistLobby:
+        liveGang.activeHeistLobby && typeof liveGang.activeHeistLobby === "object" && !Array.isArray(liveGang.activeHeistLobby)
+          ? { ...liveGang.activeHeistLobby }
+          : user.gang.activeHeistLobby,
+      lastHeistReport:
+        liveGang.lastHeistReport && typeof liveGang.lastHeistReport === "object" && !Array.isArray(liveGang.lastHeistReport)
+          ? { ...liveGang.lastHeistReport }
+          : user.gang.lastHeistReport,
+      protectedClub:
+        liveGang.protectedClub && typeof liveGang.protectedClub === "object" && !Array.isArray(liveGang.protectedClub)
+          ? { ...liveGang.protectedClub }
+          : user.gang.protectedClub,
       membersList: Array.isArray(liveGang.membersList) && liveGang.membersList.length ? liveGang.membersList : user.gang.membersList,
       chat: Array.isArray(liveGang.eventLog) && liveGang.eventLog.length ? liveGang.eventLog : user.gang.chat,
     };
@@ -1359,6 +1628,7 @@ async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
     user,
     clubMarket: await buildClubMarketSnapshot(now),
     gangs,
+    contractsBoard: buildContractBoardForPlayer(player, now),
     ...extra,
   };
 }
@@ -1753,13 +2023,15 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
 }));
 
 app.get("/me", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
   refreshMarket();
   ensureAlphaTestGrant(req.player, req.user);
+  settleClubPassiveReportForPlayer(req.player, now);
   req.player.online.friends = await buildFriendEntries(req.player);
   await persistPlayerForUser(req.user.id, req.player);
   const marketView = getMarketPublicView(state.market, getActiveUserCount());
   res.json({
-    ...(await buildPlayerEnvelope(req.player)),
+    ...(await buildPlayerEnvelope(req.player, now)),
     market: marketView.prices,
     marketState: marketView.products,
     heists: HEIST_DEFINITIONS,
@@ -3045,37 +3317,72 @@ app.post("/clubs/visit", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const mode = String(req.body?.mode || req.body?.action || "enter").trim().toLowerCase();
   const venueId = String(req.body?.venueId || "").trim();
+  const ownerRecordPreview = mode === "leave" ? null : await findClubOwnerRecordByVenueId(venueId);
+  const ownerUserId =
+    ownerRecordPreview?._id && ownerRecordPreview._id !== req.user.id ? ownerRecordPreview._id : null;
+  let result = null;
 
-  await withPlayerActionLock(req, `clubs-visit:${mode}`, async () => {
-    await commitPlayerMutation(req, "clubs-visit", async (player) => {
-      if (mode === "leave") {
-        const previousVenueId = player.club?.visitId || null;
-        player.club.visitId = null;
-        pushLog(
-          player,
-          previousVenueId
-            ? "Wychodzisz z klubu i znikasz z sali."
-            : "Nie siedzialeś teraz w zadnym klubie."
-        );
-        return null;
-      }
+  await withUserMutationLocks([req.user.id, ownerUserId].filter(Boolean), `clubs-visit:${mode}:${venueId || "self"}`, async () => {
+    const actorRecord = await findUserById(req.user.id);
+    const ownerRecord =
+      ownerUserId
+        ? await findUserById(ownerUserId)
+        : ownerRecordPreview?._id === req.user.id
+          ? actorRecord
+          : null;
 
-      const venue = resolveClubVenueSnapshot(venueId, { fallbackPlayer: player });
+    if (!actorRecord?.playerData) {
+      const error = new Error("Authenticated player not found");
+      error.statusCode = 401;
+      throw error;
+    }
+
+    const actor = actorRecord.playerData;
+    syncPlayerState(actor, now);
+    if (ownerRecord?.playerData && ownerRecord._id !== actorRecord._id) {
+      syncPlayerState(ownerRecord.playerData, now);
+      settleClubPassiveReportForPlayer(ownerRecord.playerData, now);
+    }
+
+    if (mode === "leave") {
+      result = leaveClubVenueForPlayer(actor, now);
+      pushLog(actor, result.logMessage);
+    } else {
+      const venue = resolveClubVenueSnapshot(venueId, { ownerRecord, fallbackPlayer: actor });
       if (!venue) {
         const error = new Error("Nie ma takiego lokalu na mapie miasta.");
         error.statusCode = 404;
         throw error;
       }
 
-      player.club.visitId = venue.id;
-      pushLog(player, `Wchodzisz do ${venue.name}.`);
-      return null;
-    });
+      const ownerPlayer =
+        ownerRecord?.playerData ||
+        (actor?.club?.owned && String(actor.club.sourceId || "").trim() === String(venue.id || "").trim()
+          ? actor
+          : null);
+      if (ownerPlayer?.club?.owned) {
+        settleClubPassiveReportForPlayer(ownerPlayer, now);
+      }
+
+      result = enterClubVenueForPlayer(actor, venue, ownerPlayer, now);
+      pushLog(actor, result.logMessage);
+      if (ownerPlayer && ownerPlayer !== actor && result.entryFeePaid > 0) {
+        pushLog(ownerPlayer, `${actor.profile?.name || "Gosc"} doklada ${result.entryFeePaid}$ z bramki ${venue.name}.`);
+      }
+    }
+
+    const persistTasks = [persistPlayerForUser(actorRecord._id, actor)];
+    if (ownerRecord?.playerData && ownerRecord._id !== actorRecord._id) {
+      persistTasks.push(persistPlayerForUser(ownerRecord._id, ownerRecord.playerData));
+    }
+
+    const [updatedActorRecord] = await Promise.all(persistTasks);
+    req.userRecord = updatedActorRecord;
+    req.player = updatedActorRecord?.playerData || actor;
   });
 
-  res.json(await buildPlayerEnvelope(req.player, now));
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
-
 app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const actionId = String(req.body?.actionId || "").trim().toLowerCase();
@@ -3107,6 +3414,9 @@ app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
     syncPlayerState(actor, now);
     if (ownerRecord?.playerData) {
       syncPlayerState(ownerRecord.playerData, now);
+      settleClubPassiveReportForPlayer(ownerRecord.playerData, now);
+    } else if (actor?.club?.owned && actor.club.sourceId === venueId) {
+      settleClubPassiveReportForPlayer(actor, now);
     }
 
     const venue = resolveClubVenueSnapshot(venueId, {
@@ -3155,7 +3465,6 @@ app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
-
 app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const venueId = String(req.body?.venueId || req.player?.club?.visitId || "").trim();
@@ -3178,6 +3487,9 @@ app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
     syncPlayerState(actor, now);
     if (ownerRecord?.playerData) {
       syncPlayerState(ownerRecord.playerData, now);
+      settleClubPassiveReportForPlayer(ownerRecord.playerData, now);
+    } else if (actor?.club?.owned && actor.club.sourceId === venueId) {
+      settleClubPassiveReportForPlayer(actor, now);
     }
 
     const venue = resolveClubVenueSnapshot(venueId, {
@@ -3225,7 +3537,6 @@ app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
-
 app.get("/districts", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   syncPlayerState(req.player, now);
@@ -3279,7 +3590,22 @@ app.post("/clubs/plan", auth, asyncHandler(async (req, res) => {
   let result = null;
   await withPlayerActionLock(req, "clubs-plan", async () => {
     await commitPlayerMutation(req, "clubs-plan", async (player) => {
+      settleClubPassiveReportForPlayer(player, now);
       result = setClubNightPlanForPlayer(player, planId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/clubs/settings", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const entryFee = Number(req.body?.entryFee ?? 0);
+  let result = null;
+  await withPlayerActionLock(req, "clubs-settings", async () => {
+    await commitPlayerMutation(req, "clubs-settings", async (player) => {
+      result = setClubEntryFeeForPlayer(player, entryFee, now);
       pushLog(player, result.logMessage);
       return null;
     });
@@ -3303,6 +3629,7 @@ app.post("/clubs/stash/move", auth, asyncHandler(async (req, res) => {
   let result = null;
   await withPlayerActionLock(req, "clubs-stash-move", async () => {
     await commitPlayerMutation(req, "clubs-stash-move", async (player) => {
+      settleClubPassiveReportForPlayer(player, now);
       result = moveDrugToClubForPlayer(player, drugId, parsedQuantity.value, now);
       pushLog(player, result.logMessage);
       return null;
@@ -3342,6 +3669,9 @@ app.post("/clubs/stash/consume", auth, asyncHandler(async (req, res) => {
     syncPlayerState(actor, now);
     if (ownerRecord?.playerData) {
       syncPlayerState(ownerRecord.playerData, now);
+      settleClubPassiveReportForPlayer(ownerRecord.playerData, now);
+    } else if (actor?.club?.owned && actor.club.sourceId === venueId) {
+      settleClubPassiveReportForPlayer(actor, now);
     }
 
     result = consumeClubStashDrugForPlayer(actor, ownerRecord?.playerData || null, venueId, drugId, now);
@@ -3384,11 +3714,25 @@ app.post("/clubs/night", auth, asyncHandler(async (req, res) => {
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
+app.post("/clubs/safe/collect", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withPlayerActionLock(req, "clubs-safe-collect", async () => {
+    await commitPlayerMutation(req, "clubs-safe-collect", async (player) => {
+      result = collectClubSafeForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
 app.post("/clubs/fortify", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   let result = null;
   await withPlayerActionLock(req, "clubs-fortify", async () => {
     await commitPlayerMutation(req, "clubs-fortify", async (player) => {
+      settleClubPassiveReportForPlayer(player, now);
       result = fortifyClubForPlayer(player, now);
       pushLog(player, `${result.logMessage} Koszt ${result.cost}$.`);
       return null;
@@ -3786,12 +4130,14 @@ app.post("/gang/pvp/attack", auth, asyncHandler(async (req, res) => {
 app.post("/gang/settings", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   let result = null;
-  await withPlayerActionLock(req, "gang-settings", async () => {
-    await commitPlayerMutation(req, "gang-settings", async (player) => {
-      result = updateGangSettingsForPlayer(player, req.body || {}, now);
-      pushLog(player, result.logMessage);
-      return null;
+  await withGangMutation(req, "gang-settings", async (entries) => {
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    result = updateGangSettingsForPlayer(actorEntry.player, req.body || {}, now);
+    const sharedPatch = buildSharedGangPatch(actorEntry.player.gang);
+    entries.forEach((entry) => {
+      syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
+    pushLog(actorEntry.player, result.logMessage);
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4028,12 +4374,14 @@ app.post("/gang/tribute", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const amount = Number(req.body?.amount || 0);
   let result = null;
-  await withPlayerActionLock(req, "gang-tribute", async () => {
-    await commitPlayerMutation(req, "gang-tribute", async (player) => {
-      result = contributeGangVaultForPlayer(player, amount, now);
-      pushLog(player, result.logMessage);
-      return null;
+  await withGangMutation(req, "gang-tribute", async (entries) => {
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    result = contributeGangVaultForPlayer(actorEntry.player, amount, now);
+    const sharedPatch = buildSharedGangPatch(actorEntry.player.gang);
+    entries.forEach((entry) => {
+      syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
+    pushLog(actorEntry.player, result.logMessage);
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4042,12 +4390,14 @@ app.post("/gang/focus", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const districtId = String(req.body?.districtId || "").trim();
   let result = null;
-  await withPlayerActionLock(req, "gang-focus", async () => {
-    await commitPlayerMutation(req, "gang-focus", async (player) => {
-      result = setGangFocusForPlayer(player, districtId, now);
-      pushLog(player, result.logMessage);
-      return null;
+  await withGangMutation(req, "gang-focus", async (entries) => {
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    result = setGangFocusForPlayer(actorEntry.player, districtId, now);
+    const sharedPatch = buildSharedGangPatch(actorEntry.player.gang);
+    entries.forEach((entry) => {
+      syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
+    pushLog(actorEntry.player, result.logMessage);
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4056,12 +4406,14 @@ app.post("/gang/projects/invest", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const projectId = String(req.body?.projectId || "").trim();
   let result = null;
-  await withPlayerActionLock(req, "gang-project-invest", async () => {
-    await commitPlayerMutation(req, "gang-project-invest", async (player) => {
-      result = investGangProjectForPlayer(player, projectId, now);
-      pushLog(player, result.logMessage);
-      return null;
+  await withGangMutation(req, "gang-project-invest", async (entries) => {
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    result = investGangProjectForPlayer(actorEntry.player, projectId, now);
+    const sharedPatch = buildSharedGangPatch(actorEntry.player.gang);
+    entries.forEach((entry) => {
+      syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
+    pushLog(actorEntry.player, result.logMessage);
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4069,19 +4421,33 @@ app.post("/gang/projects/invest", auth, asyncHandler(async (req, res) => {
 app.post("/gang/goals/claim", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   let result = null;
-  await withPlayerActionLock(req, "gang-goal-claim", async () => {
-    await commitPlayerMutation(req, "gang-goal-claim", async (player) => {
-      result = claimGangWeeklyGoalForPlayer(player, now);
-      applyGangGoalRewardToPlayer(player, result.rewards, now);
-      pushLog(player, result.logMessage);
-      return null;
+  await withGangMutation(req, "gang-goal-claim", async (entries) => {
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    result = claimGangWeeklyGoalForPlayer(actorEntry.player, now);
+    applyGangGoalRewardToPlayer(actorEntry.player, result.rewards, now);
+    const sharedPatch = buildSharedGangPatch(actorEntry.player.gang);
+    entries.forEach((entry) => {
+      syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
+    pushLog(actorEntry.player, result.logMessage);
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
-app.post("/gang/heists/:id/execute", auth, asyncHandler(async (req, res) => {
+app.post("/gang/members/upgrade", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+  await withGangMutation(req, "gang-members-upgrade", async (entries) => {
+    result = upgradeGangCapacityForGang(entries, req.user.id, now);
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    pushLog(actorEntry.player, result.logMessage);
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, { result }));
+}));
+
+app.post("/gang/heists/:id/open", auth, asyncHandler(async (req, res) => {
   const heistId = String(req.params?.id || "").trim();
+  const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
   const heist = getGangHeistById(heistId);
   if (!heist) {
     res.status(404).json({ error: "Gang heist not found", heistId });
@@ -4089,62 +4455,174 @@ app.post("/gang/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   }
 
   const now = Date.now();
-  syncPlayerState(req.player, now);
-  if (req.player?.gang?.joined && req.player.gang.name) {
-    const liveGang = (await buildGangDirectorySnapshot(now)).find(
-      (entry) => entry?.name === req.player.gang.name
-    );
-    if (liveGang) {
-      req.player.gang = {
-        ...req.player.gang,
-        members: liveGang.members,
-        territory: liveGang.territory,
-        influence: liveGang.influence,
-        vault: liveGang.vault,
-        inviteRespectMin: liveGang.inviteRespectMin,
-        focusDistrictId: liveGang.focusDistrictId || req.player.gang.focusDistrictId,
-        projects:
-          liveGang.projects && typeof liveGang.projects === "object" && !Array.isArray(liveGang.projects)
-            ? { ...liveGang.projects }
-            : req.player.gang.projects,
-        weeklyGoal:
-          liveGang.weeklyGoal && typeof liveGang.weeklyGoal === "object" && !Array.isArray(liveGang.weeklyGoal)
-            ? { ...liveGang.weeklyGoal }
-            : req.player.gang.weeklyGoal,
-        weeklyProgress:
-          liveGang.weeklyProgress && typeof liveGang.weeklyProgress === "object" && !Array.isArray(liveGang.weeklyProgress)
-            ? { ...liveGang.weeklyProgress }
-            : req.player.gang.weeklyProgress,
-        weeklyGoalClaimedAt: liveGang.weeklyGoalClaimedAt ?? req.player.gang.weeklyGoalClaimedAt ?? null,
-        membersList:
-          Array.isArray(liveGang.membersList) && liveGang.membersList.length
-            ? liveGang.membersList
-            : req.player.gang.membersList,
-        chat:
-          Array.isArray(liveGang.eventLog) && liveGang.eventLog.length
-            ? liveGang.eventLog
-            : req.player.gang.chat,
-      };
-    }
-  }
-
-  if (isPlayerJailed(req.player, now)) {
-    res.status(423).json({ error: "Siedzisz w wiezieniu. Najpierw odsiadka albo kaucja." });
-    return;
-  }
-
   let result = null;
-  await withPlayerActionLock(req, `gang-heist:${heist.id}`, async () => {
-    await commitPlayerMutation(req, "gang-heist-execute", async (player) => {
-      result = executeGangHeistForPlayer(player, heist.id, now);
-      return null;
-    });
+  await withGangMutation(req, `gang-heist-open:${heist.id}`, async (entries) => {
+    result = openGangHeistLobbyForGang(entries, req.user.id, heist.id, note, now);
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    pushLog(actorEntry.player, result.logMessage);
   });
-
   res.json(await buildPlayerEnvelope(req.player, now, {
     result,
     gangHeists: GANG_HEISTS,
   }));
+}));
+
+app.post("/gang/heists/:id/join", auth, asyncHandler(async (req, res) => {
+  const heistId = String(req.params?.id || "").trim();
+  const heist = getGangHeistById(heistId);
+  if (!heist) {
+    res.status(404).json({ error: "Gang heist not found", heistId });
+    return;
+  }
+  const now = Date.now();
+  let result = null;
+  await withGangMutation(req, `gang-heist-join:${heist.id}`, async (entries) => {
+    result = joinGangHeistLobbyForGang(entries, req.user.id, now);
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    pushLog(actorEntry.player, result.logMessage);
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, {
+    result,
+    gangHeists: GANG_HEISTS,
+  }));
+}));
+
+app.post("/gang/heists/:id/leave", auth, asyncHandler(async (req, res) => {
+  const heistId = String(req.params?.id || "").trim();
+  const heist = getGangHeistById(heistId);
+  if (!heist) {
+    res.status(404).json({ error: "Gang heist not found", heistId });
+    return;
+  }
+  const now = Date.now();
+  let result = null;
+  await withGangMutation(req, `gang-heist-leave:${heist.id}`, async (entries) => {
+    result = leaveGangHeistLobbyForGang(entries, req.user.id, now);
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    pushLog(actorEntry.player, result.logMessage);
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, {
+    result,
+    gangHeists: GANG_HEISTS,
+  }));
+}));
+
+app.post("/gang/heists/:id/start", auth, asyncHandler(async (req, res) => {
+  const heistId = String(req.params?.id || "").trim();
+  const heist = getGangHeistById(heistId);
+  if (!heist) {
+    res.status(404).json({ error: "Gang heist not found", heistId });
+    return;
+  }
+  const now = Date.now();
+  let result = null;
+  await withGangMutation(req, `gang-heist-start:${heist.id}`, async (entries) => {
+    result = startGangHeistForGang(entries, req.user.id, now);
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    pushLog(actorEntry.player, result.logMessage);
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, {
+    result,
+    gangHeists: GANG_HEISTS,
+  }));
+}));
+
+app.post("/gang/heists/rescue", auth, asyncHandler(async (req, res) => {
+  const optionId = String(req.body?.optionId || "").trim();
+  const now = Date.now();
+  let result = null;
+  await withGangMutation(req, "gang-heist-rescue", async (entries) => {
+    result = rescueGangHeistCrewForGang(entries, req.user.id, optionId, now);
+    const actorEntry = getGangMutationActor(entries, req.user.id, now);
+    pushLog(actorEntry.player, result.logMessage);
+  });
+  res.json(await buildPlayerEnvelope(req.player, now, {
+    result,
+    gangHeists: GANG_HEISTS,
+  }));
+}));
+
+app.post("/gang/heists/:id/execute", auth, asyncHandler(async (_req, res) => {
+  res.status(409).json({ error: "Napady gangu ida teraz przez lobby: otworz, dolacz i wystartuj sklad." });
+}));
+
+app.get("/contracts", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  syncPlayerState(req.player, now);
+  res.json(buildContractBoardForPlayer(req.player, now));
+}));
+
+app.post("/contracts/items/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const itemId = String(req.body?.itemId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "contracts-item-buy", async () => {
+    await commitPlayerMutation(req, "contracts-item-buy", async (player) => {
+      result = buyContractItemForPlayer(player, itemId);
+      pushLog(player, result.logMessage);
+      return result;
+    });
+  });
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+    contractsBoard: buildContractBoardForPlayer(req.player, now),
+  });
+}));
+
+app.post("/contracts/cars/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const carId = String(req.body?.carId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "contracts-car-buy", async () => {
+    await commitPlayerMutation(req, "contracts-car-buy", async (player) => {
+      result = buyContractCarForPlayer(player, carId);
+      pushLog(player, result.logMessage);
+      return result;
+    });
+  });
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+    contractsBoard: buildContractBoardForPlayer(req.player, now),
+  });
+}));
+
+app.post("/contracts/loadout/equip", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const slotId = String(req.body?.slotId || "").trim();
+  const assetId = typeof req.body?.assetId === "string" ? req.body.assetId.trim() : null;
+  let result = null;
+  await withPlayerActionLock(req, "contracts-loadout-equip", async () => {
+    await commitPlayerMutation(req, "contracts-loadout-equip", async (player) => {
+      result = equipContractLoadoutForPlayer(player, slotId, assetId);
+      pushLog(player, result.logMessage);
+      return result;
+    });
+  });
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+    contractsBoard: buildContractBoardForPlayer(req.player, now),
+  });
+}));
+
+app.post("/contracts/execute", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const contractId = String(req.body?.contractId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "contracts-execute", async () => {
+    await commitPlayerMutation(req, "contracts-execute", async (player) => {
+      result = executeContractForPlayer(player, contractId, now);
+      pushLog(player, result.logMessage);
+      return result;
+    });
+  });
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+    contractsBoard: buildContractBoardForPlayer(req.player, now),
+  });
 }));
 
 app.get("/operations", auth, asyncHandler(async (req, res) => {
@@ -5006,4 +5484,5 @@ app.listen(port, host, () => {
     corsOrigins: allowedOrigins.length ? allowedOrigins.join(",") : "all",
   });
 });
+
 

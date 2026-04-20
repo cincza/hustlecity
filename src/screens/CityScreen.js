@@ -48,7 +48,6 @@ export function CityScreen({
   hottestDistrictSummary,
   escortFindChance,
   gangTributeRemaining,
-  clubNightRemaining,
   bankAmountDraft,
   setBankAmountDraft,
   restaurantItems,
@@ -114,7 +113,7 @@ export function CityScreen({
   ];
 
   const empireCards = [
-    { id: "club", title: "Klub", subtitle: game.club?.owned ? "Noc, stash i rozliczenia." : "Przejmij albo odwiedz lokal.", visual: systemVisuals.club, onPress: () => actions.openSection("empire", "club") },
+    { id: "club", title: "Klub", subtitle: game.club?.owned ? "Raport, sejf, stash i drzwi." : "Przejmij albo odwiedz lokal.", visual: systemVisuals.club, onPress: () => actions.openSection("empire", "club") },
     { id: "cashflow", title: "Biznes", subtitle: `${formatMoney(totalBusinessIncome)}/min z zaplecza.`, visual: systemVisuals.factory, onPress: () => actions.openSection("empire", "businesses") },
     { id: "street", title: "Ulica", subtitle: `${formatMoney(totalEscortIncome)}/min i przypal.`, visual: systemVisuals.street, onPress: () => actions.openSection("empire", "club") },
     { id: "tasks", title: "Misje", subtitle: "Nagrody i szybki progress.", visual: systemVisuals.respect, onPress: () => actions.openSection("city", "tasks") },
@@ -198,7 +197,7 @@ export function CityScreen({
             ))}
             <ActionTile title="Fightclub" subtitle="Sparing podbija sile, zrecznosc i szacun." visual={systemVisuals.pvp} onPress={actions.fightClubRound} />
             <ActionTile title="Haracz" subtitle={gangTributeRemaining > 0 ? `Kolejna koperta za ${formatCooldown(gangTributeRemaining)}.` : "Regularna wyplata z terenu i ochrony."} visual={systemVisuals.gang} onPress={actions.collectGangTribute} disabled={!game.gang.joined || gangTributeRemaining > 0} />
-            <ActionTile title="Noc w klubie" subtitle={clubNightRemaining > 0 ? `Wroc za ${formatCooldown(clubNightRemaining)}.` : "Sprzedaj towar wrzucony do klubu."} visual={systemVisuals.club} onPress={actions.runClubNight} disabled={!game.club.owned || clubNightRemaining > 0} />
+            <ActionTile title="Raport klubu" subtitle={game.club?.owned ? "Wejdz po sejf, stash i stan lokalu." : "Przejmij albo odwiedz lokal."} visual={systemVisuals.club} onPress={() => actions.openSection("empire", "club")} />
             <ActionTile title="Odbierz biznes" subtitle={businessCash > 0 ? businessCollectionSubtitle : "Skrytka pusta."} visual={systemVisuals.cash} onPress={actions.collectBusinessIncome} disabled={businessCollectableCash <= 0} />
             <ActionTile title="Odbierz ulice" subtitle={escortCash > 0 ? escortCollectionSubtitle : "Rozliczenie puste."} visual={systemVisuals.street} onPress={actions.collectEscortIncome} disabled={escortCollectableCash <= 0} />
           </View>

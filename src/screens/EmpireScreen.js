@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getFactoryDistrictId } from "../../shared/districts.js";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
+import { getClubGuestVenueState, getClubThreatLabel, hasClubGuestAccess } from "../../shared/socialGameplay.js";
 import {
   getDistrictAlertText,
   getDistrictEffectLines,
@@ -50,7 +51,6 @@ export function EmpireScreen({
   currentClubProfile,
   clubPolice,
   insideOwnClub,
-  clubNightRemaining,
   focusDistrictSummary,
   districtSummaries,
   helpers,
@@ -114,6 +114,9 @@ export function EmpireScreen({
   ].filter((entry) => entry.unlocks.length);
   const clubGuestState = safeGame.club?.guestState || {};
   const [clubTradeDraft, setClubTradeDraft] = React.useState("1");
+  const [clubEntryFeeDraft, setClubEntryFeeDraft] = React.useState(
+    String(Math.max(0, Number(currentClubVenue?.entryFee ?? safeGame.club?.entryFee ?? 0)))
+  );
   const parsedClubTradeQuantity = Number.parseInt(String(clubTradeDraft || "").replace(/[^\d]/g, ""), 10);
   const clubTradeQuantity = Math.max(1, Number.isFinite(parsedClubTradeQuantity) ? parsedClubTradeQuantity : 1);
   const activePlanId = currentClubVenue
@@ -197,7 +200,29 @@ export function EmpireScreen({
     gangEffects,
   });
   const activeClubDistrictAlert = getDistrictAlertText(activeClubDistrictSummary);
-  const clubNightSummary = insideOwnClub ? safeGame.club?.lastNightSummary || null : null;
+  const clubReportSummary = insideOwnClub
+    ? safeGame.club?.lastReportSummary || safeGame.club?.lastNightSummary || null
+    : currentClubVenue?.lastReportSummary || null;
+  const currentVenueAffinity = currentClubVenue ? getClubGuestVenueState(clubGuestState, currentClubVenue.id) : null;
+  const guestHasVenueAccess = currentClubVenue
+    ? insideOwnClub || hasClubGuestAccess(clubGuestState, currentClubVenue.id, Date.now())
+    : false;
+  const guestAccessRemaining = !insideOwnClub && guestHasVenueAccess
+    ? Math.max(0, Number(currentVenueAffinity?.accessUntil || 0) - Date.now())
+    : 0;
+  const currentEntryFee = Math.max(
+    0,
+    Number(currentClubVenue?.entryFee ?? (insideOwnClub ? safeGame.club?.entryFee : 0) ?? 0)
+  );
+  const currentSafeCash = insideOwnClub ? Math.max(0, Number(safeGame.club?.safeCash || 0)) : 0;
+  const protectorGangName = currentClubVenue?.protectorGangName || null;
+  const protectorEffects = currentClubVenue?.protectorEffects || null;
+  const threatLabel = getClubThreatLabel(
+    Number((insideOwnClub ? safeGame.club?.threatLevel : currentClubVenue?.threatLevel) || 0)
+  );
+  React.useEffect(() => {
+    setClubEntryFeeDraft(String(Math.max(0, Number(currentClubVenue?.entryFee ?? safeGame.club?.entryFee ?? 0))));
+  }, [currentClubVenue?.id, currentClubVenue?.entryFee, safeGame.club?.entryFee]);
 
   const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
     <SectionCard title={title} subtitle={subtitle}>
@@ -592,7 +617,7 @@ export function EmpireScreen({
       <SceneArtwork
         eyebrow="Klub"
         title="Lokal, ruch i nocne okazje"
-        lines={["Klub to ruch, kontakty i nocne okazje.", "Wlasciciel ustawia plan nocy, a odwiedzajacy maja trzy proste ruchy."]}
+        lines={["Klub to ruch, kontakty i nocne okazje.", "Wlasciciel trzyma drzwi, stash i raport, a odwiedzajacy maja trzy proste ruchy."]}
         accent={["#432417", "#170f0c", "#050505"]}
         source={sceneBackgrounds.clubWide}
       />
@@ -631,7 +656,7 @@ export function EmpireScreen({
                   {listing.districtId ? `Dzielnica: ${listing.districtId} | ` : ""}Plan nocy: {listingPlan?.name || "Guest List"} | Ruch {Math.round(listing.traffic || 0)} | Presja: {listingPressureLabel}
                 </Text>
                 <Text style={styles.listCardMeta}>
-                  Scout do {formatMoney(listingProfile.scoutTipValue)} | Hunt +{listingProfile.huntProgressValue} | Lay Low: -{listingProfile.layLowHeat} heat
+                  Bramka: {formatMoney(listing.entryFee || 0)} | Wejdz w obieg: +{listingProfile.networkBoostValue}% do kolejnego kontaktu | Szukaj kontaktu: +{listingProfile.huntProgressValue}
                 </Text>
                 <View style={styles.marketButtons}>
                   <Pressable onPress={() => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
@@ -644,7 +669,7 @@ export function EmpireScreen({
                 <View style={styles.inlineRow}>
                   <Text style={styles.costLabel}>
                     {isOwnedByPlayer
-                      ? "Lokal jest Twoj. Wejdz do srodka, zeby odpalic swoj panel."
+                      ? "Lokal jest Twoj. Wejdz do srodka, zeby zobaczyc raport, sejf i drzwi."
                       : `Przejecie: ${formatMoney(listing.takeoverCost)}`}
                   </Text>
                 </View>
@@ -665,7 +690,7 @@ export function EmpireScreen({
 
       <SectionCard
         title={currentClubVenue ? `Stan lokalu: ${currentClubVenue.name}` : "Stan klubu"}
-        subtitle={currentClubVenue ? "Widzisz stan lokalu, plan nocy i to, co dzieje sie teraz." : "Wejdz do lokalu, zeby odpalic trzy akcje klubowe."}
+        subtitle={currentClubVenue ? "Widzisz rytm lokalu, presje, drzwi i to, kto trzyma ten adres." : "Wejdz do lokalu, zeby zobaczyc rytm sali i akcje dla goscia."}
       >
         <View style={styles.heroBanner}>
           <View style={styles.listCardHeader}>
@@ -675,7 +700,7 @@ export function EmpireScreen({
                 <Text style={styles.heroBannerTitle}>{currentClubVenue ? currentClubVenue.name : "Poza klubem"}</Text>
                 <Text style={styles.heroBannerText}>
                   {currentClubVenue
-                    ? `${insideOwnClub ? "Twoj lokal" : `Wlasciciel: ${currentClubVenue.ownerLabel}`}. Plan nocy: ${activeClubPlan?.name || "Guest List"}.`
+                    ? `${insideOwnClub ? "Twoj lokal" : `Wlasciciel: ${currentClubVenue.ownerLabel}`}. ${currentEntryFee > 0 ? `Bramka ${formatMoney(currentEntryFee)}.` : "Lista otwarta."} Plan: ${activeClubPlan?.name || "Guest List"}.`
                     : "Wybierz lokal z listy wyzej, zeby wejsc do srodka."}
                 </Text>
               </View>
@@ -701,11 +726,21 @@ export function EmpireScreen({
                   <Text style={styles.listCardMeta}>{pressureLabel}</Text>
                 </View>
                 <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>Lead</Text>
+                  <Text style={styles.mobileOverviewLabel}>{insideOwnClub ? "Sejf" : "Wejscie"}</Text>
                   <Text style={styles.mobileOverviewValueSmall}>
-                    {activeLeadEscort ? `${leadProgress}/${leadRequired}` : "Brak celu"}
+                    {insideOwnClub ? formatMoney(currentSafeCash) : guestHasVenueAccess ? "Aktywne" : formatMoney(currentEntryFee)}
                   </Text>
-                  <Text style={styles.listCardMeta}>{activeLeadEscort ? activeLeadEscort.name : "Odblokuj wyzszy respekt"}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {insideOwnClub
+                      ? "Do odbioru z lokalu"
+                      : guestHasVenueAccess
+                        ? guestAccessRemaining > 0
+                          ? `Opaska jeszcze ${formatCooldown(guestAccessRemaining)}`
+                          : "Masz opaske na lokal"
+                        : currentEntryFee > 0
+                          ? "Placisz raz za wejscie"
+                          : "Wejscie za free"}
+                  </Text>
                 </View>
                 <View style={styles.mobileOverviewCard}>
                   <Text style={styles.mobileOverviewLabel}>Dzielnica</Text>
@@ -715,11 +750,19 @@ export function EmpireScreen({
                 <View style={styles.mobileOverviewCard}>
                   <Text style={styles.mobileOverviewLabel}>Obrona</Text>
                   <Text style={styles.mobileOverviewValue}>{Math.round((insideOwnClub ? safeGame.club.defenseReadiness : currentClubVenue.defenseReadiness) || 0)}</Text>
-                  <Text style={styles.listCardMeta}>Zagrozenie {Math.round((insideOwnClub ? safeGame.club.threatLevel : currentClubVenue.threatLevel) || 0)}</Text>
+                  <Text style={styles.listCardMeta}>Zagrozenie {threatLabel}</Text>
                 </View>
               </View>
               <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text>
-              <Text style={styles.listCardMeta}>{activeClubPlan?.summary}</Text>
+              <Text style={styles.listCardMeta}>
+                {insideOwnClub
+                  ? `Plan lokalu: ${activeClubPlan?.summary}`
+                  : guestHasVenueAccess
+                    ? "Masz wejscie, wiec dzialasz normalnie na sali i przy kontaktach."
+                    : currentEntryFee > 0
+                      ? `Bez wejscia nie ruszysz sali. Bramka bierze ${formatMoney(currentEntryFee)} za okno wejscia.`
+                      : "Lokal wpuszcza bez oplaty i gra glownie ruchem oraz kontaktami."}
+              </Text>
               {activeClubDistrictSummary ? (
                 <View style={styles.listCard}>
                   <Text style={styles.listCardTitle}>{activeClubDistrictSummary.name}</Text>
@@ -737,31 +780,53 @@ export function EmpireScreen({
                 </View>
               ) : null}
               {insideOwnClub ? (
-                <View style={styles.planChipRow}>
-                  {clubNightPlans.map((plan) => {
-                    const active = safeGame.club.nightPlanId === plan.id;
-                    return (
-                      <Pressable
-                        key={plan.id}
-                        onPress={() => actions.setClubNightPlan(plan.id)}
-                        style={[styles.planChip, active && styles.planChipActive]}
-                      >
-                        <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{plan.name}</Text>
+                <>
+                  <View style={styles.planChipRow}>
+                    {clubNightPlans.map((plan) => {
+                      const active = safeGame.club.nightPlanId === plan.id;
+                      return (
+                        <Pressable
+                          key={plan.id}
+                          onPress={() => actions.setClubNightPlan(plan.id)}
+                          style={[styles.planChip, active && styles.planChipActive]}
+                        >
+                          <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{plan.name}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <View style={styles.listCard}>
+                    <View style={styles.entityHead}>
+                      <EntityBadge visual={systemVisuals.bank} />
+                      <View style={styles.flexOne}>
+                        <Text style={styles.listCardTitle}>Bramka lokalu</Text>
+                        <Text style={styles.listCardMeta}>
+                          Ustawiasz wejscie dla obcych. Za wysoko siada ruch i kontakty. Twoj gang protektor wchodzi bez oplaty.
+                        </Text>
+                      </View>
+                    </View>
+                    <TextInput
+                      value={clubEntryFeeDraft}
+                      onChangeText={(text) => setClubEntryFeeDraft(text.replace(/[^\d]/g, ""))}
+                      placeholder="Np. 80"
+                      placeholderTextColor="#6c6c6c"
+                      keyboardType="numeric"
+                      style={styles.chatInput}
+                    />
+                    <View style={styles.listActionsRow}>
+                      <Pressable onPress={() => actions.setClubEntryFee(clubEntryFeeDraft)} style={styles.inlineButton}>
+                        <Text style={styles.inlineButtonText}>Ustaw wejscie</Text>
                       </Pressable>
-                    );
-                  })}
-                </View>
+                      <Pressable onPress={actions.fortifyClub} style={styles.inlineButton}>
+                        <Text style={styles.inlineButtonText}>Zabezpiecz lokal</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </>
               ) : null}
               {insideOwnClub && safeGame.club.recentIncident?.text ? (
                 <View style={styles.lockedPanel}>
                   <Text style={styles.lockedPanelText}>{safeGame.club.recentIncident.text}</Text>
-                </View>
-              ) : null}
-              {insideOwnClub ? (
-                <View style={styles.listActionsRow}>
-                  <Pressable onPress={actions.fortifyClub} style={styles.inlineButton}>
-                    <Text style={styles.inlineButtonText}>Zabezpiecz lokal</Text>
-                  </Pressable>
                 </View>
               ) : null}
             </>
@@ -769,28 +834,33 @@ export function EmpireScreen({
         </View>
       </SectionCard>
 
-      {currentClubVenue ? (
+      {currentClubVenue && !insideOwnClub ? (
         <SectionCard
-          title="Akcje w klubie"
+          title="Akcje goscia"
           subtitle={
             clubActionCooldownRemaining > 0
               ? `Kolejny ruch za ${formatCooldown(clubActionCooldownRemaining)}.`
-              : "Masz trzy szybkie ruchy."
+              : guestHasVenueAccess
+                ? "Trzy szybkie ruchy. Kazdy daje jasny efekt i konkret pod kolejny krok."
+                : currentEntryFee > 0
+                  ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}.`
+                  : "Lokal wpuszcza bez oplaty."
           }
         >
           <View style={styles.grid}>
             {clubVisitorActions.map((action) => {
               const disabled =
                 clubActionCooldownRemaining > 0 ||
+                !guestHasVenueAccess ||
                 (action.id === "hunt" && !activeLeadEscort);
               const subtitle =
                 action.id === "scout"
-                  ? `Tip do ${formatMoney(currentClubProfile.scoutTipValue)}. Krotki rekonesans sali.`
+                  ? `Koszt 0$. Daje +${currentClubProfile.networkBoostValue}% do kolejnego szukania kontaktu i lekko rozkreca lokal.`
                   : action.id === "hunt"
                     ? activeLeadEscort
-                      ? `${activeLeadEscort.name}: +${currentClubProfile.huntProgressValue} postepu za ${formatMoney(action.costCash)}.`
+                      ? `Koszt ${formatMoney(action.costCash)}. ${activeLeadEscort.name}: +${currentClubProfile.huntProgressValue} progressu.`
                       : "Na tym progu nie ma jeszcze kontaktu do namierzenia."
-                    : `Heat -${currentClubProfile.layLowHeat} | HP +${currentClubProfile.layLowHp}. Chwila oddechu.`;
+                    : `Koszt 0$. Heat -${currentClubProfile.layLowHeat} | HP +${currentClubProfile.layLowHp}. Wracasz do pionu.`;
 
               return (
                 <ActionTile
@@ -799,7 +869,7 @@ export function EmpireScreen({
                   subtitle={subtitle}
                   visual={
                     action.id === "scout"
-                      ? systemVisuals.cash
+                      ? systemVisuals.club
                       : action.id === "hunt"
                         ? systemVisuals.street
                         : systemVisuals.heat
@@ -814,19 +884,84 @@ export function EmpireScreen({
       ) : null}
 
       <SectionCard
-        title={currentClubVenue ? "Okazje i wynik" : "Po co tu wchodzic"}
+        title={
+          !currentClubVenue
+            ? "Po co tu wchodzic"
+            : insideOwnClub
+              ? "Raport i sejf"
+              : "Okazje i wynik"
+        }
         subtitle={
           currentClubVenue
-            ? "Tu widzisz postep, ostatni rezultat i ruchy wlasciciela."
+            ? insideOwnClub
+              ? "Tu widzisz ostatni raport lokalu, sejf i czy klub trzyma rytm."
+              : "Tu widzisz postep kontaktu i ostatni wynik z sali."
             : "Klub daje kontakty, ruch i nocne okazje."
         }
       >
         {!currentClubVenue ? (
           <View style={styles.lockedPanel}>
             <Text style={styles.lockedPanelText}>
-              Po wejsciu do lokalu odpalasz trzy szybkie akcje. Scout szuka tipa, Hunt Contacts pcha kontakt do przodu, a Lay Low zrzuca heat i daje oddech.
+              Po wejsciu do lokalu widzisz od razu bramke, rytm sali i trzy proste ruchy: wejscie w obieg, szukanie kontaktu albo chwile oddechu.
             </Text>
           </View>
+        ) : insideOwnClub ? (
+          <>
+            <View style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.entityHead}>
+                  <EntityBadge visual={systemVisuals.cash} />
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>Sejf klubu</Text>
+                    <Text style={styles.listCardMeta}>
+                      {clubReportSummary
+                        ? `Obrot: ${formatMoney(clubReportSummary.grossIncome || 0)} | Realny payout: ${formatMoney(clubReportSummary.payout || 0)}`
+                        : "Lokal jeszcze nie domknal okresu do czytelnego raportu."}
+                    </Text>
+                  </View>
+                </View>
+                <Tag text={formatMoney(currentSafeCash)} warning={currentSafeCash <= 0} />
+              </View>
+              <Text style={styles.listCardMeta}>
+                {clubReportSummary
+                  ? `Gosci: ${clubReportSummary.guestCount || 0} | Wejscia: ${formatMoney(clubReportSummary.entryRevenue || 0)} | Zeszlo ze stashu: ${clubReportSummary.stashUsed || 0}`
+                  : "Raport pojawi sie automatycznie po kolejnym okresie pracy lokalu."}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {clubReportSummary
+                  ? `Presja +${Number(clubReportSummary.clubPressureGain || 0).toFixed(1)} | Dzielnica +${Number(clubReportSummary.districtPressureGain || 0).toFixed(1)} | Wplyw +${Number(clubReportSummary.influenceGain || 0).toFixed(1)}`
+                  : "Na razie lokal dopiero zbiera ruch, wejscie i zuzycie stashu."}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {clubReportSummary
+                  ? clubReportSummary.incidentTriggered
+                    ? `Incydent: ${clubReportSummary.incidentText || "Cos przycielo obrot."}`
+                    : clubReportSummary.incidentText || "Ostatni okres bez grubego incydentu."
+                  : "Cisza. Lokal czeka na kolejny raport."}
+              </Text>
+              <View style={styles.listActionsRow}>
+                <Pressable
+                  onPress={actions.collectClubSafe}
+                  style={[styles.inlineButton, currentSafeCash <= 0 && styles.tileDisabled]}
+                >
+                  <Text style={styles.inlineButtonText}>
+                    {currentSafeCash > 0 ? `Odbierz ${formatMoney(currentSafeCash)}` : "Sejf pusty"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Co robi lokal teraz</Text>
+              <Text style={styles.listCardMeta}>
+                Bramka: {currentEntryFee > 0 ? formatMoney(currentEntryFee) : "free"} | Stash support {Math.round(Number(currentClubProfile.stashSupport || 0) * 100)}%
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {protectorGangName
+                  ? `Protektor: ${protectorGangName}. Drzwi trzymaja nizszy threat i lepsza stabilnosc.`
+                  : "Bez protektora. Lokal sam dzwiga threat i presje."}
+              </Text>
+            </View>
+          </>
         ) : (
           <>
             <View style={styles.listCard}>
@@ -834,11 +969,11 @@ export function EmpireScreen({
                 <View style={styles.entityHead}>
                   <EntityBadge visual={activeLeadEscort ? escortVisuals[activeLeadEscort.id] || escortVisuals.velvet : systemVisuals.street} />
                   <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{activeLeadEscort ? `Lead na ${activeLeadEscort.name}` : "Lead meter czeka"}</Text>
+                    <Text style={styles.listCardTitle}>{activeLeadEscort ? `Lead na ${activeLeadEscort.name}` : "Kontakt jeszcze sie nie odpalil"}</Text>
                     <Text style={styles.listCardMeta}>
                       {activeLeadEscort
-                        ? `${leadProgress}/${leadRequired} lead | ${formatMoney(activeLeadEscort.cashPerMinute)}/min po domknieciu`
-                        : "Podnies respekt albo zmien lokal, zeby odpalic lepsze kontakty."}
+                        ? `${leadProgress}/${leadRequired} | Kolejny ruch daje +${currentClubProfile.huntProgressValue}`
+                        : "Podnies respekt albo wejdz do mocniejszego lokalu po lepszy kontakt."}
                     </Text>
                   </View>
                 </View>
@@ -847,70 +982,58 @@ export function EmpireScreen({
               <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: `${Math.max(4, leadMeterProgress * 100)}%` }]} />
               </View>
-            </View>
-
-            <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>{insideOwnClub ? "Ostatnia noc" : "Ostatni wynik"}</Text>
-              {insideOwnClub && clubNightSummary ? (
-                <>
-                  <Text style={styles.listCardMeta}>
-                    Zeszlo {clubNightSummary.soldUnits} szt. | {clubNightSummary.soldSummary || "Miks z sali"}
-                  </Text>
-                  <Text style={styles.listCardMeta}>
-                    Wpada {formatMoney(clubNightSummary.payout)} | Pressure +{Number(clubNightSummary.clubPressureGain || 0).toFixed(1)} | Wplyw +{Number(clubNightSummary.influenceGain || 0).toFixed(1)}
-                  </Text>
-                  <Text style={styles.listCardMeta}>
-                    {clubNightSummary.incidentTriggered
-                      ? `Incydent: ${clubNightSummary.incidentText || "Patrol przycial noc."}`
-                      : clubNightSummary.incidentText || "Noc zeszla bez grubego incydentu."}
-                  </Text>
-                </>
-              ) : (
-                <Text style={styles.listCardMeta}>
-                  {lastOutcome
-                    ? lastOutcome.logMessage
-                    : insideOwnClub
-                      ? "Po pierwszej odpalonej nocy zobaczysz tutaj sprzedany towar, payout i pressure."
-                      : "Po pierwszej akcji zobaczysz tutaj konkret: tip, lead albo chwile spokoju."}
-                </Text>
-              )}
+              <Text style={styles.listCardMeta}>
+                {lastOutcome
+                  ? lastOutcome.logMessage
+                  : guestHasVenueAccess
+                    ? "Pierwszy ruch od razu pokaże konkretny wynik: boost do kontaktu, progress albo zejście heat."
+                    : currentEntryFee > 0
+                      ? `Najpierw wejście za ${formatMoney(currentEntryFee)}. Potem masz pelny dostep do akcji i stashu lokalu.`
+                      : "Lokal wpuszcza bez oplaty. Wchodzisz i od razu grasz pod kontakty."}
+              </Text>
               <View style={styles.listActionsRow}>
-                {insideOwnClub ? (
-                  <>
-                    <Pressable onPress={actions.promoteClub} style={styles.inlineButton}>
-                      <Text style={styles.inlineButtonText}>Promo</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={actions.runClubNight}
-                      style={[styles.inlineButton, clubNightRemaining > 0 && styles.tileDisabled]}
-                    >
-                      <Text style={styles.inlineButtonText}>
-                        {clubNightRemaining > 0 ? `Noc za ${formatCooldown(clubNightRemaining)}` : "Odpal noc"}
-                      </Text>
-                    </Pressable>
-                  </>
-                ) : null}
                 <Pressable onPress={actions.leaveClubAsGuest} style={styles.inlineButton}>
                   <Text style={styles.inlineButtonText}>Wyjdz</Text>
                 </Pressable>
               </View>
-              {insideOwnClub ? (
-                <Text style={styles.listCardMeta}>
-                  Noc liczy ruch, stash i temperature dzielnicy. Goraca okolica dusi lokal szybciej niz sama sala.
-                </Text>
-              ) : (
-                <Text style={styles.listCardMeta}>
-                  W tym lokalu wpadasz glownie po kontakty i okazje.
-                </Text>
-              )}
             </View>
           </>
         )}
       </SectionCard>
 
+      {currentClubVenue ? (
+        <SectionCard title="Ochrona i protektor" subtitle="Widzisz, kto trzyma drzwi i jak lokal oddycha pod presja.">
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>{protectorGangName ? protectorGangName : "Brak protektora"}</Text>
+            <Text style={styles.listCardMeta}>
+              {protectorGangName
+                ? `Gang trzyma ten adres. Obrona +${Math.round(Number(protectorEffects?.clubSecurity || 0))}, threat lzej o ${Math.round(Number(protectorEffects?.clubThreatMitigation || 0) * 100)}%.`
+                : "Na MVP tylko jeden gang moze chronic jeden klub. Bez protektora lokal bierze cala presje na siebie."}
+            </Text>
+            <Text style={styles.listCardMeta}>
+              Presja: {pressureLabel} | Zagrozenie: {threatLabel}
+            </Text>
+            <Text style={styles.listCardMeta}>
+              {activeClubDistrictAlert
+                ? activeClubDistrictAlert
+                : pressureLabel === "Goraco"
+                  ? "Goraca dzielnica tnie ruch, pogarsza kontakty i podbija ryzyko incydentu."
+                  : "Spokojniejsza dzielnica trzyma lokal stabilniej i daje wiecej oddechu."}
+            </Text>
+          </View>
+        </SectionCard>
+      ) : null}
+
       {currentClubVenue && !insideOwnClub ? (
         <SectionCard title="Towar w lokalu" subtitle="Jako gosc mozesz zarzucic to, co wlasciciel wrzucil na stash. Bez kupna i sprzedazy na miejscu.">
-          {clubConsumeCooldownRemaining > 0 ? (
+          {!guestHasVenueAccess ? (
+            <Text style={styles.listCardMeta}>
+              {currentEntryFee > 0
+                ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}. Opaska daje Ci dostep do stashu i akcji w lokalu.`
+                : "Wejdz do lokalu i zlap aktywne wejscie, zeby korzystac z tego co lezy na stashu."}
+            </Text>
+          ) : null}
+          {guestHasVenueAccess && clubConsumeCooldownRemaining > 0 ? (
             <Text style={styles.listCardMeta}>{`Lokal musi chwile odpoczac. Kolejny strzal za ${formatCooldown(clubConsumeCooldownRemaining)}.`}</Text>
           ) : null}
           {guestClubStashDrugs.length ? (
@@ -928,10 +1051,14 @@ export function EmpireScreen({
                   </View>
                   <Pressable
                     onPress={() => actions.consumeDrugFromClub(drug)}
-                    style={[styles.inlineButton, clubConsumeCooldownRemaining > 0 && styles.tileDisabled]}
+                    style={[styles.inlineButton, (!guestHasVenueAccess || clubConsumeCooldownRemaining > 0) && styles.tileDisabled]}
                   >
                     <Text style={styles.inlineButtonText}>
-                      {clubConsumeCooldownRemaining > 0 ? `Za ${formatCooldown(clubConsumeCooldownRemaining)}` : "Zarzuc"}
+                      {!guestHasVenueAccess
+                        ? "Najpierw wejscie"
+                        : clubConsumeCooldownRemaining > 0
+                          ? `Za ${formatCooldown(clubConsumeCooldownRemaining)}`
+                          : "Zarzuc"}
                     </Text>
                   </Pressable>
                 </View>
@@ -944,14 +1071,14 @@ export function EmpireScreen({
       ) : null}
 
       {insideOwnClub ? (
-        <SectionCard title="Stash klubu" subtitle="Wlasciciel dorzuca tu towar do zaplecza. Goscie moga tylko zarzucic to, co tu lezy.">
+        <SectionCard title="Stash klubu" subtitle="Wlasciciel dorzuca tu towar do zaplecza. To poprawia klimat sali, kontakty i raport lokalu.">
           <View style={styles.listCard}>
             <View style={styles.entityHead}>
               <EntityBadge visual={businessVisuals.club} />
               <View style={styles.flexOne}>
                 <Text style={styles.listCardTitle}>Ilosc wrzutki</Text>
                 <Text style={styles.listCardMeta}>
-                  Ustawiasz ile sztuk chcesz przerzucic do stashu przed kolejna noca. Klub zuzywa ten towar automatycznie podczas ruchu na sali.
+                  Wrzucasz towar na zaplecze, a lokal zuzywa go pasywnie w tle. To nie jest drugi dealer screen, tylko support dla nastroju, ruchu i kontaktow.
                 </Text>
               </View>
             </View>

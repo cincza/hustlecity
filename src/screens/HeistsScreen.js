@@ -4,8 +4,10 @@ import { HEIST_TIERS, getNextHeistTier, groupHeistsByTier } from "../game/config
 import { HeistCard, HeistTabs } from "../components/GameShellUI";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getOperationChoiceImpactLines, getOperationPreviewDetails } from "../game/selectors/metaGameplay";
+import { getContractTagText } from "../../shared/contracts.js";
 
 export function HeistsScreen({
+  section = "solo",
   heists,
   game,
   effectivePlayer,
@@ -16,12 +18,18 @@ export function HeistsScreen({
   Tag,
   formatMoney,
   districtSummaries,
+  contractBoard,
+  contractHistory,
+  contractLoadoutSummaryLines,
+  getContractPreviewForContract,
+  getContractPreviewLinesForContract,
   availableOperations,
   activeOperation,
   activeOperationStage,
   activeOperationChoices,
   getSoloHeistOdds,
   onExecuteHeist,
+  onExecuteContract,
   onStartOperation,
   onAdvanceOperation,
   onExecuteOperation,
@@ -32,6 +40,9 @@ export function HeistsScreen({
   const safeOperations = Array.isArray(availableOperations) ? availableOperations : [];
   const safeOperationChoices = Array.isArray(activeOperationChoices) ? activeOperationChoices : [];
   const safeDistrictSummaries = Array.isArray(districtSummaries) ? districtSummaries : [];
+  const safeContractBoard = contractBoard && typeof contractBoard === "object" ? contractBoard : { active: [], history: [] };
+  const safeContracts = Array.isArray(safeContractBoard.active) ? safeContractBoard.active : [];
+  const safeContractHistory = Array.isArray(contractHistory) ? contractHistory : [];
   const grouped = useMemo(() => groupHeistsByTier(safeHeists), [safeHeists]);
   const unlockedTierIds = HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).map((tier) => tier.id);
   const [selectedTier, setSelectedTier] = useState(unlockedTierIds[unlockedTierIds.length - 1] || HEIST_TIERS[0].id);
@@ -81,12 +92,193 @@ export function HeistsScreen({
     lockedLabel: game.player.respect < tier.unlockRespect ? `Szacunek ${tier.unlockRespect}` : null,
   }));
 
+  const renderOperationsSection = () => (
+    <SectionCard title="Operacje" subtitle="Grubsza robota ponad kontraktem. Jedna planowka naraz.">
+      {activeOperation ? (
+        <View style={styles.listCard}>
+          <Text style={styles.listCardTitle}>{activeOperationTitle}</Text>
+          <Text style={styles.listCardMeta}>
+            Dzielnica: {districtSummaryById[activeOperation.districtId]?.name || activeOperation.districtId} | Etap: {activeOperationStage || "final"}
+          </Text>
+          {(activeOperationPreview?.lines || []).map((line) => (
+            <Text key={`active-op-${line}`} style={styles.listCardMeta}>
+              {line}
+            </Text>
+          ))}
+          {activeOperationStage ? (
+            safeOperationChoices.map((choice) => (
+              <View key={choice.id} style={styles.listCard}>
+                <View style={styles.inlineRow}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{choice.label}</Text>
+                    <Text style={styles.listCardMeta}>{choice.summary}</Text>
+                    {getOperationChoiceImpactLines(choice).map((line) => (
+                      <Text key={`${choice.id}-${line}`} style={styles.listCardMeta}>
+                        {line}
+                      </Text>
+                    ))}
+                  </View>
+                  <Pressable onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
+                    <Text style={styles.inlineButtonText}>Wybierz</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Pressable onPress={onExecuteOperation} style={styles.inlineButton}>
+              <Text style={styles.inlineButtonText}>Odpal final</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : (
+        <>
+          {!safeOperations.length ? <Text style={styles.emptyText}>Najpierw dobij do wyzszych progow szacunku.</Text> : null}
+          {safeOperations.map((operation) => (
+            <View key={operation.id} style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>{operation.name}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {districtSummaryById[operation.districtId]?.name || operation.districtId} | Start od {operation.respect} RES
+                  </Text>
+                </View>
+                <SafeTag text={formatMoney(operation.baseReward[0])} />
+              </View>
+              <Text style={styles.listCardMeta}>{operation.summary}</Text>
+              {(getOperationPreviewDetails({
+                operation,
+                player: effectivePlayer,
+                districtSummary: districtSummaryById[operation.districtId],
+                gangEffects,
+              })?.lines || []).map((line) => (
+                <Text key={`${operation.id}-${line}`} style={styles.listCardMeta}>
+                  {line}
+                </Text>
+              ))}
+              <View style={styles.inlineRow}>
+                <Text style={styles.costLabel}>Przygotowanie {formatMoney(operation.prepCost)} | Energia {operation.energyCost}</Text>
+                <Pressable onPress={() => onStartOperation(operation.id)} style={styles.inlineButton}>
+                  <Text style={styles.inlineButtonText}>Zacznij</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+    </SectionCard>
+  );
+
+  if (section === "contracts") {
+    return (
+      <>
+        <SceneArtwork
+          eyebrow="Kontrakty"
+          title="Robota premium"
+          lines={["Sprzet, auto i staty sklejaja wynik. Bez loadoutu robi sie naprawde goraco."]}
+          source={sceneBackgrounds.heists}
+        />
+
+        <SectionCard title="Loadout" subtitle="Kontrakty licza pelny set. Kazdy pusty slot boli.">
+          {(contractLoadoutSummaryLines || []).map((line) => (
+            <Text key={line} style={styles.listCardMeta}>
+              {line}
+            </Text>
+          ))}
+        </SectionCard>
+
+        <SectionCard title="Aktywne kontrakty" subtitle="Trzy roboty na rotacji. Dobierz set pod tagi, nie pod sam koszt.">
+          <Text style={styles.listCardMeta}>
+            Kolejna rotacja:{" "}
+            {safeContractBoard?.nextRefreshAt
+              ? new Date(safeContractBoard.nextRefreshAt).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+              : "brak danych"}
+          </Text>
+          {!safeContracts.length ? <Text style={styles.emptyText}>Tablica jest pusta. Odswiez za chwile.</Text> : null}
+          {safeContracts.map((contract) => {
+            const preview = getContractPreviewForContract(contract);
+            const previewLines = getContractPreviewLinesForContract(contract);
+            const locked = game.player.respect < contract.respect;
+            return (
+              <View key={contract.id} style={[styles.listCard, locked && styles.listCardLocked]}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{contract.name}</Text>
+                    <Text style={styles.listCardMeta}>
+                      {districtSummaryById[contract.districtId]?.name || contract.districtId} | Trudnosc {contract.difficulty}/5
+                    </Text>
+                  </View>
+                  <SafeTag text={contract.riskLabel} warning />
+                </View>
+                <Text style={styles.listCardMeta}>{contract.summary}</Text>
+                <Text style={styles.listCardMeta}>Tagi: {getContractTagText(contract.tags)}</Text>
+                <Text style={styles.listCardMeta}>
+                  Staty: ATK {contract.recommendedStats.attack} | DEF {contract.recommendedStats.defense} | DEX {contract.recommendedStats.dexterity} | CHA {contract.recommendedStats.charisma}
+                </Text>
+                {previewLines.map((line) => (
+                  <Text key={`${contract.id}-${line}`} style={styles.listCardMeta}>
+                    {line}
+                  </Text>
+                ))}
+                <View style={styles.oddsRow}>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Nagroda</Text>
+                    <Text style={styles.oddsValue}>
+                      {formatMoney(contract.baseReward[0])} - {formatMoney(contract.baseReward[1])}
+                    </Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Szansa</Text>
+                    <Text style={styles.oddsValue}>{Math.round(Number(preview?.successChance || 0) * 100)}%</Text>
+                  </View>
+                </View>
+                <View style={styles.inlineRow}>
+                  <Text style={styles.costLabel}>
+                    Wejscie {formatMoney(contract.entryCost)} | Energia {contract.energyCost} | RES {contract.respect}
+                  </Text>
+                  <Pressable
+                    onPress={() => onExecuteContract(contract)}
+                    style={[styles.inlineButton, locked && styles.tileDisabled]}
+                  >
+                    <Text style={styles.inlineButtonText}>{locked ? "Za niski RES" : "Odpal"}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </SectionCard>
+
+        <SectionCard title="Ostatnie rozliczenia" subtitle="Krotki raport po robocie. Kto trafi pod kontrakty, musi to widziec od razu.">
+          {!safeContractHistory.length ? <Text style={styles.emptyText}>Jeszcze nic nie rozliczyles.</Text> : null}
+          {safeContractHistory.map((entry) => (
+            <View key={entry.id} style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>{entry.name}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {entry.success ? `Wpada ${formatMoney(entry.reward)}` : `Koszt ${formatMoney(entry.entryCost)} | HP -${entry.damage}`}
+                  </Text>
+                </View>
+                <SafeTag text={entry.success ? "SIADL" : "SPALONY"} warning={!entry.success} />
+              </View>
+              <Text style={styles.listCardMeta}>
+                Heat +{entry.heatGain}
+                {entry.jailed ? ` | Cela ${Math.max(1, Math.ceil(Number(entry.jailSeconds || 0) / 60))} min` : ""}
+              </Text>
+            </View>
+          ))}
+        </SectionCard>
+
+        {renderOperationsSection()}
+      </>
+    );
+  }
+
   return (
     <>
       <SceneArtwork
         eyebrow="Napady"
         title="Miasto po zmroku"
-        lines={["Ulica, sklepy, firmy i high risk bez zbednego scrolla."]}
+        lines={["Ulica, sklepy i szybkie roboty bez zbednego scrolla."]}
         source={sceneBackgrounds.heists}
       />
 
@@ -97,80 +289,6 @@ export function HeistsScreen({
           value={HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).slice(-1)[0]?.title || HEIST_TIERS[0].title}
         />
         <StatLine label="Nastepny prog" value={nextTier ? `${nextTier.title} przy Szacunku ${nextTier.unlockRespect}` : "Masz wszystkie progi"} />
-      </SectionCard>
-
-      <SectionCard title="Operacje" subtitle="Grubsza robota ponad szybkim heistem. Jedna aktywna planowka naraz.">
-        {activeOperation ? (
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>{activeOperationTitle}</Text>
-            <Text style={styles.listCardMeta}>
-              Dzielnica: {districtSummaryById[activeOperation.districtId]?.name || activeOperation.districtId} | Etap: {activeOperationStage || "final"}
-            </Text>
-            {(activeOperationPreview?.lines || []).map((line) => (
-              <Text key={`active-op-${line}`} style={styles.listCardMeta}>
-                {line}
-              </Text>
-            ))}
-            {activeOperationStage ? (
-              safeOperationChoices.map((choice) => (
-                <View key={choice.id} style={styles.listCard}>
-                  <View style={styles.inlineRow}>
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{choice.label}</Text>
-                      <Text style={styles.listCardMeta}>{choice.summary}</Text>
-                      {getOperationChoiceImpactLines(choice).map((line) => (
-                        <Text key={`${choice.id}-${line}`} style={styles.listCardMeta}>
-                          {line}
-                        </Text>
-                      ))}
-                    </View>
-                    <Pressable onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
-                      <Text style={styles.inlineButtonText}>Wybierz</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <Pressable onPress={onExecuteOperation} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Odpal final</Text>
-              </Pressable>
-            )}
-          </View>
-        ) : (
-          <>
-            {!safeOperations.length ? <Text style={styles.emptyText}>Najpierw dobij do wyzszych progow szacunu.</Text> : null}
-            {safeOperations.map((operation) => (
-              <View key={operation.id} style={styles.listCard}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{operation.name}</Text>
-                    <Text style={styles.listCardMeta}>
-                      {districtSummaryById[operation.districtId]?.name || operation.districtId} | Start od {operation.respect} RES
-                    </Text>
-                  </View>
-                  <SafeTag text={formatMoney(operation.baseReward[0])} />
-                </View>
-                <Text style={styles.listCardMeta}>{operation.summary}</Text>
-                {(getOperationPreviewDetails({
-                  operation,
-                  player: effectivePlayer,
-                  districtSummary: districtSummaryById[operation.districtId],
-                  gangEffects,
-                })?.lines || []).map((line) => (
-                  <Text key={`${operation.id}-${line}`} style={styles.listCardMeta}>
-                    {line}
-                  </Text>
-                ))}
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>Przygotowanie {formatMoney(operation.prepCost)} | Energia {operation.energyCost}</Text>
-                  <Pressable onPress={() => onStartOperation(operation.id)} style={styles.inlineButton}>
-                    <Text style={styles.inlineButtonText}>Zacznij</Text>
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </>
-        )}
       </SectionCard>
 
       <SectionCard title="Progi" subtitle="Ulica, sklepy, firmy i high risk w jednym czystym przejsciu.">

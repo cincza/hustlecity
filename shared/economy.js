@@ -89,6 +89,15 @@ export const ECONOMY_RULES = {
     raidStockWeight: 0.006,
     componentQualityBonusCap: 0.18,
   },
+  contracts: {
+    rotationHours: 4,
+    minSuccessChance: 0.06,
+    maxSuccessChance: 0.88,
+    failExtraCostRate: 0.2,
+    maxRewardMultiplier: 1.38,
+    maxHistoryEntries: 10,
+    maxTagBonusPerContract: 0.36,
+  },
   boosts: {
     globalStatBonusCap: 0.24,
     maxConcurrentBoostFamilies: 2,
@@ -210,6 +219,7 @@ export const ECONOMY_RULES = {
 };
 
 export const FACTORY_RULES = ECONOMY_RULES.factories;
+export const CONTRACT_RULES = ECONOMY_RULES.contracts;
 export const BOOST_RULES = ECONOMY_RULES.boosts;
 export const CLUB_RULES = ECONOMY_RULES.clubs;
 export const CLUB_PVP_RULES = ECONOMY_RULES.clubPvp;

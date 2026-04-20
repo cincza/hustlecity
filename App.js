@@ -35,7 +35,10 @@ import {
   claimClubOnline,
   claimGangGoalOnline,
   claimTaskOnline,
+  collectClubSafeOnline,
   collectBusinessIncomeOnline,
+  buyContractCarOnline,
+  buyContractItemOnline,
   collectEscortIncomeOnline,
   contributeGangOnline,
   consumeDrugOnline,
@@ -43,12 +46,14 @@ import {
   deleteGangOnline,
   attackPlayerOnline,
   depositOnline,
+  equipContractLoadoutOnline,
+  executeContractOnline,
   executeOperationPlanOnline,
   executeHeistOnline,
-  executeGangHeistOnline,
   executeGangPvpOnline,
   fetchFriendListOnline,
   fetchCasinoMeta,
+  fetchContractsOnline,
   fetchGangDirectoryOnline,
   fetchGlobalChatOnline,
   fetchHeistsOnline,
@@ -69,7 +74,10 @@ import {
   investGangProjectOnline,
   invitePlayerToGangOnline,
   joinGangOnline,
+  joinGangHeistLobbyOnline,
   leaveGangOnline,
+  leaveGangHeistLobbyOnline,
+  openGangHeistLobbyOnline,
   placeBountyOnline,
   playHighRiskOnline,
   playFightClubRoundOnline,
@@ -81,7 +89,7 @@ import {
   moveDrugToClubOnline,
   produceDrugOnline,
   pullEscortFromStreetOnline,
-  runClubNightOnline,
+  rescueGangHeistCrewOnline,
   sellEscortOnline,
   sellDrugToDealerOnline,
   sellProductOnline,
@@ -89,7 +97,9 @@ import {
   sendDirectMessageOnline,
   sendGangAllianceOfferOnline,
   setClubPlanOnline,
+  setClubSettingsOnline,
   setGangFocusOnline,
+  startGangHeistLobbyOnline,
   updateGangMemberRoleOnline,
   updateGangSettingsOnline,
   startOperationOnline,
@@ -97,6 +107,7 @@ import {
   standBlackjackOnline,
   sendPrisonChatMessageOnline,
   trainAtGymOnline,
+  upgradeGangMembersOnline,
   upgradeBusinessOnline,
   updateAvatarOnline,
   visitClubOnline,
@@ -132,6 +143,11 @@ import { getGameMode } from "./src/game/modes";
 import { getNextHeistTier } from "./src/game/config/heistTiers";
 import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradePreview, getBusinessUpgradeState } from "./src/game/selectors/businessSelectors";
 import { getCasinoGameConfig, getGangRaidPreviewLines } from "./src/game/selectors/authorityFeedback";
+import {
+  getContractAssetEffectLine,
+  getContractLoadoutSummaryLines,
+  getContractPreviewLines,
+} from "./src/game/selectors/contractSelectors";
 import { getDistrictEffectLines, getGangEffectLines, getGangProjectLevelLine } from "./src/game/selectors/metaGameplay";
 import {
   FACTORIES,
@@ -145,12 +161,29 @@ import {
   normalizeFactoriesOwned,
   normalizeSupplies,
 } from "./shared/empire.js";
+import {
+  CONTRACT_CARS,
+  CONTRACT_ITEM_CATEGORIES,
+  CONTRACT_ITEMS,
+  CONTRACT_LOADOUT_SLOTS,
+  createContractState,
+  getActiveContractBoard,
+  getContractById,
+  getContractCarById,
+  getContractItemById,
+  getContractOutcomePreview,
+  getOwnedContractCars,
+  getOwnedContractItems,
+  normalizeContractState,
+} from "./shared/contracts.js";
 import { applyXpProgression } from "./shared/progression.js";
 import {
   canRunGangHeistRole,
   GANG_HEISTS,
+  GANG_HEIST_RESCUE_OPTIONS,
   getGangHeistBonusRate,
-  getGangHeistOdds,
+  getGangHeistById,
+  getGangHeistSquadSummary,
 } from "./shared/gangHeists.js";
 import {
   createCityState,
@@ -165,6 +198,8 @@ import {
   GANG_INVITE_RESPECT_MAX,
   GANG_INVITE_RESPECT_MIN,
   GANG_MEMBER_MANAGEABLE_ROLES,
+  getGangJobBoardProgress,
+  getGangMemberCapUpgrade,
   getGangProjectCost,
   getGangProjectEffects,
   getGangProjectLevel,
@@ -197,6 +232,7 @@ import {
   PLAYER_BOUNTY_COST,
   PLAYER_BOUNTY_INCREMENT,
   createClubGuestState,
+  getClubGuestVenueState,
   getClubNightPlan,
   getClubPressureAfterDecay,
   getClubPressureLabel,
@@ -204,6 +240,7 @@ import {
   getClubTrafficLabel,
   getClubVenueProfile as getSharedClubVenueProfile,
   getClubVisitDiminishing,
+  hasClubGuestAccess,
   getDealerPayoutForDrug,
   getLeadTargetEscortForVenue,
   normalizeClubState,
@@ -230,7 +267,6 @@ const GANG_ROLE_BUTTON_LABELS = {
   "Vice Boss": "Vice",
 };
 const GANG_TRIBUTE_COOLDOWN_MS = 20 * 60 * 1000;
-const CLUB_NIGHT_COOLDOWN_MS = 12 * 60 * 1000;
 const PLAYER_SAME_TARGET_ATTACK_COOLDOWN_MS = Number(ECONOMY_RULES.clubPvp?.sameTargetRepeatCooldownSeconds || 0) * 1000;
 const AVATAR_ART = {
   ghost: require("./assets/avatars/avatar-ghost-face.png"),
@@ -481,6 +517,15 @@ const PRODUCT_VISUALS = {
   crystal: { icon: "diamond-stone", code: "CR", colors: ["#5a80ad", "#13203a"], image: require("./assets/drug-icons/gbl.png") },
 };
 
+const CONTRACT_CATEGORY_VISUALS = {
+  weapon: { icon: "pistol", code: "WPN", colors: ["#6b2a24", "#1a0907"] },
+  armor: { icon: "shield-half-full", code: "ARM", colors: ["#3c4b63", "#0e131c"] },
+  tool: { icon: "tools", code: "TL", colors: ["#6a4f21", "#181107"] },
+  electronics: { icon: "radio-tower", code: "SIG", colors: ["#284f5e", "#091116"] },
+  car: { icon: "car-sports", code: "DRV", colors: ["#2f3d5e", "#0a0f18"] },
+  contract: { icon: "briefcase-clock-outline", code: "CTR", colors: ["#70451e", "#170f08"] },
+};
+
 const TAB_DEFINITIONS = [
   {
     id: "city",
@@ -494,9 +539,27 @@ const TAB_DEFINITIONS = [
       { id: "hospital", label: "Szpital", title: "Szpital" },
     ],
   },
-  { id: "heists", label: "Napady", sections: [{ id: "solo", label: "Solo", title: "Napady" }, { id: "fightclub", label: "Fight", title: "Fightclub" }, { id: "prison", label: "Cela", title: "Wiezienie" }] },
+  {
+    id: "heists",
+    label: "Napady",
+    sections: [
+      { id: "solo", label: "Solo", title: "Napady" },
+      { id: "contracts", label: "Kontrakty", title: "Kontrakty" },
+      { id: "fightclub", label: "Fight", title: "Fightclub" },
+      { id: "prison", label: "Cela", title: "Wiezienie" },
+    ],
+  },
   { id: "empire", label: "Biznes", sections: [{ id: "businesses", label: "Biznesy", title: "Biznesy" }, { id: "factories", label: "Fabryki", title: "Fabryki" }, { id: "suppliers", label: "Dostawy", title: "Hurtownie" }, { id: "club", label: "Klub", title: "Klub" }] },
-  { id: "market", label: "Rynek", sections: [{ id: "drugs", label: "Towar", title: "Narkotyki" }, { id: "boosts", label: "Boosty", title: "Boosty" }] },
+  {
+    id: "market",
+    label: "Rynek",
+    sections: [
+      { id: "drugs", label: "Towar", title: "Narkotyki" },
+      { id: "items", label: "Itemy", title: "Itemy" },
+      { id: "cars", label: "Auta", title: "Auta" },
+      { id: "boosts", label: "Boosty", title: "Boosty" },
+    ],
+  },
   { id: "gang", label: "Gang", sections: [{ id: "overview", label: "Gang", title: "Gang" }, { id: "heists", label: "Napady", title: "Napady gangu" }, { id: "members", label: "Sklad", title: "Czlonkowie" }, { id: "chat", label: "Chat", title: "Chat gangu" }, { id: "ops", label: "Akcje", title: "Operacje" }] },
   {
     id: "profile",
@@ -504,6 +567,7 @@ const TAB_DEFINITIONS = [
     sections: [
       { id: "summary", label: "Profil", title: "Profil" },
       { id: "progress", label: "Ranga", title: "Szacun" },
+      { id: "loadout", label: "Ekwipunek", title: "Ekwipunek" },
       { id: "protection", label: "Ochrona", title: "Ochrona" },
       { id: "log", label: "Log", title: "Log wydarzen" },
       { id: "utilities", label: "Narzedzia", title: "Narzedzia", hidden: true },
@@ -546,6 +610,7 @@ const createInitialCasinoState = () => ({
 
 const INITIAL = {
   player: {
+    id: null,
     name: "Vin Blaze",
     username: "vinblaze",
     avatarId: "ghost",
@@ -576,6 +641,7 @@ const INITIAL = {
   gang: createGangState(),
   city: createCityState(),
   operations: createOperationsState(),
+  contracts: createContractState(),
   businessesOwned: [],
   businessUpgrades: {},
   escortsOwned: [],
@@ -644,6 +710,7 @@ const INITIAL = {
     npcFallbackMarkup: 1.16,
     orderRules: null,
   },
+  contractBoard: getActiveContractBoard(Date.now()),
   tasksClaimed: [],
   regenRemainder: 0,
   hpRegenRemainder: 0,
@@ -843,6 +910,8 @@ const normalizeGangDirectoryEntry = (entry, index = 0) => ({
   vault: Number.isFinite(entry?.vault) ? entry.vault : 0,
   description: entry?.description || "Gang trzyma ekipe i probuje przepchnac wplywy po miescie.",
   inviteRespectMin: Number.isFinite(entry?.inviteRespectMin) ? entry.inviteRespectMin : GANG_INVITE_RESPECT_MIN,
+  memberCapLevel: Number.isFinite(entry?.memberCapLevel) ? entry.memberCapLevel : 0,
+  maxMembers: Number.isFinite(entry?.maxMembers) ? entry.maxMembers : 8,
   focusDistrictId: entry?.focusDistrictId || "oldtown",
   projects:
     entry?.projects && typeof entry.projects === "object" && !Array.isArray(entry.projects)
@@ -857,6 +926,27 @@ const normalizeGangDirectoryEntry = (entry, index = 0) => ({
       ? { ...entry.weeklyProgress }
       : {},
   weeklyGoalClaimedAt: Number.isFinite(entry?.weeklyGoalClaimedAt) ? entry.weeklyGoalClaimedAt : null,
+  jobBoard: Array.isArray(entry?.jobBoard) ? entry.jobBoard.map((job) => ({ ...job })) : [],
+  jobProgress:
+    entry?.jobProgress && typeof entry.jobProgress === "object" && !Array.isArray(entry.jobProgress)
+      ? { ...entry.jobProgress }
+      : {},
+  jobRewardedAt:
+    entry?.jobRewardedAt && typeof entry.jobRewardedAt === "object" && !Array.isArray(entry.jobRewardedAt)
+      ? { ...entry.jobRewardedAt }
+      : {},
+  activeHeistLobby:
+    entry?.activeHeistLobby && typeof entry.activeHeistLobby === "object" && !Array.isArray(entry.activeHeistLobby)
+      ? { ...entry.activeHeistLobby }
+      : null,
+  lastHeistReport:
+    entry?.lastHeistReport && typeof entry.lastHeistReport === "object" && !Array.isArray(entry.lastHeistReport)
+      ? { ...entry.lastHeistReport }
+      : null,
+  protectedClub:
+    entry?.protectedClub && typeof entry.protectedClub === "object" && !Array.isArray(entry.protectedClub)
+      ? { ...entry.protectedClub }
+      : null,
   membersList: Array.isArray(entry?.membersList) ? entry.membersList.map(normalizeGangMemberEntry) : [],
   eventLog: Array.isArray(entry?.eventLog) ? normalizeChatFeedEntries(entry.eventLog) : [],
 });
@@ -871,6 +961,8 @@ const applyGangDirectoryState = (gangState, liveGang) => {
   return normalizeGangState({
     ...gangState,
     members: liveGang.members,
+    memberCapLevel: liveGang.memberCapLevel ?? gangState.memberCapLevel ?? 0,
+    maxMembers: liveGang.maxMembers ?? gangState.maxMembers ?? 8,
     territory: liveGang.territory,
     influence: liveGang.influence,
     vault: liveGang.vault,
@@ -890,6 +982,30 @@ const applyGangDirectoryState = (gangState, liveGang) => {
         : gangState.weeklyProgress,
     weeklyGoalClaimedAt:
       liveGang.weeklyGoalClaimedAt ?? gangState.weeklyGoalClaimedAt ?? null,
+    jobBoard:
+      Array.isArray(liveGang.jobBoard) && liveGang.jobBoard.length
+        ? liveGang.jobBoard.map((entry) => ({ ...entry }))
+        : gangState.jobBoard,
+    jobProgress:
+      liveGang.jobProgress && typeof liveGang.jobProgress === "object" && !Array.isArray(liveGang.jobProgress)
+        ? { ...liveGang.jobProgress }
+        : gangState.jobProgress,
+    jobRewardedAt:
+      liveGang.jobRewardedAt && typeof liveGang.jobRewardedAt === "object" && !Array.isArray(liveGang.jobRewardedAt)
+        ? { ...liveGang.jobRewardedAt }
+        : gangState.jobRewardedAt,
+    activeHeistLobby:
+      liveGang.activeHeistLobby && typeof liveGang.activeHeistLobby === "object" && !Array.isArray(liveGang.activeHeistLobby)
+        ? { ...liveGang.activeHeistLobby }
+        : gangState.activeHeistLobby,
+    lastHeistReport:
+      liveGang.lastHeistReport && typeof liveGang.lastHeistReport === "object" && !Array.isArray(liveGang.lastHeistReport)
+        ? { ...liveGang.lastHeistReport }
+        : gangState.lastHeistReport,
+    protectedClub:
+      liveGang.protectedClub && typeof liveGang.protectedClub === "object" && !Array.isArray(liveGang.protectedClub)
+        ? { ...liveGang.protectedClub }
+        : gangState.protectedClub,
     membersList: liveGang.membersList?.length ? liveGang.membersList : gangState.membersList,
     chat: liveGang.eventLog?.length ? liveGang.eventLog : gangState.chat,
   });
@@ -1000,6 +1116,33 @@ function normalizeMarketPayload(payload, fallbackMarket, fallbackState, fallback
   };
 }
 
+function normalizeContractBoardSnapshot(payload, fallbackHistory = []) {
+  const fallbackBoard = getActiveContractBoard(Date.now());
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return {
+      ...fallbackBoard,
+      history: Array.isArray(fallbackHistory) ? fallbackHistory.slice(0, 6) : [],
+    };
+  }
+
+  const active =
+    Array.isArray(payload.active) && payload.active.length
+      ? payload.active
+          .map((entry) => {
+            const contractId = typeof entry === "string" ? entry : entry?.id;
+            return getContractById(contractId) || null;
+          })
+          .filter(Boolean)
+      : fallbackBoard.active;
+
+  return {
+    refreshedAt: Number.isFinite(payload.refreshedAt) ? payload.refreshedAt : fallbackBoard.refreshedAt,
+    nextRefreshAt: Number.isFinite(payload.nextRefreshAt) ? payload.nextRefreshAt : fallbackBoard.nextRefreshAt,
+    active,
+    history: Array.isArray(payload.history) ? payload.history.slice(0, 6) : Array.isArray(fallbackHistory) ? fallbackHistory.slice(0, 6) : [],
+  };
+}
+
 function getGangVisual(name) {
   if (!name || name === "No gang") return GANG_VISUALS.default;
   return GANG_VISUALS[name] || GANG_VISUALS.default;
@@ -1093,6 +1236,8 @@ function getGangProfileByName(game, gangName) {
       members: game.gang.members,
       respect: game.player.respect,
       ranking: 0,
+      memberCapLevel: game.gang.memberCapLevel || 0,
+      maxMembers: game.gang.maxMembers || 8,
       territory: game.gang.territory,
       influence: game.gang.influence,
       vault: game.gang.vault,
@@ -1103,6 +1248,12 @@ function getGangProfileByName(game, gangName) {
       weeklyGoal: game.gang.weeklyGoal || null,
       weeklyProgress: { ...(game.gang.weeklyProgress || {}) },
       weeklyGoalClaimedAt: game.gang.weeklyGoalClaimedAt || null,
+      jobBoard: Array.isArray(game.gang.jobBoard) ? game.gang.jobBoard.map((entry) => ({ ...entry })) : [],
+      jobProgress: { ...(game.gang.jobProgress || {}) },
+      jobRewardedAt: { ...(game.gang.jobRewardedAt || {}) },
+      activeHeistLobby: game.gang.activeHeistLobby ? { ...game.gang.activeHeistLobby } : null,
+      lastHeistReport: game.gang.lastHeistReport ? { ...game.gang.lastHeistReport } : null,
+      protectedClub: game.gang.protectedClub ? { ...game.gang.protectedClub } : null,
       membersList: game.gang.membersList,
       eventLog: normalizeChatFeedEntries(game.gang.chat || []),
       self: true,
@@ -1211,11 +1362,22 @@ function getCurrentClubVenue(game) {
       policePressure: game.club.policePressure,
       traffic: game.club.traffic,
       nightPlanId: game.club.nightPlanId,
+      entryFee: game.club.entryFee,
+      safeCash: game.club.safeCash,
+      lastReportSummary: game.club.lastReportSummary || game.club.lastNightSummary || null,
       stash: { ...(game.club.stash || {}) },
       districtId: game.club.districtId || null,
       securityLevel: game.club.securityLevel,
       defenseReadiness: game.club.defenseReadiness,
       threatLevel: game.club.threatLevel,
+      protectorGangName:
+        game.gang?.joined && String(game.gang?.role || "").trim() === "Boss" ? game.gang.name || null : null,
+      protectorFocusDistrictId:
+        game.gang?.joined && String(game.gang?.role || "").trim() === "Boss" ? game.gang.focusDistrictId || null : null,
+      protectorEffects:
+        game.gang?.joined && String(game.gang?.role || "").trim() === "Boss"
+          ? getGangProjectEffects(game.gang)
+          : null,
       note: game.club.note,
     };
   }
@@ -1654,6 +1816,7 @@ function AppRuntime() {
   const [directMessageDraft, setDirectMessageDraft] = useState("");
   const [directMessageRecipient, setDirectMessageRecipient] = useState(null);
   const [gangDraftName, setGangDraftName] = useState("Night Reign");
+  const [gangHeistNoteDraft, setGangHeistNoteDraft] = useState("");
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
   const [dealerTradeDraft, setDealerTradeDraft] = useState("1");
   const [notice, setNotice] = useState(null);
@@ -1759,6 +1922,76 @@ function AppRuntime() {
       ),
     [game.online, game.gang.inviteRespectMin, game.player.name]
   );
+  const selfGangMember = useMemo(() => {
+    if (!game.gang.joined) return null;
+    const selfName = String(game.player.name || "").trim().toLowerCase();
+    const fromList = (game.gang.membersList || []).find(
+      (member) =>
+        (game.player.id && member?.id === game.player.id) ||
+        String(member?.name || "").trim().toLowerCase() === selfName
+    );
+    if (fromList) return fromList;
+    return {
+      id: game.player.id || `self-gang-${selfName || "member"}`,
+      name: game.player.name,
+      role: game.gang.role || "Czlonek",
+      trusted: game.gang.role === "Zaufany" || game.gang.role === "Vice Boss" || game.gang.role === "Boss",
+      respect: game.player.respect,
+      online: true,
+    };
+  }, [game.gang.joined, game.gang.membersList, game.gang.role, game.player.id, game.player.name, game.player.respect]);
+  const activeGangHeistLobby = game.gang.activeHeistLobby || null;
+  const activeGangHeistDefinition = useMemo(
+    () => (activeGangHeistLobby?.heistId ? getGangHeistById(activeGangHeistLobby.heistId) : null),
+    [activeGangHeistLobby]
+  );
+  const activeGangHeistParticipants = useMemo(() => {
+    if (!activeGangHeistLobby) return [];
+    const memberMap = new Map();
+    [...(game.gang.membersList || []), ...(selfGangMember ? [selfGangMember] : [])].forEach((member) => {
+      if (member?.id && !memberMap.has(member.id)) {
+        memberMap.set(member.id, member);
+      }
+    });
+    return (Array.isArray(activeGangHeistLobby.participantIds) ? activeGangHeistLobby.participantIds : [])
+      .map((participantId) => {
+        const member = memberMap.get(participantId);
+        return (
+          member || {
+            id: participantId,
+            name: "Czlonek ekipy",
+            role: "Czlonek",
+            trusted: false,
+            respect: 0,
+            online: false,
+          }
+        );
+      })
+      .slice(0, 25);
+  }, [activeGangHeistLobby, game.gang.membersList, selfGangMember]);
+  const isInActiveGangHeistLobby = useMemo(() => {
+    if (!activeGangHeistLobby || !selfGangMember?.id) return false;
+    return (Array.isArray(activeGangHeistLobby.participantIds) ? activeGangHeistLobby.participantIds : []).includes(selfGangMember.id);
+  }, [activeGangHeistLobby, selfGangMember]);
+  const nextGangMemberCapUpgrade = useMemo(
+    () => getGangMemberCapUpgrade(game.gang.memberCapLevel),
+    [game.gang.memberCapLevel]
+  );
+  const gangJobBoardProgress = useMemo(() => getGangJobBoardProgress(game.gang), [game.gang]);
+  const protectedGangDistrict = useMemo(
+    () => (game.gang.protectedClub?.districtId ? findDistrictById(game.city, game.gang.protectedClub.districtId) : null),
+    [game.city, game.gang.protectedClub]
+  );
+  const pendingGangRescue = useMemo(() => {
+    const report = game.gang.lastHeistReport;
+    if (!report || report.success || report.rescueAttemptedAt) return null;
+    if (!Array.isArray(report.jailedParticipantIds) || !report.jailedParticipantIds.length) return null;
+    return report;
+  }, [game.gang.lastHeistReport]);
+  const pendingGangRescueMembers = useMemo(
+    () => (pendingGangRescue?.participants || []).filter((participant) => participant?.jailed),
+    [pendingGangRescue]
+  );
   const jailRemaining = game.player.jailUntil ? Math.max(0, game.player.jailUntil - Date.now()) : 0;
   const taskStates = useMemo(
     () => getSharedTaskStates(game, { mode: gameMode }),
@@ -1775,7 +2008,6 @@ function AppRuntime() {
       : HEISTS.map(normalizeHeistDefinition).filter(Boolean);
   const inGang = Boolean(game.gang.joined);
   const gangTributeRemaining = Math.max(0, GANG_TRIBUTE_COOLDOWN_MS - (Date.now() - (game.gang.lastTributeAt || 0)));
-  const clubNightRemaining = Math.max(0, CLUB_NIGHT_COOLDOWN_MS - (Date.now() - (game.club.lastRunAt || 0)));
   const selectedWorldPlayerAttackCooldownRemaining = Math.max(
     0,
     Number(
@@ -1824,6 +2056,45 @@ function AppRuntime() {
     [game.player.isAdmin, game.player.adminGrantPresets, game.player.adminRespectPresets]
   );
   const hasOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
+  const contractState = useMemo(() => normalizeContractState(game.contracts), [game.contracts]);
+  const contractBoard = useMemo(() => {
+    const normalizedBoard = normalizeContractBoardSnapshot(game.contractBoard, contractState.history);
+    if (!hasOnlineAuthority && Number(normalizedBoard.nextRefreshAt || 0) <= Date.now()) {
+      return normalizeContractBoardSnapshot(null, contractState.history);
+    }
+    return {
+      ...normalizedBoard,
+      history:
+        Array.isArray(normalizedBoard.history) && normalizedBoard.history.length
+          ? normalizedBoard.history
+          : contractState.history.slice(0, 6),
+    };
+  }, [game.contractBoard, contractState.history, game.lastTick, hasOnlineAuthority]);
+  const contractHistory = useMemo(
+    () =>
+      Array.isArray(contractBoard.history) && contractBoard.history.length
+        ? contractBoard.history
+        : contractState.history.slice(0, 6),
+    [contractBoard.history, contractState.history]
+  );
+  const contractLoadoutSummaryLines = useMemo(
+    () => getContractLoadoutSummaryLines(contractState),
+    [contractState]
+  );
+  const ownedContractItems = useMemo(() => getOwnedContractItems(contractState), [contractState]);
+  const ownedContractCars = useMemo(() => getOwnedContractCars(contractState), [contractState]);
+  const getContractPreviewForContract = (contract) =>
+    getContractOutcomePreview({
+      contract,
+      profile: effectivePlayer,
+      contractState,
+      districtSummary: districtSummaries.find((entry) => entry.id === contract?.districtId) || null,
+    });
+  const getContractPreviewLinesForContract = (contract) => {
+    const preview = getContractPreviewForContract(contract);
+    const districtSummary = districtSummaries.find((entry) => entry.id === contract?.districtId) || null;
+    return getContractPreviewLines({ contract, preview, districtSummary });
+  };
 
   const mergeServerUser = (serverUser, marketPayload) => {
     const safeProfile = serverUser?.profile;
@@ -1887,6 +2158,10 @@ function AppRuntime() {
       ...prev,
       player: {
         ...prev.player,
+        id:
+          typeof serverUser?.id === "string" && serverUser.id.trim()
+            ? serverUser.id.trim()
+            : prev.player.id,
         name: safeProfile.name || prev.player.name,
         username:
           typeof serverUser?.username === "string" && serverUser.username.trim()
@@ -2024,6 +2299,14 @@ function AppRuntime() {
         serverUser?.operations && typeof serverUser.operations === "object"
           ? normalizeOperationsState(serverUser.operations)
           : prev.operations,
+      contracts:
+        serverUser?.contracts && typeof serverUser.contracts === "object"
+          ? normalizeContractState(serverUser.contracts)
+          : prev.contracts,
+      contractBoard: normalizeContractBoardSnapshot(
+        marketPayload?.contractsBoard,
+        serverUser?.contracts?.history || prev.contracts?.history || []
+      ),
       online: {
         ...prev.online,
         gangs: nextGangDirectory || prev.online.gangs,
@@ -2074,6 +2357,26 @@ function AppRuntime() {
         heists: heistsSnapshot.heists.map(normalizeHeistDefinition).filter(Boolean),
       },
     }));
+  };
+
+  const refreshContractBoardState = async (token = sessionToken) => {
+    if (!token) return null;
+    const contractsSnapshot = await fetchContractsOnline(token);
+    setGame((prev) => ({
+      ...prev,
+      contracts:
+        Array.isArray(contractsSnapshot?.history) && contractsSnapshot.history.length
+          ? normalizeContractState({
+              ...prev.contracts,
+              history: contractsSnapshot.history,
+            })
+          : prev.contracts,
+      contractBoard: normalizeContractBoardSnapshot(
+        contractsSnapshot,
+        contractsSnapshot?.history || prev.contracts?.history || []
+      ),
+    }));
+    return contractsSnapshot;
   };
 
   const refreshSocialState = async (token = sessionToken) => {
@@ -2142,7 +2445,13 @@ function AppRuntime() {
     if (!token) return null;
     const me = await fetchMe(token);
     if (!me?.user?.profile) return null;
-    mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket, gangs: me.gangs });
+    mergeServerUser(me.user, {
+      prices: me.market,
+      products: me.marketState,
+      clubMarket: me.clubMarket,
+      gangs: me.gangs,
+      contractsBoard: me.contractsBoard,
+    });
     return me;
   };
 
@@ -2180,7 +2489,13 @@ function AppRuntime() {
       if (!me?.user?.profile) {
         throw new Error("Backend nie zwrocil profilu gracza.");
       }
-        mergeServerUser(me.user, { prices: me.market, products: me.marketState, clubMarket: me.clubMarket, gangs: me.gangs });
+        mergeServerUser(me.user, {
+          prices: me.market,
+          products: me.marketState,
+          clubMarket: me.clubMarket,
+          gangs: me.gangs,
+          contractsBoard: me.contractsBoard,
+        });
       didHydrateSessionRef.current = true;
       try {
         const casinoMeta = await fetchCasinoMeta(token);
@@ -2212,6 +2527,10 @@ function AppRuntime() {
       }
       try {
         await refreshHeistsState(token);
+      } catch (_error) {
+      }
+      try {
+        await refreshContractBoardState(token);
       } catch (_error) {
       }
   };
@@ -2309,12 +2628,15 @@ function AppRuntime() {
       refreshMarketState(sessionToken).catch(() => {});
       refreshCasinoState(sessionToken).catch(() => {});
       refreshSocialState(sessionToken).catch(() => {});
+      if (tab === "heists" && activeSectionId === "contracts") {
+        refreshContractBoardState(sessionToken).catch(() => {});
+      }
       if (inJail(game.player)) {
         refreshPrisonChatState(sessionToken).catch(() => {});
       }
     }, 45000);
     return () => clearInterval(timer);
-  }, [sessionToken, apiStatus, game.player.jailUntil]);
+  }, [sessionToken, apiStatus, game.player.jailUntil, tab, activeSectionId]);
 
   useEffect(() => {
     if (!sessionToken || apiStatus !== "online") return;
@@ -2335,6 +2657,12 @@ function AppRuntime() {
       cancelled = true;
     };
   }, [sessionToken, apiStatus, tab, activeSectionId, game.player.jailUntil]);
+
+  useEffect(() => {
+    if (!sessionToken || apiStatus !== "online") return;
+    if (tab !== "heists" || activeSectionId !== "contracts") return;
+    refreshContractBoardState(sessionToken).catch(() => {});
+  }, [sessionToken, apiStatus, tab, activeSectionId]);
 
   useEffect(() => {
     if (!sessionToken || apiStatus !== "online") return undefined;
@@ -3082,33 +3410,492 @@ function AppRuntime() {
     }
   };
 
-  const executeGangHeist = async (heist) => {
+  const buyContractItem = async (item) => {
+    if (!item?.id) return pushLog("Ten item nie jest teraz gotowy do kupna.");
     if (!canDoStreetAction()) return;
-    if (sessionToken && apiStatus === "online") {
+
+    if (hasOnlineAuthority) {
       try {
-        const result = await executeGangHeistOnline(sessionToken, heist.id);
+        const result = await buyContractItemOnline(sessionToken, item.id);
         mergeServerUser(result.user, result);
+        showExplicitNotice({
+          tone: "success",
+          title: "ITEM KUPIONY",
+          message: result?.result?.logMessage || `${item.name} wpada do ekwipunku kontraktowego.`,
+          deltas: null,
+        });
       } catch (error) {
         pushLog(error.message);
       }
       return;
     }
-    if (!requireOfflineDemoAuthority("Napady gangu")) return;
+
+    if (!requireOfflineDemoAuthority("Kupowanie itemow kontraktowych")) return;
+    if (game.player.respect < item.respect) return pushLog(`Ten item odpala sie od ${item.respect} szacunu.`);
+    if (game.player.cash < item.price) return pushLog(`Brakuje ${formatMoney(item.price)} na ${item.name}.`);
+    if (contractState.ownedItems?.[item.id]) return pushLog("Masz juz ten item.");
+
+    setGame((prev) => ({
+      ...prev,
+      player: { ...prev.player, cash: prev.player.cash - item.price },
+      contracts: normalizeContractState({
+        ...prev.contracts,
+        ownedItems: {
+          ...(prev.contracts?.ownedItems || {}),
+          [item.id]: 1,
+        },
+      }),
+      log: [`Kupujesz ${item.name}. Sprzet jest gotowy pod kontrakty.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const buyContractCar = async (car) => {
+    if (!car?.id) return pushLog("To auto nie jest teraz gotowe do kupna.");
+    if (!canDoStreetAction()) return;
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await buyContractCarOnline(sessionToken, car.id);
+        mergeServerUser(result.user, result);
+        showExplicitNotice({
+          tone: "success",
+          title: "AUTO W GARAZU",
+          message: result?.result?.logMessage || `${car.name} wskakuje do garazu kontraktowego.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Kupowanie aut kontraktowych")) return;
+    if (game.player.respect < car.respect) return pushLog(`To auto odpala sie od ${car.respect} szacunu.`);
+    if (game.player.cash < car.price) return pushLog(`Brakuje ${formatMoney(car.price)} na ${car.name}.`);
+    if (contractState.ownedCars?.[car.id]) return pushLog("To auto juz stoi w Twoim garazu.");
+
+    setGame((prev) => ({
+      ...prev,
+      player: { ...prev.player, cash: prev.player.cash - car.price },
+      contracts: normalizeContractState({
+        ...prev.contracts,
+        ownedCars: {
+          ...(prev.contracts?.ownedCars || {}),
+          [car.id]: 1,
+        },
+      }),
+      log: [`Garaz lapie ${car.name}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const equipContractAsset = async (slotId, assetId = null) => {
+    const slotLabel = CONTRACT_LOADOUT_SLOTS.find((entry) => entry.id === slotId)?.label || slotId;
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await equipContractLoadoutOnline(sessionToken, slotId, assetId);
+        mergeServerUser(result.user, result);
+        showExplicitNotice({
+          tone: "success",
+          title: assetId ? "LOADOUT USTAWIONY" : "SLOT WYCZYSZCZONY",
+          message: result?.result?.logMessage || `${slotLabel} jest juz ustawiony.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Loadout kontraktowy")) return;
+    if (!assetId) {
+      setGame((prev) => ({
+        ...prev,
+        contracts: normalizeContractState({
+          ...prev.contracts,
+          loadout: {
+            ...(prev.contracts?.loadout || {}),
+            [slotId]: null,
+          },
+        }),
+        log: [`Czyscisz slot ${slotLabel}.`, ...prev.log].slice(0, 16),
+      }));
+      return;
+    }
+
+    if (slotId === "car") {
+      const car = getContractCarById(assetId);
+      if (!car) return pushLog("Nie ma takiego auta.");
+      if (!contractState.ownedCars?.[car.id]) return pushLog(`Najpierw kup ${car.name}.`);
+      setGame((prev) => ({
+        ...prev,
+        contracts: normalizeContractState({
+          ...prev.contracts,
+          loadout: {
+            ...(prev.contracts?.loadout || {}),
+            car: car.id,
+          },
+        }),
+        log: [`${car.name} wchodzi do loadoutu kontraktowego.`, ...prev.log].slice(0, 16),
+      }));
+      return;
+    }
+
+    const item = getContractItemById(assetId);
+    if (!item) return pushLog("Nie ma takiego itemu.");
+    if (item.category !== slotId) return pushLog(`To nie pasuje do slotu ${slotLabel}.`);
+    if (!contractState.ownedItems?.[item.id]) return pushLog(`Najpierw kup ${item.name}.`);
+
+    setGame((prev) => ({
+      ...prev,
+      contracts: normalizeContractState({
+        ...prev.contracts,
+        loadout: {
+          ...(prev.contracts?.loadout || {}),
+          [slotId]: item.id,
+        },
+      }),
+      log: [`${item.name} siedzi teraz w slocie ${slotLabel}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const executeContract = async (contract) => {
+    if (!contract?.id) return pushLog("Ten kontrakt nie jest teraz gotowy.");
+    if (!canDoStreetAction()) return;
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await executeContractOnline(sessionToken, contract.id);
+        mergeServerUser(result.user, result);
+        const contractResult = result?.result || {};
+        showExplicitNotice({
+          tone: contractResult.success ? "success" : "danger",
+          title: contractResult.success ? "KONTRAKT SIADL" : "KONTRAKT SPALONY",
+          message: contractResult.logMessage || contract.name,
+          deltas: null,
+        });
+        if (contractResult.jailed || inJail(result?.user?.profile || {})) {
+          setActiveSection("heists", "prison");
+        }
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Kontrakty")) return;
+    if (game.player.respect < contract.respect) return pushLog(`Ten kontrakt odpala sie od ${contract.respect} szacunu.`);
+    if (game.player.energy < contract.energyCost) return pushLog(`Potrzebujesz ${contract.energyCost} energii.`);
+    if (game.player.cash < contract.entryCost) return pushLog(`Brakuje ${formatMoney(contract.entryCost)} na wejscie.`);
+    if (!contractBoard.active.some((entry) => entry.id === contract.id)) {
+      return pushLog("Ten kontrakt wypadl juz z tablicy. Poczekaj na kolejna rotacje.");
+    }
+
+    const districtSummary = districtSummaries.find((entry) => entry.id === contract.districtId) || null;
+    if (districtSummary?.pressureState?.id === "lockdown") {
+      return pushLog(`Ta dzielnica siedzi w lockdownie. ${contract.name} musi poczekac.`);
+    }
+
+    const preview = getContractOutcomePreview({
+      contract,
+      profile: effectivePlayer,
+      contractState,
+      districtSummary,
+    });
+    if (!preview) return pushLog("Nie udalo sie policzyc kontraktu.");
+
+    const success = Math.random() < Number(preview.successChance || 0.06);
+    const baseReward = randomBetween(contract.baseReward[0], contract.baseReward[1]);
+    const entryCost = Number(contract.entryCost || 0);
+
+    if (success) {
+      const reward = Math.max(0, Math.floor(baseReward * Number(preview.rewardMultiplier || 1)));
+      const nextPlayer = applyProgressionToPlayer(
+        {
+          ...game.player,
+          cash: game.player.cash - entryCost + reward,
+          energy: game.player.energy - contract.energyCost,
+          heat: clamp(game.player.heat + Number(preview.heatGain || 0), 0, 100),
+        },
+        Number(contract.xpGain || 0)
+      ).player;
+      const historyEntry = {
+        id: `contract-${contract.id}-${Date.now()}`,
+        contractId: contract.id,
+        name: contract.name,
+        success: true,
+        reward,
+        entryCost,
+        damage: 0,
+        heatGain: Number(preview.heatGain || 0),
+        jailed: false,
+        jailSeconds: 0,
+        time: Date.now(),
+      };
+
+      setGame((prev) => {
+        const nextContracts = normalizeContractState({
+          ...prev.contracts,
+          history: [historyEntry, ...(prev.contracts?.history || [])].slice(0, ECONOMY_RULES.contracts.maxHistoryEntries || 10),
+        });
+        return {
+          ...prev,
+          player: nextPlayer,
+          contracts: nextContracts,
+          contractBoard: {
+            ...normalizeContractBoardSnapshot(prev.contractBoard, nextContracts.history),
+            history: nextContracts.history.slice(0, 6),
+          },
+          stats: {
+            ...prev.stats,
+            totalEarned: Number(prev.stats.totalEarned || 0) + reward,
+          },
+          log: [`Kontrakt siada: ${contract.name}. Wpada ${formatMoney(reward)}.`, ...prev.log].slice(0, 16),
+        };
+      });
+
+      showExplicitNotice({
+        tone: "success",
+        title: "KONTRAKT SIADL",
+        message: `${contract.name} siada. Wpada ${formatMoney(reward)} po koszcie ${formatMoney(entryCost)}.`,
+        deltas: null,
+      });
+      return;
+    }
+
+    const failDamage = Math.max(
+      4,
+      Math.round(randomBetween(contract.hpLoss[0], contract.hpLoss[1]) * Number(preview.failDamageMultiplier || 1))
+    );
+    const extraLoss = Math.max(
+      0,
+      Math.round(
+        entryCost *
+          Number(ECONOMY_RULES.contracts.failExtraCostRate || 0.2) *
+          clamp(
+            1 - Number(preview.loadout?.protection || 0) * 0.45 - Number(preview.loadout?.retention || 0) * 0.25,
+            0.55,
+            1.05
+          )
+      )
+    );
+    const jailSeconds = Math.random() < Number(preview.jailChanceOnFail || 0.1) ? randomBetween(180, 420) : 0;
+    const historyEntry = {
+      id: `contract-${contract.id}-${Date.now()}`,
+      contractId: contract.id,
+      name: contract.name,
+      success: false,
+      reward: 0,
+      entryCost: entryCost + extraLoss,
+      damage: failDamage,
+      heatGain: Number(preview.heatGain || 0) + 4,
+      jailed: jailSeconds > 0,
+      jailSeconds,
+      time: Date.now(),
+    };
+
+    setGame((prev) => {
+      const nextContracts = normalizeContractState({
+        ...prev.contracts,
+        history: [historyEntry, ...(prev.contracts?.history || [])].slice(0, ECONOMY_RULES.contracts.maxHistoryEntries || 10),
+      });
+      return {
+        ...prev,
+        player: {
+          ...prev.player,
+          cash: Math.max(0, Number(prev.player.cash || 0) - entryCost - extraLoss),
+          energy: Math.max(0, Number(prev.player.energy || 0) - Number(contract.energyCost || 0)),
+          hp: clamp(Number(prev.player.hp || 0) - failDamage, 1, Number(prev.player.maxHp || 100)),
+          heat: clamp(Number(prev.player.heat || 0) + Number(preview.heatGain || 0) + 4, 0, 100),
+          jailUntil: jailSeconds > 0 ? Math.max(Number(prev.player.jailUntil || 0), Date.now() + jailSeconds * 1000) : prev.player.jailUntil,
+        },
+        contracts: nextContracts,
+        contractBoard: {
+          ...normalizeContractBoardSnapshot(prev.contractBoard, nextContracts.history),
+          history: nextContracts.history.slice(0, 6),
+        },
+        log: [`Kontrakt spalony: ${contract.name}. Leci ${formatMoney(entryCost + extraLoss)} i ${failDamage} HP.`, ...prev.log].slice(0, 16),
+      };
+    });
+
+    showExplicitNotice({
+      tone: "danger",
+      title: "KONTRAKT SPALONY",
+      message:
+        jailSeconds > 0
+          ? `${contract.name} pali kase i konczysz za kratami.`
+          : `${contract.name} nie siada. Tracisz wejscie, doplate i zdrowie.`,
+      deltas: null,
+    });
+    if (jailSeconds > 0) {
+      setActiveSection("heists", "prison");
+    }
+  };
+
+  const openGangHeistLobby = async (heist) => {
+    if (!canDoStreetAction()) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
-    if (!canRunGangHeistRole(game.gang.role)) return pushLog("Napady gangu odpalaja tylko Boss, Vice Boss albo Zaufany.");
+    if (!canRunGangHeistRole(game.gang.role)) return pushLog("Lobby napadu otwiera Boss, Vice Boss albo Zaufany.");
+    if (game.gang.activeHeistLobby?.status === "open") return pushLog("Gang ma juz otwarte jedno lobby napadu.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await openGangHeistLobbyOnline(sessionToken, heist.id, gangHeistNoteDraft);
+        mergeServerUser(result.user, result);
+        setGangHeistNoteDraft("");
+        pushLog(result?.result?.logMessage || `Lobby pod ${heist.name} stoi otwarte.`);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Lobby napadu gangu")) return;
+    const selfId =
+      selfGangMember?.id ||
+      game.player.id ||
+      `self-gang-${String(game.player.name || "player").trim().toLowerCase()}`;
+    const summary = getGangHeistSquadSummary(
+      [{ profile: game.player, effectiveProfile: effectivePlayer }],
+      heist,
+      game.gang
+    );
+
+    setGame((prev) => ({
+      ...prev,
+      gang: normalizeGangState({
+        ...prev.gang,
+        activeHeistLobby: {
+          id: `gang-lobby-${heist.id}-${Date.now()}`,
+          heistId: heist.id,
+          status: "open",
+          note: String(gangHeistNoteDraft || "").trim().slice(0, 140),
+          openedByUserId: selfId,
+          openedByName: prev.player.name,
+          participantIds: [selfId],
+          requiredMembers: heist.minMembers,
+          createdAt: Date.now(),
+          chance: summary.chance,
+          squadPower: summary.totalPower,
+          summary,
+        },
+      }),
+      log: [`Otwierasz lobby pod ${heist.name}.`, ...prev.log].slice(0, 16),
+    }));
+    setGangHeistNoteDraft("");
+  };
+
+  const joinGangHeistLobby = async (heist) => {
+    if (!canDoStreetAction()) return;
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    if (!activeGangHeistLobby) return pushLog("Nie ma teraz otwartego lobby.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await joinGangHeistLobbyOnline(sessionToken, heist.id);
+        mergeServerUser(result.user, result);
+        pushLog(result?.result?.logMessage || `Wbijasz do skladu pod ${heist.name}.`);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Dolaczenie do lobby gangu")) return;
+    if (isInActiveGangHeistLobby) return pushLog("W demo juz siedzisz w tym lobby.");
+    pushLog("W demo lobby najlepiej testowac online na prawdziwym skladzie.");
+  };
+
+  const leaveGangHeistLobby = async (heist) => {
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    if (!activeGangHeistLobby) return pushLog("Nie ma teraz otwartego lobby.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await leaveGangHeistLobbyOnline(sessionToken, heist.id);
+        mergeServerUser(result.user, result);
+        pushLog(result?.result?.logMessage || `Schodzisz z lobby ${heist.name}.`);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Zejscie z lobby gangu")) return;
+    const selfId = selfGangMember?.id || game.player.id;
+    const nextIds = (activeGangHeistLobby.participantIds || []).filter((entry) => entry !== selfId);
+    setGame((prev) => ({
+      ...prev,
+      gang: normalizeGangState({
+        ...prev.gang,
+        activeHeistLobby: nextIds.length
+          ? {
+              ...prev.gang.activeHeistLobby,
+              participantIds: nextIds,
+            }
+          : null,
+      }),
+      log: [`Schodzisz z lobby ${heist.name}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const startGangHeistLobby = async (heist) => {
+    if (!canDoStreetAction()) return;
+    if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    if (!activeGangHeistLobby) return pushLog("Najpierw otworz lobby i zbierz sklad.");
+    if (!canRunGangHeistRole(game.gang.role)) return pushLog("Start odpala Boss, Vice Boss albo Zaufany.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await startGangHeistLobbyOnline(sessionToken, heist.id);
+        mergeServerUser(result.user, result);
+        const report = result?.result?.report;
+        showExplicitNotice({
+          tone: report?.success ? "success" : "danger",
+          title: report?.success ? "NAPAD SIADL" : "NAPAD SPALONY",
+          message: result?.result?.logMessage || result?.result?.message || heist.name,
+          deltas: null,
+        });
+        pushLog(result?.result?.logMessage || result?.result?.message || `Startujesz ${heist.name}.`);
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Start napadu gangu")) return;
     if (game.gang.members < heist.minMembers) return pushLog(`Ten napad wymaga ${heist.minMembers} ludzi w ekipie.`);
     if (game.gang.members - game.gang.jailedCrew < heist.minMembers) return pushLog("Za duzo ludzi siedzi. Nie masz pelnego skladu do tej roboty.");
-    if (game.player.respect < heist.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${heist.respect}.`);
     if (game.player.energy < heist.energy) return pushLog(`Potrzebujesz ${heist.energy} energii.`);
 
-    const { chance } = getGangHeistOdds(game.player, effectivePlayer, game.gang, heist);
-    const participants = Math.min(game.gang.members - game.gang.jailedCrew, Math.max(heist.minMembers, heist.minMembers + Math.floor(game.gang.influence / 6)));
+    const lobbySummary = activeGangHeistLobby?.summary || getGangHeistSquadSummary(
+      [{ profile: game.player, effectiveProfile: effectivePlayer }],
+      heist,
+      game.gang
+    );
+    const chance = Number(lobbySummary?.chance || 0.08);
+    const participants = Math.max(
+      heist.minMembers,
+      Array.isArray(activeGangHeistLobby?.participantIds) ? activeGangHeistLobby.participantIds.length : 1
+    );
 
     if (Math.random() < chance) {
       const gangBonusRate = getGangHeistBonusRate(game.gang);
       const gain = Math.floor((randomBetween(heist.reward[0], heist.reward[1]) + Math.floor(game.gang.gearScore * 60)) * (1 + gangBonusRate));
-      const share = Math.max(600, Math.floor(gain / participants));
+      const vaultCut = Math.floor(gain * 0.1);
+      const share = Math.max(600, Math.floor((gain - vaultCut) / participants));
       const xpGain = Math.max(7, randomBetween(Math.ceil(heist.minMembers * 2.5), heist.minMembers * 4));
+      const participantReport = [
+        {
+          userId: selfGangMember?.id || game.player.id || "self",
+          name: game.player.name,
+          cash: share,
+          xp: xpGain,
+          jailed: false,
+          heat: Math.ceil(heist.risk * 18),
+          hpLoss: 0,
+        },
+      ];
       setGame((prev) => ({
         ...prev,
         player: applyProgressionToPlayer(
@@ -3120,14 +3907,33 @@ function AppRuntime() {
           },
           xpGain
         ).player,
-        gang: {
+        gang: normalizeGangState({
           ...prev.gang,
-          vault: prev.gang.vault + Math.floor(gain * 0.12),
+          activeHeistLobby: null,
+          lastHeistReport: {
+            id: `offline-gang-heist-${heist.id}-${Date.now()}`,
+            heistId: heist.id,
+            heistName: heist.name,
+            success: true,
+            districtId: heist.districtId,
+            createdAt: Date.now(),
+            totalTake: gain,
+            vaultCut,
+            teamChance: chance,
+            incident: "Robota siadla w trybie demo.",
+            participants: participantReport,
+            jailedParticipantIds: [],
+            rescueAttemptedAt: null,
+            rescueResolvedAt: null,
+            rescueMode: null,
+            rescueSuccess: null,
+          },
+          vault: prev.gang.vault + vaultCut,
           influence: prev.gang.influence + 2,
           territory: prev.gang.territory + (Math.random() < 0.25 ? 1 : 0),
           gearScore: clamp(prev.gang.gearScore - randomBetween(1, 3) + 1, 28, 100),
-          chat: [{ id: `gang-${Date.now()}`, author: "System", text: `Napad gangu udany: ${heist.name}. Dzialka na leb: ${formatMoney(share)}.`, time: nowTimeLabel() }, ...prev.gang.chat].slice(0, 14),
-        },
+          chat: [{ id: `gang-${Date.now()}`, author: "System", text: `Napad gangu udany: ${heist.name}. Dzialka na leb: ${formatMoney(share)}.`, time: nowTimeLabel() }, ...prev.gang.chat].slice(0, 20),
+        }),
         stats: {
           ...prev.stats,
           gangHeistsWon: prev.stats.gangHeistsWon + 1,
@@ -3140,6 +3946,19 @@ function AppRuntime() {
 
     const jailedCrew = Math.min(game.gang.members - 1, randomBetween(1, Math.max(1, Math.ceil(heist.minMembers / 2))));
     const gearLoss = randomBetween(6, 14);
+    const jailUntil = Date.now() + (150 + heist.energy * 45) * 1000;
+    const participantReport = [
+      {
+        userId: selfGangMember?.id || game.player.id || "self",
+        name: game.player.name,
+        cash: 0,
+        xp: 0,
+        jailed: Math.random() < heist.risk * 0.7,
+        heat: Math.ceil(heist.risk * 26),
+        hpLoss: 16,
+      },
+    ];
+    const jailedIds = participantReport.filter((entry) => entry.jailed).map((entry) => entry.userId);
     setGame((prev) => ({
       ...prev,
       player: {
@@ -3147,21 +3966,98 @@ function AppRuntime() {
         energy: prev.player.energy - heist.energy,
         hp: clamp(prev.player.hp - 16, 0, prev.player.maxHp),
         heat: clamp(prev.player.heat + Math.ceil(heist.risk * 26), 0, 100),
+        jailUntil: participantReport[0]?.jailed ? jailUntil : prev.player.jailUntil,
       },
-      gang: {
+      gang: normalizeGangState({
         ...prev.gang,
+        activeHeistLobby: null,
+        lastHeistReport: {
+          id: `offline-gang-heist-${heist.id}-${Date.now()}`,
+          heistId: heist.id,
+          heistName: heist.name,
+          success: false,
+          districtId: heist.districtId,
+          createdAt: Date.now(),
+          totalTake: 0,
+          vaultCut: 0,
+          teamChance: chance,
+          incident: jailedIds.length ? "Wtopa na robocie. Czesci skladu grozi cela." : "Wtopa na robocie. Ekipa schodzi poobijana.",
+          participants: participantReport,
+          jailedParticipantIds: jailedIds,
+          rescueAttemptedAt: null,
+          rescueResolvedAt: null,
+          rescueMode: null,
+          rescueSuccess: null,
+        },
         vault: clamp(prev.gang.vault - Math.floor(heist.reward[0] * 0.2), 0, 999999999),
         gearScore: clamp(prev.gang.gearScore - gearLoss, 18, 100),
         jailedCrew: clamp(prev.gang.jailedCrew + jailedCrew, 0, prev.gang.members - 1),
-        crewLockdownUntil: Date.now() + (150 + heist.energy * 45) * 1000,
-        chat: [{ id: `gang-${Date.now()}`, author: "System", text: `Wtopa na robocie: ${heist.name}. Siedzi ${jailedCrew} ludzi, sprzet spalony.`, time: nowTimeLabel() }, ...prev.gang.chat].slice(0, 14),
-      },
+        crewLockdownUntil: jailUntil,
+        chat: [{ id: `gang-${Date.now()}`, author: "System", text: `Wtopa na robocie: ${heist.name}. Siedzi ${jailedCrew} ludzi, sprzet spalony.`, time: nowTimeLabel() }, ...prev.gang.chat].slice(0, 20),
+      }),
       log: [`Napad gangu nie siadl: ${heist.name}. Siada ${jailedCrew} ludzi i leci ${gearLoss} pkt sprzetu.`, ...prev.log].slice(0, 16),
     }));
+  };
 
-    if (Math.random() < heist.risk * 0.7) {
-      applyJail(120 + heist.energy * 40, heist.name);
+  const upgradeGangMembers = async () => {
+    if (!game.gang.joined) return pushLog("Najpierw musisz miec gang.");
+    if (game.gang.role !== "Boss") return pushLog("Rozbudowe skladu kupuje tylko Boss.");
+    if (!nextGangMemberCapUpgrade) return pushLog("Gang ma juz wbity maksymalny sklad.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await upgradeGangMembersOnline(sessionToken);
+        mergeServerUser(result.user, result);
+        showExplicitNotice({
+          tone: "success",
+          title: "ROZBUDOWA GANGU",
+          message: result?.result?.logMessage || `Gang wskakuje na ${result?.result?.maxMembers || game.gang.maxMembers} slotow.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
     }
+
+    if (!requireOfflineDemoAuthority("Rozbudowa gangu")) return;
+    if (game.gang.vault < nextGangMemberCapUpgrade.cost) {
+      return pushLog(`Brakuje ${formatMoney(nextGangMemberCapUpgrade.cost)} w skarbcu.`);
+    }
+    setGame((prev) => ({
+      ...prev,
+      gang: normalizeGangState({
+        ...prev.gang,
+        memberCapLevel: nextGangMemberCapUpgrade.level,
+        maxMembers: nextGangMemberCapUpgrade.maxMembers,
+        vault: Math.max(0, Number(prev.gang.vault || 0) - Number(nextGangMemberCapUpgrade.cost || 0)),
+      }),
+      log: [`Rozbudowujesz gang do ${nextGangMemberCapUpgrade.maxMembers} slotow.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
+  const rescueGangCrew = async (optionId) => {
+    if (!pendingGangRescue) return pushLog("Nie ma teraz ekipy do wyciagniecia.");
+    if (!canRunGangHeistRole(game.gang.role)) return pushLog("Pomoc po wtapie odpala Boss, Vice Boss albo Zaufany.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await rescueGangHeistCrewOnline(sessionToken, optionId);
+        mergeServerUser(result.user, result);
+        showExplicitNotice({
+          tone: result?.result?.success ? "success" : "danger",
+          title: result?.result?.success ? "EKIPA ODBITA" : "RATUNEK SPALONY",
+          message: result?.result?.logMessage || "Gang probuje wyciagnac swoich.",
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Ratunek po wtapie")) return;
+    pushLog("Ratunek po wtapie jest liczony w pelni online.");
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - business purchase cost, unlock validation and empire scaling should be stored server-side
@@ -3369,8 +4265,101 @@ function AppRuntime() {
     });
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - owner-side traffic -> night payout loop is still local in demo mode,
-  // but visitor utility/progress uses backend authority when online.
+  const setClubEntryFee = async (entryFeeDraft) => {
+    if (!game.club.owned) return pushLog("Najpierw musisz miec swoj klub.");
+    if (!insideOwnClub) return pushLog("Wejsciowke ustawiasz tylko bedac u siebie.");
+    const parsedEntryFee = Number.parseInt(String(entryFeeDraft ?? game.club.entryFee ?? 0).replace(/[^\d]/g, ""), 10);
+    const entryFee = Math.max(0, Number.isFinite(parsedEntryFee) ? parsedEntryFee : 0);
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await setClubSettingsOnline(sessionToken, { entryFee });
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
+        showExplicitNotice({
+          tone: "success",
+          title: "BRAMKA",
+          message: result?.result?.logMessage || `Wejsciowka ustawiona na ${formatMoney(entryFee)}.`,
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Ustawienia wejscia klubu")) return;
+
+    setGame((prev) => {
+      const nextClub = syncClubRuntimeState({
+        ...prev.club,
+        entryFee,
+        recentIncident: {
+          tone: "door",
+          text: entryFee > 0 ? `Bramka ustawiona na ${entryFee}$.` : "Lista otwarta. Wejscie bez oplaty.",
+          createdAt: Date.now(),
+        },
+      });
+
+      return {
+        ...prev,
+        club: nextClub,
+        clubListings: syncClubListing(
+          prev.clubListings,
+          nextClub,
+          prev.club.ownerLabel || getPlayerClubOwnerLabel(prev)
+        ),
+        log: [
+          entryFee > 0 ? `Bramka leci teraz po ${formatMoney(entryFee)}.` : "Lokal wpuszcza teraz bez oplaty.",
+          ...prev.log,
+        ].slice(0, 16),
+      };
+    });
+  };
+
+  const collectClubSafe = async () => {
+    if (!game.club.owned) return pushLog("Najpierw musisz miec swoj klub.");
+    if (!insideOwnClub) return pushLog("Sejf odbierasz tylko bedac u siebie.");
+
+    if (hasOnlineAuthority) {
+      try {
+        const result = await collectClubSafeOnline(sessionToken);
+        mergeServerUser(result.user, { clubMarket: result.clubMarket });
+        showExplicitNotice({
+          tone: "success",
+          title: "SEJF KLUBU",
+          message: result?.result?.logMessage || "Sejf klubu opróżniony.",
+          deltas: null,
+        });
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+
+    if (!requireOfflineDemoAuthority("Sejf klubu")) return;
+    const safeCash = Math.max(0, Math.floor(Number(game.club.safeCash || 0)));
+    if (safeCash <= 0) return pushLog("Sejf jest pusty.");
+
+    setGame((prev) => ({
+      ...prev,
+      player: { ...prev.player, cash: Number(prev.player.cash || 0) + safeCash },
+      stats: { ...prev.stats, totalEarned: Number(prev.stats?.totalEarned || 0) + safeCash },
+      club: {
+        ...prev.club,
+        safeCash: 0,
+        lastReportSummary: prev.club?.lastReportSummary
+          ? {
+              ...prev.club.lastReportSummary,
+              safeCash: 0,
+              collectedAt: Date.now(),
+              collectedAmount: safeCash,
+            }
+          : prev.club.lastReportSummary,
+      },
+      log: [`Wyciagasz z sejfu ${formatMoney(safeCash)}.`, ...prev.log].slice(0, 16),
+    }));
+  };
+
   const runClubVisitorAction = async (actionId) => {
     if (!canDoStreetAction()) return;
     if (!currentClubVenue) return pushLog("Najpierw wejdz do jakiegos klubu.");
@@ -3388,6 +4377,9 @@ function AppRuntime() {
 
     if (action.costCash > 0 && game.player.cash < action.costCash) {
       return pushLog(`Brakuje ${formatMoney(action.costCash)} na ${action.name}.`);
+    }
+    if (!insideOwnClub && !hasClubGuestAccess(game.club?.guestState, currentClubVenue.id, Date.now())) {
+      return pushLog("Najpierw ogarnij wejscie do lokalu.");
     }
 
     if (action.id === "hunt") {
@@ -3413,17 +4405,17 @@ function AppRuntime() {
           tone:
             actionResult?.escort
               ? "success"
-              : actionResult?.cashTip || actionResult?.heatReduced || actionResult?.hpRecovered
+              : actionResult?.networkBoost || actionResult?.heatReduced || actionResult?.hpRecovered || actionResult?.leadGain
                 ? "success"
                 : "warning",
           title:
             action.id === "scout"
-              ? "SCOUT"
+              ? "W OBIEGU"
               : action.id === "hunt"
                 ? actionResult?.escort
                   ? "LEAD DOMKNIETY"
                   : "LEAD ROSNIE"
-                : "LAY LOW",
+                : "PRZYCZAJ SIE",
           message: actionResult?.logMessage || `${action.name} rozliczone przez backend.`,
           deltas: null,
         });
@@ -3458,7 +4450,7 @@ function AppRuntime() {
       const dayKey = new Date(now).toISOString().slice(0, 10);
       const affinityEntry = guestState.affinity[venue.id]
         ? { ...guestState.affinity[venue.id] }
-        : { visits: 0, lastVisitAt: 0, tipDayKey: dayKey, tipValueToday: 0, tipCountToday: 0 };
+        : { ...getClubGuestVenueState(guestState, venue.id) };
       if (affinityEntry.tipDayKey !== dayKey) {
         affinityEntry.tipDayKey = dayKey;
         affinityEntry.tipValueToday = 0;
@@ -4309,203 +5301,6 @@ function AppRuntime() {
     }));
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - club tick income, player-driven traffic, raid rolls and stash consumption are high-value economy actions
-  const runClubNight = () => {
-    if (!canDoStreetAction()) return;
-    if (!game.club.owned) return pushLog("Bez klubu nie ma co odpalac nocy.");
-    if (!insideOwnClub) return pushLog("Musisz siedziec we wlasnym klubie, zeby odpalic noc i pilnowac stolow.");
-    if (clubNightRemaining > 0) return pushLog(`Klub juz pracuje. Wroc za ${formatCooldown(clubNightRemaining)}.`);
-
-    if (hasOnlineAuthority) {
-      runClubNightOnline(sessionToken)
-        .then((result) => {
-          mergeServerUser(result.user, { clubMarket: result.clubMarket });
-          showExplicitNotice({
-            tone: "success",
-            title: "NOC KLUBU",
-            message: result?.result?.logMessage || "Lokal domknal noc.",
-            deltas: null,
-          });
-        })
-        .catch((error) => pushLog(error.message));
-      return;
-    }
-
-    if (!requireOfflineDemoAuthority("Noc klubu")) return;
-
-    const clubSnapshot = syncClubRuntimeState(game.club);
-    const clubVenue = {
-      id: clubSnapshot.sourceId,
-      name: clubSnapshot.name,
-      ownerLabel: clubSnapshot.ownerLabel,
-      respect: clubSnapshot.respect || 0,
-      popularity: clubSnapshot.popularity,
-      mood: clubSnapshot.mood,
-      policeBase: clubSnapshot.policeBase,
-      policePressure: clubSnapshot.policePressure,
-      traffic: clubSnapshot.traffic,
-      nightPlanId: clubSnapshot.nightPlanId,
-      note: clubSnapshot.note,
-    };
-    const profile = getClubVenueProfile({ ...game, club: clubSnapshot }, clubVenue);
-    const totalUnits = DRUGS.reduce((sum, drug) => sum + (clubSnapshot.stash[drug.id] || 0), 0);
-    if (!totalUnits) return pushLog("Klub stoi pusty. Dorzuc najpierw towar z fabryk.");
-    const trafficLevel = clamp(Number(clubSnapshot.traffic || 0), 0, CLUB_SYSTEM_RULES.nightlyTrafficHardCap);
-    const trafficWeight = clamp(trafficLevel / CLUB_SYSTEM_RULES.nightlyTrafficSoftCap, 0, 1.2);
-    const pressureDrag = Math.max(0, (Math.max(0, clubPolice.pressure - 48) / 36));
-    const effectiveTraffic = Math.max(0, trafficLevel - pressureDrag);
-    const starterFloorDemand = totalUnits > 0 ? 1 : 0;
-    const demandBudget = Math.max(
-      starterFloorDemand,
-      Math.min(
-        9,
-        Math.floor(effectiveTraffic / 2.6) + (profile.plan.id === "showtime" && effectiveTraffic >= 7 ? 1 : 0)
-      )
-    );
-
-    if (demandBudget <= 0) {
-      return pushLog("Presja zabila noc. Uspokoj dzielnice albo podbij ruch w lokalu.");
-    }
-
-    const workingStock = DRUGS.reduce((acc, drug) => {
-      acc[drug.id] = Number(clubSnapshot.stash[drug.id] || 0);
-      return acc;
-    }, {});
-    const soldByDrug = {};
-    let remainingDemand = demandBudget;
-
-    while (remainingDemand > 0) {
-      const candidate = DRUGS
-        .filter((drug) => workingStock[drug.id] > 0)
-        .sort(
-          (left, right) =>
-            workingStock[right.id] * (1 + right.streetPrice / 7000) -
-            workingStock[left.id] * (1 + left.streetPrice / 7000)
-        )[0];
-
-      if (!candidate) break;
-      soldByDrug[candidate.id] = (soldByDrug[candidate.id] || 0) + 1;
-      workingStock[candidate.id] -= 1;
-      remainingDemand -= 1;
-    }
-
-    const soldUnits = Object.values(soldByDrug).reduce((sum, amount) => sum + amount, 0);
-    if (!soldUnits) {
-      return pushLog("Kolejka byla, ale nie zeszlo nic konkretnego ze stashu.");
-    }
-
-    let grossIncome = 0;
-    Object.entries(soldByDrug).forEach(([drugId, amount]) => {
-      const drug = DRUGS.find((entry) => entry.id === drugId);
-      if (!drug || !amount) return;
-      const perUnit = Math.max(
-        80,
-        Math.floor(drug.streetPrice * profile.nightIncomeFactor * (0.58 + trafficWeight * 0.28))
-      );
-      grossIncome += perUnit * amount;
-    });
-
-    const projectedPressure = clamp(
-      Number(clubSnapshot.policePressure || 0) +
-        effectiveTraffic * 1.4 +
-        soldUnits * 1.8 +
-        Math.max(0, totalUnits - soldUnits) * 0.18 +
-        game.player.heat * 0.08,
-      0,
-      100
-    );
-    const incidentChance = clamp(
-      0.03 + Math.max(0, projectedPressure - 58) / 190 + trafficWeight * 0.05,
-      0.03,
-      0.24
-    );
-    const incidentTriggered = Math.random() < incidentChance;
-    const incidentLoss = incidentTriggered ? Math.floor(grossIncome * (0.12 + Math.random() * 0.08)) : 0;
-    const netIncome = Math.max(0, grossIncome - incidentLoss);
-    const quietNight = trafficLevel < 1.25;
-    const soldSummary = Object.entries(soldByDrug)
-      .filter(([, amount]) => amount > 0)
-      .map(([drugId, amount]) => {
-        const drug = DRUGS.find((entry) => entry.id === drugId);
-        return drug ? `${amount}x ${drug.name}` : null;
-      })
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(", ");
-    const nextTraffic = Number((Math.max(0, trafficLevel * 0.34)).toFixed(3));
-    const nextPressure = clamp(
-      Number(clubSnapshot.policePressure || 0) + effectiveTraffic * 0.9 + soldUnits * 0.7 + (incidentTriggered ? 5.5 : 2.1),
-      0,
-      100
-    );
-    const recentIncident = incidentTriggered
-      ? {
-          tone: "risk",
-          text: `Patrol przecial sale i scial ${formatMoney(incidentLoss)} z utargu.`,
-          createdAt: Date.now(),
-        }
-      : {
-          tone: quietNight ? "calm" : trafficLevel >= 12 ? "buzz" : "calm",
-          text:
-            quietNight
-              ? "Lokal przepchnal cicha noc i rozruszal zaplecze bez szumu."
-              : trafficLevel >= 12
-              ? "Kolejka dowiozla noc, ale lokal robi sie coraz glosniejszy."
-              : "Noc zamknieta czysto. Ruch byl umiarkowany i bez zbednego szumu.",
-          createdAt: Date.now(),
-        };
-
-    setGame((prev) => {
-      const nextStash = { ...clubSnapshot.stash };
-      Object.entries(soldByDrug).forEach(([drugId, amount]) => {
-        nextStash[drugId] = Math.max(0, Number(nextStash[drugId] || 0) - Number(amount || 0));
-      });
-
-      const nextClub = {
-        ...clubSnapshot,
-        popularity: clamp(clubSnapshot.popularity + (incidentTriggered ? -1 : trafficLevel >= 9 ? 2 : 1), 0, 100),
-        mood: clamp(clubSnapshot.mood + (incidentTriggered ? -4 : soldUnits >= 4 ? 2 : 1), 0, 100),
-        policePressure: nextPressure,
-        traffic: nextTraffic,
-        lastTrafficAt: Date.now(),
-        lastRunAt: Date.now(),
-        recentIncident,
-        stash: nextStash,
-      };
-
-      return {
-        ...prev,
-        player: {
-          ...prev.player,
-          cash: prev.player.cash + netIncome,
-          heat: clamp(prev.player.heat + (incidentTriggered ? 4 : 1), 0, 100),
-        },
-        stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + netIncome },
-        club: nextClub,
-        clubListings: syncClubListing(prev.clubListings, nextClub, prev.club.ownerLabel || getPlayerClubOwnerLabel(prev)),
-        log: [
-          incidentTriggered
-            ? `${prev.club.name}: noc domknieta na ${formatMoney(netIncome)}. Patrol przycial ${formatMoney(incidentLoss)}. Poszlo: ${soldSummary || "skromny miks"}.`
-            : quietNight
-              ? `${prev.club.name}: cicha noc domknieta na ${formatMoney(netIncome)}. Poszlo: ${soldSummary || "skromny miks"}.`
-              : `${prev.club.name}: noc dowiozla ${formatMoney(netIncome)}. Ruch ${Math.round(trafficLevel)} i zeszlo: ${soldSummary || "skromny miks"}.`,
-          ...prev.log,
-        ].slice(0, 16),
-      };
-    });
-
-    showExplicitNotice({
-      tone: incidentTriggered ? "warning" : "success",
-      title: incidentTriggered ? "NOC Z PRESJA" : "NOC DOMKNIETA",
-      message: incidentTriggered
-        ? `${clubSnapshot.name} wyciagnal ${formatMoney(netIncome)}, ale patrol przycial ${formatMoney(incidentLoss)}.`
-        : quietNight
-          ? `${clubSnapshot.name} zamknal cicha noc na ${formatMoney(netIncome)}.`
-          : `${clubSnapshot.name} zamknal noc na ${formatMoney(netIncome)} przy ruchu ${Math.round(trafficLevel)}.`,
-      deltas: null,
-    });
-  };
-
   const fortifyClub = async () => {
     if (!canDoStreetAction()) return;
     if (!game.club.owned) return pushLog("Najpierw musisz miec swoj lokal.");
@@ -4550,20 +5345,51 @@ function AppRuntime() {
       try {
         const result = await visitClubOnline(sessionToken, "enter", listing.id);
         mergeServerUser(result.user, { clubMarket: result.clubMarket });
+        showExplicitNotice({
+          tone: "success",
+          title: "LOKAL",
+          message: result?.result?.logMessage || `Wchodzisz do ${listing.name}.`,
+          deltas: null,
+        });
       } catch (error) {
         pushLog(error.message);
       }
       return;
     }
 
+    const now = Date.now();
+    const alreadyHasAccess = hasClubGuestAccess(game.club?.guestState, listing.id, now);
+    const entryFee = alreadyHasAccess ? 0 : Math.max(0, Number(listing.entryFee || 0));
+    if (entryFee > 0 && Number(game.player.cash || 0) < entryFee) {
+      return pushLog(`Brakuje ${formatMoney(entryFee)} na wejscie do ${listing.name}.`);
+    }
+
     setGame((prev) => ({
       ...prev,
+      player: {
+        ...prev.player,
+        cash: Math.max(0, Number(prev.player.cash || 0) - entryFee),
+      },
       club: {
         ...prev.club,
         visitId: listing.id,
+        guestState: {
+          ...(prev.club.guestState || createClubGuestState()),
+          affinity: {
+            ...((prev.club.guestState && prev.club.guestState.affinity) || {}),
+            [listing.id]: {
+              ...getClubGuestVenueState(prev.club.guestState, listing.id),
+              accessUntil: now + Number(CLUB_SYSTEM_RULES.accessWindowMs || 0),
+              lastAccessPaidAt: now,
+              lastEntryFeePaid: entryFee,
+            },
+          },
+        },
       },
       log: [
-        `Wchodzisz do ${listing.name}. Masz teraz Scout, Hunt Contacts i Lay Low.`,
+        entryFee > 0
+          ? `Wchodzisz do ${listing.name}. Bramka bierze ${formatMoney(entryFee)}.`
+          : `Wchodzisz do ${listing.name}.`,
         ...prev.log,
       ].slice(0, 16),
     }));
@@ -4575,6 +5401,9 @@ function AppRuntime() {
       try {
         const result = await visitClubOnline(sessionToken, "leave", currentClubVenue.id);
         mergeServerUser(result.user, { clubMarket: result.clubMarket });
+        if (result?.result?.logMessage) {
+          pushLog(result.result.logMessage);
+        }
       } catch (error) {
         pushLog(error.message);
       }
@@ -4589,34 +5418,6 @@ function AppRuntime() {
       },
       log: [`Wychodzisz z ${currentClubVenue.name} i wracasz na ulice.`, ...prev.log].slice(0, 16),
     }));
-  };
-
-  const promoteClub = () => {
-    if (!requireOfflineDemoAuthority("Promocja klubu")) return;
-    if (!game.club.owned) return pushLog("Najpierw otworz klub.");
-    if (!insideOwnClub) return pushLog("Promo lokalu odpalasz tylko bedac w srodku swojego klubu.");
-    if (game.player.cash < 1200) return pushLog("Brakuje kasy na promo lokalu.");
-    updateLocalPlayer({ cash: game.player.cash - 1200 }, "Promo odpalone. Klub zaczyna byc glosny na miescie.");
-    setGame((prev) => {
-      const baseClub = syncClubRuntimeState(prev.club, Date.now());
-      const nextClub = {
-        ...baseClub,
-        popularity: clamp(baseClub.popularity + 6, 0, 100),
-        mood: clamp(baseClub.mood + 3, 0, 100),
-        traffic: clamp(Number(baseClub.traffic || 0) + 1.8, 0, CLUB_SYSTEM_RULES.nightlyTrafficHardCap),
-        policePressure: clamp(Number(baseClub.policePressure || 0) + 1.4, 0, 100),
-        recentIncident: {
-          tone: "buzz",
-          text: "Promo rozkrecilo wejscie i ustawilo lekka kolejke pod lokalem.",
-          createdAt: Date.now(),
-        },
-      };
-      return {
-        ...prev,
-        club: nextClub,
-        clubListings: syncClubListing(prev.clubListings, nextClub, prev.club.ownerLabel || getPlayerClubOwnerLabel(prev)),
-      };
-    });
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - local market fallback must be removed; supply generation,
@@ -4818,6 +5619,9 @@ function AppRuntime() {
 
   const setGangFocus = async (districtId) => {
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    if (!["Boss", "Vice Boss"].includes(String(game.gang.role || "").trim())) {
+      return pushLog("Fokus gangu przerzuca Boss albo Vice Boss.");
+    }
     const district = findDistrictById(districtId);
 
     if (hasOnlineAuthority) {
@@ -4843,6 +5647,7 @@ function AppRuntime() {
     const project = GANG_PROJECTS.find((entry) => entry.id === projectId);
     if (!project) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
+    if (String(game.gang.role || "").trim() !== "Boss") return pushLog("Projektami gangu zarzadza Boss.");
 
     if (hasOnlineAuthority) {
       try {
@@ -5173,6 +5978,7 @@ function AppRuntime() {
   const inviteCandidate = (candidateId) => {
     if (!game.gang.joined) return;
     if (game.gang.role !== "Boss") return pushLog("Tylko boss moze wysylac zaproszenia.");
+    if (game.gang.members >= game.gang.maxMembers) return pushLog("Gang jest juz pelny. Rozbuduj sklad albo zrob miejsce.");
     const candidate = (game.online?.roster || []).find((entry) => entry.id === candidateId);
     if (!candidate) return;
     if (candidate.gang !== "No gang") return pushLog("Ten gracz jest juz w gangu.");
@@ -6472,57 +7278,183 @@ function AppRuntime() {
       <SceneArtwork
         eyebrow="Gang"
         title="Robota dla calej organizacji"
-        lines={["Sklad, szacun i wplywy decyduja, czy robota siada."]}
+        lines={["Najpierw zbierasz sklad, potem dopiero odpalasz robote.", "Szansa liczy sie z realnych ludzi w lobby, nie z jednego klikniecia."]}
         accent={["#422418", "#160f0c", "#050505"]}
         source={SCENE_BACKGROUNDS.gangWide}
       />
-      <SectionCard title="Napady gangu" subtitle="Sklad i szacun decyduja o wejsciu.">
-        {GANG_HEISTS.map((heist) => {
-          const roleLocked = !canRunGangHeistRole(game.gang.role);
-          const memberLocked = game.gang.members < heist.minMembers;
-          const respectLocked = game.player.respect < heist.respect;
-          const crewLocked = game.gang.members - game.gang.jailedCrew < heist.minMembers;
-          const lockdownLocked = crewLockdownRemaining > 0;
-          const locked = roleLocked || memberLocked || respectLocked || crewLocked || lockdownLocked;
-          const odds = getGangHeistOdds(game.player, effectivePlayer, game.gang, heist);
-          const ctaLabel = roleLocked
-            ? "Za niska ranga"
-            : lockdownLocked
-              ? "Ekipa lezy po wtapie"
-              : crewLocked
-                ? "Za malo wolnych ludzi"
-                : memberLocked || respectLocked
-                  ? "Za malo ludzi albo szacunu"
-                  : "Odpal napad gangu";
-          return (
-            <View key={heist.id} style={[styles.listCard, locked && styles.listCardLocked]}>
-              <View style={styles.listCardHeader}>
-                <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{heist.name}</Text>
-                  <Text style={styles.listCardMeta}>Szacun {heist.respect} | Min. ludzi {heist.minMembers} | Energia {heist.energy}</Text>
+      <SectionCard title="Napady gangu" subtitle="Jedno lobby, jeden sklad, jeden start.">
+        {!game.gang.joined ? (
+          <View style={styles.lockedPanel}>
+            <Text style={styles.lockedPanelText}>Najpierw wejdz do gangu, a potem ustawiaj wspolna robote.</Text>
+          </View>
+        ) : (
+          <>
+            {activeGangHeistLobby ? (
+              <View style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{activeGangHeistDefinition?.name || "Aktywne lobby"}</Text>
+                    <Text style={styles.listCardMeta}>
+                      {activeGangHeistLobby.openedByName || "Ekipa"} zbiera sklad. Min. ludzi {activeGangHeistLobby.requiredMembers} | Energia {activeGangHeistDefinition?.energy || 0}
+                    </Text>
+                  </View>
+                  <Text style={styles.listCardReward}>
+                    {formatMoney(activeGangHeistDefinition?.reward?.[0] || 0)} - {formatMoney(activeGangHeistDefinition?.reward?.[1] || 0)}
+                  </Text>
                 </View>
-                <Text style={styles.listCardReward}>{formatMoney(heist.reward[0])} - {formatMoney(heist.reward[1])}</Text>
-              </View>
-              <View style={styles.oddsRow}>
-                <View style={styles.oddsBlock}>
-                  <Text style={styles.oddsLabel}>Szansa ekipy</Text>
-                  <Text style={styles.oddsValue}>{Math.round(odds.chance * 100)}%</Text>
+                {activeGangHeistLobby.note ? (
+                  <Text style={styles.listCardMeta}>Komunikat: {activeGangHeistLobby.note}</Text>
+                ) : null}
+                <View style={styles.oddsRow}>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Szansa skladu</Text>
+                    <Text style={styles.oddsValue}>{Math.round(Number(activeGangHeistLobby.summary?.chance || activeGangHeistLobby.chance || 0) * 100)}%</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Sklad</Text>
+                    <Text style={styles.oddsValue}>
+                      {activeGangHeistParticipants.length}/{activeGangHeistLobby.requiredMembers}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.oddsBlock}>
-                  <Text style={styles.oddsLabel}>Sklad</Text>
-                  <Text style={styles.oddsValue}>{game.gang.members}/{heist.minMembers}</Text>
+                <ProgressBar progress={Number(activeGangHeistLobby.summary?.chance || activeGangHeistLobby.chance || 0)} />
+                <Text style={styles.listCardMeta}>
+                  Moc ekipy: {Math.round(Number(activeGangHeistLobby.summary?.totalPower || activeGangHeistLobby.squadPower || 0))} | Rekomendowany prog: {activeGangHeistLobby.summary?.recommendedRespect || activeGangHeistDefinition?.recommendedRespect || activeGangHeistDefinition?.respect || 0} RES
+                </Text>
+                <View style={styles.listCard}>
+                  <Text style={styles.listCardTitle}>Kto siedzi w skladzie</Text>
+                  {activeGangHeistParticipants.map((participant) => (
+                    <Text key={`gang-lobby-${participant.id}`} style={styles.listCardMeta}>
+                      {participant.name} | {participant.role} | {participant.respect || 0} RES
+                    </Text>
+                  ))}
+                </View>
+                <View style={styles.listActionsRow}>
+                  <Pressable
+                    onPress={() => activeGangHeistDefinition && joinGangHeistLobby(activeGangHeistDefinition)}
+                    disabled={
+                      !activeGangHeistDefinition ||
+                      isInActiveGangHeistLobby ||
+                      activeGangHeistParticipants.length >= Number(activeGangHeistLobby.requiredMembers || 1) ||
+                      inJail(game.player)
+                    }
+                    style={[
+                      styles.inlineButton,
+                      (isInActiveGangHeistLobby ||
+                        activeGangHeistParticipants.length >= Number(activeGangHeistLobby.requiredMembers || 1) ||
+                        inJail(game.player)) && styles.tileDisabled,
+                    ]}
+                  >
+                    <Text style={styles.inlineButtonText}>Dolacz</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => activeGangHeistDefinition && leaveGangHeistLobby(activeGangHeistDefinition)}
+                    disabled={!activeGangHeistDefinition || !isInActiveGangHeistLobby}
+                    style={[styles.inlineButton, !isInActiveGangHeistLobby && styles.tileDisabled]}
+                  >
+                    <Text style={styles.inlineButtonText}>Opusc</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => activeGangHeistDefinition && startGangHeistLobby(activeGangHeistDefinition)}
+                    disabled={
+                      !activeGangHeistDefinition ||
+                      !canRunGangHeistRole(game.gang.role) ||
+                      activeGangHeistParticipants.length < Number(activeGangHeistLobby.requiredMembers || 1) ||
+                      crewLockdownRemaining > 0
+                    }
+                    style={[
+                      styles.inlineButton,
+                      (!canRunGangHeistRole(game.gang.role) ||
+                        activeGangHeistParticipants.length < Number(activeGangHeistLobby.requiredMembers || 1) ||
+                        crewLockdownRemaining > 0) && styles.tileDisabled,
+                    ]}
+                  >
+                    <Text style={styles.inlineButtonText}>Start</Text>
+                  </Pressable>
+                </View>
+                {crewLockdownRemaining > 0 ? (
+                  <Text style={styles.listCardMeta}>Ekipa jeszcze zbiera sie po ostatniej wtapie: {formatDuration(crewLockdownRemaining)}.</Text>
+                ) : null}
+              </View>
+            ) : (
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Otworz lobby</Text>
+                <Text style={styles.listCardMeta}>Boss, Vice albo Zaufany wystawia robote i zostawia krotki sygnal dla ekipy.</Text>
+                <View style={styles.inlineRow}>
+                  <TextInput
+                    value={gangHeistNoteDraft}
+                    onChangeText={setGangHeistNoteDraft}
+                    placeholder="Np. minimum 25 ATK i pelna energia"
+                    placeholderTextColor="#6c6c6c"
+                    style={styles.chatInput}
+                  />
                 </View>
               </View>
-              <ProgressBar progress={odds.chance} />
-              <View style={styles.inlineRow}>
-                <Text style={styles.costLabel}>Wplywy: {game.gang.influence} | Teren: {game.gang.territory}</Text>
-                <Pressable onPress={() => executeGangHeist(heist)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
-                  <Text style={styles.inlineButtonText}>{ctaLabel}</Text>
-                </Pressable>
+            )}
+
+            {game.gang.lastHeistReport ? (
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Ostatni raport</Text>
+                <Text style={styles.listCardMeta}>
+                  {game.gang.lastHeistReport.success ? "Robota siadla." : "Robota spalona."} {game.gang.lastHeistReport.heistName}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  Ekipa: {(game.gang.lastHeistReport.participants || []).length} | Skarbiec: {formatMoney(game.gang.lastHeistReport.vaultCut || 0)} | Cela: {(game.gang.lastHeistReport.jailedParticipantIds || []).length}
+                </Text>
+                {(game.gang.lastHeistReport.participants || []).map((participant) => (
+                  <Text key={`gang-heist-report-${participant.userId || participant.name}`} style={styles.listCardMeta}>
+                    {participant.name}: {participant.jailed ? "cela" : formatMoney(participant.cash || 0)} {participant.xp ? `| +${participant.xp} XP` : ""} {participant.hpLoss ? `| HP -${participant.hpLoss}` : ""}
+                  </Text>
+                ))}
               </View>
-            </View>
-          );
-        })}
+            ) : null}
+
+            {GANG_HEISTS.map((heist) => {
+              const roleLocked = !canRunGangHeistRole(game.gang.role);
+              const memberLocked = game.gang.members < heist.minMembers;
+              const crewLocked = game.gang.members - game.gang.jailedCrew < heist.minMembers;
+              const lockdownLocked = crewLockdownRemaining > 0;
+              const activeElsewhere = Boolean(activeGangHeistLobby && activeGangHeistLobby.heistId !== heist.id);
+              const isActive = activeGangHeistLobby?.heistId === heist.id;
+              const locked = roleLocked || memberLocked || crewLocked || lockdownLocked || activeElsewhere;
+              const ctaLabel = isActive
+                ? "Lobby otwarte"
+                : roleLocked
+                  ? "Za niska ranga"
+                  : lockdownLocked
+                    ? "Ekipa lezy po wtapie"
+                    : memberLocked
+                      ? "Za malo ludzi"
+                      : crewLocked
+                        ? "Za malo wolnego skladu"
+                        : activeElsewhere
+                          ? "Juz jest inna robota"
+                          : "Otworz lobby";
+              return (
+                <View key={heist.id} style={[styles.listCard, activeElsewhere && styles.listCardLocked]}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{heist.name}</Text>
+                      <Text style={styles.listCardMeta}>
+                        Min. ludzi {heist.minMembers} | Energia {heist.energy} | Rekomendowany prog {heist.recommendedRespect || heist.respect} RES
+                      </Text>
+                    </View>
+                    <Text style={styles.listCardReward}>{formatMoney(heist.reward[0])} - {formatMoney(heist.reward[1])}</Text>
+                  </View>
+                  <Text style={styles.listCardMeta}>
+                    Dzielnica {findDistrictById(game.city, heist.districtId)?.name || heist.districtId} | Ryzyko {Math.round(Number(heist.risk || 0) * 100)}%
+                  </Text>
+                  <View style={styles.inlineRow}>
+                    <Text style={styles.costLabel}>Ludzie {game.gang.members}/{heist.minMembers} | Wolni {Math.max(0, game.gang.members - game.gang.jailedCrew)}</Text>
+                    <Pressable onPress={() => openGangHeistLobby(heist)} disabled={locked} style={[styles.inlineButton, locked && styles.tileDisabled]}>
+                      <Text style={styles.inlineButtonText}>{ctaLabel}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </>
+        )}
       </SectionCard>
     </>
   );
@@ -6584,12 +7516,13 @@ function AppRuntime() {
                 <StatLine label="Boss" value={selectedGangProfile.boss} />
                 <StatLine label="Vice Boss" value={selectedGangProfile.viceBoss} />
                 <StatLine label="Zaufani" value={`${selectedGangProfile.trusted}`} />
-                <StatLine label="Ludzie" value={`${selectedGangProfile.members}`} />
+                <StatLine label="Ludzie" value={`${selectedGangProfile.members}/${selectedGangProfile.maxMembers || selectedGangProfile.members || 8}`} />
                 <StatLine label="Teren" value={`${selectedGangProfile.territory}`} />
                 <StatLine label="Wplywy" value={`${selectedGangProfile.influence}`} />
                 <StatLine label="Skarbiec" value={formatMoney(selectedGangProfile.vault)} />
                 <StatLine label="Wejscie od" value={`${selectedGangProfile.inviteRespectMin} RES`} />
                 <StatLine label="Szacun ekipy" value={`${selectedGangProfile.respect}`} />
+                <StatLine label="Chroni klub" value={selectedGangProfile.protectedClub?.name || "-"} />
               </View>
             </View>
             <Text style={styles.listCardMeta}>{selectedGangProfile.description}</Text>
@@ -6783,6 +7716,8 @@ function AppRuntime() {
             <StatLine label="Wejscie od" value={`${game.gang.inviteRespectMin} RES`} />
             <StatLine label="Bonus do napadow gangu" value={`+${Math.round(getGangHeistBonusRate(game.gang) * 100)}% hajsu`} />
             <StatLine label="Ludzie w celi" value={game.gang.jailedCrew ? `${game.gang.jailedCrew} (${formatDuration(crewLockdownRemaining)})` : "0"} />
+            <StatLine label="Aktywna robota" value={activeGangHeistDefinition?.name || "Brak lobby"} />
+            <StatLine label="Chroniony klub" value={game.gang.protectedClub?.name || "Brak protektoratu"} />
             {game.gang.role === "Boss" ? (
               <View style={styles.listActionsRow}>
                 <Pressable onPress={deleteGang} style={[styles.inlineButton, styles.inlineButtonDanger]}>
@@ -6867,9 +7802,28 @@ function AppRuntime() {
         </View>
       ) : (
         <>
-          <StatLine label="Aktualna liczba ludzi" value={`${game.gang.members}`} />
-          <StatLine label="Do pelnego skladu" value={`${game.gang.maxMembers - game.gang.members}`} />
+          <StatLine label="Aktualna liczba ludzi" value={`${game.gang.members}/${game.gang.maxMembers}`} />
+          <StatLine label="Do pelnego skladu" value={`${Math.max(0, game.gang.maxMembers - game.gang.members)}`} />
           <StatLine label="Wplyw na napady" value={`+${Math.round(game.gang.members * 0.9)} mocy gangu`} />
+          <SectionCard title="Rozbudowa skladu" subtitle="Boss odblokowuje kolejne sloty ze skarbca gangu.">
+            <Text style={styles.listCardMeta}>
+              Start: 8 ludzi. Kolejne progi: 12 / 16 / 20 / 25.
+            </Text>
+            <Text style={styles.listCardMeta}>
+              Teraz: {game.gang.members}/{game.gang.maxMembers}. {nextGangMemberCapUpgrade ? `Nastepny skok: ${nextGangMemberCapUpgrade.maxMembers} za ${formatMoney(nextGangMemberCapUpgrade.cost)}.` : "Gang ma juz wbity maksymalny limit."}
+            </Text>
+            {game.gang.role === "Boss" ? (
+              <Pressable
+                onPress={upgradeGangMembers}
+                disabled={!nextGangMemberCapUpgrade}
+                style={[styles.inlineButton, !nextGangMemberCapUpgrade && styles.tileDisabled]}
+              >
+                <Text style={styles.inlineButtonText}>
+                  {nextGangMemberCapUpgrade ? `Rozbuduj gang do ${nextGangMemberCapUpgrade.maxMembers}` : "Max skladu"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </SectionCard>
           <SectionCard title="Sklad i role" subtitle="Boss i vice boss zarzadzaja, a napady gangu odpalaja tylko boss, vice boss i zaufani. To nie sa kupieni ludzie, tylko realni gracze.">
             {game.gang.membersList.map((member) => (
               <View key={member.id} style={styles.listCard}>
@@ -6892,7 +7846,7 @@ function AppRuntime() {
                     <Text style={styles.listCardTitle}>{candidate.name}</Text>
                     <Text style={styles.listCardMeta}>Szacun: {candidate.respect} | Status: {candidate.online ? "Online" : "Offline"}</Text>
                   </View>
-                  <Pressable onPress={() => inviteCandidate(candidate.id)} style={[styles.inlineButton, (game.gang.role !== "Boss" || candidate.respect < game.gang.inviteRespectMin) && styles.tileDisabled]}>
+                  <Pressable onPress={() => inviteCandidate(candidate.id)} style={[styles.inlineButton, (game.gang.role !== "Boss" || candidate.respect < game.gang.inviteRespectMin || game.gang.members >= game.gang.maxMembers) && styles.tileDisabled]}>
                     <Text style={styles.inlineButtonText}>Zapros</Text>
                   </Pressable>
                 </View>
@@ -6944,6 +7898,62 @@ function AppRuntime() {
             value={`${gangGoalProgress.goal?.title || "Brak"} ${gangGoalProgress.current}/${gangGoalProgress.target}`}
           />
           <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>Tablica roboty</Text>
+            <Text style={styles.listCardMeta}>Krotka lista wspolnych celow, bez zasmiecania zakladki gangu.</Text>
+            {gangJobBoardProgress.map((job) => (
+              <View key={`gang-job-${job.id}`} style={styles.listCard}>
+                <Text style={styles.listCardTitle}>{job.title}</Text>
+                <Text style={styles.listCardMeta}>{job.summary}</Text>
+                <Text style={styles.listCardMeta}>
+                  Postep {job.current}/{job.target}{job.rewarded ? " | odebrane" : ""}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  Nagroda: {formatMoney(job.rewards?.vaultCash || 0)} do skarbca, +{job.rewards?.focusInfluence || 0} influence{job.rewards?.pressureRelief ? `, pressure -${job.rewards.pressureRelief}` : ""}.
+                </Text>
+              </View>
+            ))}
+          </View>
+          {game.gang.protectedClub ? (
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Chroniony klub</Text>
+              <Text style={styles.listCardMeta}>
+                {game.gang.protectedClub.name} | {protectedGangDistrict?.name || game.gang.protectedClub.districtId}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                Threat {game.gang.protectedClub.threat} | Stabilnosc {game.gang.protectedClub.stability} | Influence +{Math.round(Number(game.gang.protectedClub.influenceBonus || 0) * 100)}%
+              </Text>
+              <Text style={styles.listCardMeta}>
+                Jeden gang = jeden protektor. Ten lokal dostaje lepsza ochrone, a projekty gangu wzmacniaja jego spokoj.
+              </Text>
+            </View>
+          ) : null}
+          {pendingGangRescue ? (
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Pomoc po wtapie</Text>
+              <Text style={styles.listCardMeta}>
+                Po {pendingGangRescue.heistName} siedza: {pendingGangRescueMembers.map((entry) => entry.name).join(", ") || "ludzie z ekipy"}.
+              </Text>
+              <Text style={styles.listCardMeta}>
+                Placisz ze skarbca i ryzykujesz dodatkowy przypal, ale gang moze wyciagnac swoich albo skrocic im odsiadke.
+              </Text>
+              {GANG_HEIST_RESCUE_OPTIONS.map((option) => (
+                <View key={`gang-rescue-${option.id}`} style={styles.listCard}>
+                  <Text style={styles.listCardTitle}>{option.name}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {option.summary} Koszt od {formatMoney(option.baseCost)} | Szansa {Math.round(Number(option.chance || 0) * 100)}%.
+                  </Text>
+                  <Pressable
+                    onPress={() => rescueGangCrew(option.id)}
+                    disabled={!canRunGangHeistRole(game.gang.role)}
+                    style={[styles.inlineButton, !canRunGangHeistRole(game.gang.role) && styles.tileDisabled]}
+                  >
+                    <Text style={styles.inlineButtonText}>Odpal {option.name.toLowerCase()}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.listCard}>
             <Text style={styles.listCardTitle}>Co robi fokus</Text>
             {focusDistrictEffectLines.map((line) => (
               <Text key={`gang-focus-${line}`} style={styles.listCardMeta}>
@@ -6964,7 +7974,8 @@ function AppRuntime() {
                 <Pressable
                   key={`focus-${district.id}`}
                   onPress={() => setGangFocus(district.id)}
-                  style={[styles.inlineButton, game.gang.focusDistrictId === district.id && styles.tileDisabled]}
+                  disabled={game.gang.focusDistrictId === district.id || !["Boss", "Vice Boss"].includes(String(game.gang.role || "").trim())}
+                  style={[styles.inlineButton, (game.gang.focusDistrictId === district.id || !["Boss", "Vice Boss"].includes(String(game.gang.role || "").trim())) && styles.tileDisabled]}
                 >
                   <Text style={styles.inlineButtonText}>{district.shortName}</Text>
                 </Pressable>
@@ -6987,7 +7998,11 @@ function AppRuntime() {
                       <Text style={styles.listCardMeta}>Poziom {level}/{project.levels.length}</Text>
                       <Text style={styles.listCardMeta}>{getGangProjectLevelLine(project, level)}</Text>
                     </View>
-                    <Pressable onPress={() => investGangProject(project.id)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
+                    <Pressable
+                      onPress={() => investGangProject(project.id)}
+                      disabled={locked || String(game.gang.role || "").trim() !== "Boss"}
+                      style={[styles.inlineButton, (locked || String(game.gang.role || "").trim() !== "Boss") && styles.tileDisabled]}
+                    >
                       <Text style={styles.inlineButtonText}>{locked ? "Max" : formatMoney(cost)}</Text>
                     </Pressable>
                   </View>
@@ -7082,7 +8097,7 @@ function AppRuntime() {
                   onPress={() => inviteCandidate(selectedWorldPlayer.id)}
                   style={[
                     styles.inlineButton,
-                    selectedWorldPlayer.respect < game.gang.inviteRespectMin && styles.tileDisabled,
+                    (selectedWorldPlayer.respect < game.gang.inviteRespectMin || game.gang.members >= game.gang.maxMembers) && styles.tileDisabled,
                   ]}
                 >
                   <Text style={styles.inlineButtonText}>Zapros do gangu</Text>
@@ -7419,11 +8434,25 @@ function AppRuntime() {
     productVisuals: PRODUCT_VISUALS,
     drugVisuals: DRUG_VISUALS,
     systemVisuals: SYSTEM_VISUALS,
+    contractItems: CONTRACT_ITEMS,
+    contractCars: CONTRACT_CARS,
+    contractState,
+    contractCategoryVisuals: CONTRACT_CATEGORY_VISUALS,
+    getContractAssetEffectLine,
     marketState: game.marketState,
     marketMeta: game.marketMeta,
     dealerTradeDraft,
     setDealerTradeDraft,
-    actions: { buyProduct, sellProduct, buyDrugFromDealer, sellDrugToDealer, consumeDrug },
+    actions: {
+      buyProduct,
+      sellProduct,
+      buyDrugFromDealer,
+      sellDrugToDealer,
+      consumeDrug,
+      buyContractItem,
+      buyContractCar,
+      equipContractAsset,
+    },
   };
 
   const cityScreenProps = {
@@ -7460,7 +8489,6 @@ function AppRuntime() {
     hottestDistrictSummary,
     escortFindChance,
     gangTributeRemaining,
-    clubNightRemaining,
     bankAmountDraft,
     setBankAmountDraft,
     restaurantItems: RESTAURANT_ITEMS,
@@ -7480,7 +8508,6 @@ function AppRuntime() {
       },
       fightClubRound,
       collectGangTribute,
-      runClubNight,
       setGangFocus,
       collectBusinessIncome,
       collectEscortIncome,
@@ -7581,7 +8608,6 @@ function AppRuntime() {
     currentClubProfile,
     clubPolice,
     insideOwnClub,
-    clubNightRemaining,
     focusDistrictSummary,
     districtSummaries,
     helpers: {
@@ -7615,9 +8641,9 @@ function AppRuntime() {
       openClub,
       foundClub,
       setClubNightPlan,
+      setClubEntryFee,
+      collectClubSafe,
       fortifyClub,
-      promoteClub,
-      runClubNight,
       runClubVisitorAction,
       buyDrugFromDealer,
       sellDrugToDealer,
@@ -7645,6 +8671,11 @@ function AppRuntime() {
     heists: heistCatalog,
     getSoloHeistOdds,
     sceneBackgrounds: SCENE_BACKGROUNDS,
+    contractState,
+    contractItems: ownedContractItems,
+    contractCars: ownedContractCars,
+    getContractAssetEffectLine,
+    onEquipContractLoadout: equipContractAsset,
   };
 
   const profileMenuScreenProps = {
@@ -7661,6 +8692,7 @@ function AppRuntime() {
   };
 
   const heistsScreenProps = {
+    section: activeSectionId,
     heists: heistCatalog,
     game,
     effectivePlayer,
@@ -7671,12 +8703,19 @@ function AppRuntime() {
     Tag,
     formatMoney,
     districtSummaries,
+    contractBoard,
+    contractState,
+    contractHistory,
+    contractLoadoutSummaryLines,
+    getContractPreviewForContract,
+    getContractPreviewLinesForContract,
     availableOperations,
     activeOperation,
     activeOperationStage,
     activeOperationChoices,
     getSoloHeistOdds,
     onExecuteHeist: executeHeist,
+    onExecuteContract: executeContract,
     onStartOperation: startOperation,
     onAdvanceOperation: advanceOperation,
     onExecuteOperation: executeOperationPlan,
@@ -7728,7 +8767,9 @@ function AppRuntime() {
       case "profile:casino":
         return <CasinoScreen {...casinoScreenProps} />;
       case "heists:solo":
-        return <HeistsScreen {...heistsScreenProps} />;
+        return <HeistsScreen {...heistsScreenProps} section="solo" />;
+      case "heists:contracts":
+        return <HeistsScreen {...heistsScreenProps} section="contracts" />;
       case "heists:fightclub":
         return (
           <SectionCard title="Fightclub" subtitle="Szybki sparing pod staty i respekt.">
@@ -7751,6 +8792,10 @@ function AppRuntime() {
         return <MarketScreen section="drugs" {...marketScreenBaseProps} />;
       case "market:drugs":
         return <MarketScreen section="drugs" {...marketScreenBaseProps} />;
+      case "market:items":
+        return <MarketScreen section="items" {...marketScreenBaseProps} />;
+      case "market:cars":
+        return <MarketScreen section="cars" {...marketScreenBaseProps} />;
       case "market:boosts":
         return <MarketScreen section="boosts" {...marketScreenBaseProps} />;
       case "gang:overview":
@@ -7777,6 +8822,8 @@ function AppRuntime() {
         return <ProfileScreen section="summary" {...profileScreenBaseProps} />;
       case "profile:progress":
         return <ProfileScreen section="progress" {...profileScreenBaseProps} />;
+      case "profile:loadout":
+        return <ProfileScreen section="loadout" {...profileScreenBaseProps} />;
       case "profile:protection":
         return <ProfileScreen section="protection" {...profileScreenBaseProps} />;
       case "profile:utilities":
@@ -8382,6 +9429,7 @@ const styles = StyleSheet.create({
   taskMeta: { gap: 6, alignItems: "flex-end" },
   flexOne: { flex: 1 },
 });
+
 
 
 

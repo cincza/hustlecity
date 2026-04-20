@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getDealerPayoutForDrug } from "../../shared/socialGameplay.js";
 
@@ -18,13 +18,17 @@ export function MarketScreen({
   productVisuals,
   drugVisuals,
   systemVisuals,
+  contractItems,
+  contractCars,
+  contractState,
+  contractCategoryVisuals,
+  getContractAssetEffectLine,
   marketState,
   marketMeta,
   dealerTradeDraft,
   setDealerTradeDraft,
   actions,
 }) {
-  // TODO: TO_MIGRATE_TO_SERVER market drug flow still executes local fallback actions from App.js.
   const safeGame = {
     player: { respect: 0, ...(game?.player || {}) },
     inventory: game?.inventory || {},
@@ -32,9 +36,25 @@ export function MarketScreen({
     drugInventory: game?.drugInventory || {},
     dealerInventory: game?.dealerInventory || {},
     activeBoosts: Array.isArray(game?.activeBoosts) ? game.activeBoosts : [],
+    contracts: game?.contracts || {},
     ...game,
   };
   const safeMarketState = marketState || {};
+  const safeContractState = contractState || { ownedItems: {}, ownedCars: {}, loadout: {} };
+  const safeContractItems = Array.isArray(contractItems) ? contractItems : [];
+  const safeContractCars = Array.isArray(contractCars) ? contractCars : [];
+  const contractCategories = useMemo(
+    () => [...new Set(safeContractItems.map((item) => item.category).filter(Boolean))],
+    [safeContractItems]
+  );
+  const [selectedContractCategory, setSelectedContractCategory] = useState(contractCategories[0] || "weapon");
+
+  useEffect(() => {
+    if (!contractCategories.includes(selectedContractCategory)) {
+      setSelectedContractCategory(contractCategories[0] || "weapon");
+    }
+  }, [contractCategories, selectedContractCategory]);
+
   const parsedDealerTradeQuantity = Number.parseInt(String(dealerTradeDraft || "").replace(/[^\d]/g, ""), 10);
   const dealerTradeQuantity = Math.max(1, Number.isFinite(parsedDealerTradeQuantity) ? parsedDealerTradeQuantity : 1);
 
@@ -52,6 +72,129 @@ export function MarketScreen({
     if (snapshot.fallbackStock > 0) return "Tylko fallback NPC";
     return "Pusto";
   };
+
+  if (section === "items") {
+    const filteredItems = safeContractItems.filter((item) => item.category === selectedContractCategory);
+    return (
+      <>
+        <SceneArtwork
+          eyebrow="Itemy"
+          title="Sklep kontraktowy"
+          lines={["Bron, ochrona, narzedzia i elektronika pod grubsze roboty."]}
+          accent={["#3b2717", "#14100c", "#050505"]}
+          source={sceneBackgrounds.market}
+        />
+        <SectionCard title="Kategorie" subtitle="Najpierw wybierasz slot, potem sprzet pod konkretne tagi kontraktu.">
+          <View style={styles.marketButtons}>
+            {contractCategories.map((categoryId) => (
+              <Pressable
+                key={categoryId}
+                onPress={() => setSelectedContractCategory(categoryId)}
+                style={[styles.marketButton, selectedContractCategory === categoryId && styles.inlineButton]}
+              >
+                <Text style={styles.marketButtonText}>{categoryId === "weapon" ? "Bron" : categoryId === "armor" ? "Ochrona" : categoryId === "tool" ? "Narzedzia" : "Elektronika"}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </SectionCard>
+        <SectionCard title="Oferta" subtitle="Kazdy item robi glownie pod Kontrakty. Nie daje tanich globalnych buffow.">
+          {!filteredItems.length ? <Text style={styles.emptyText}>Brak itemow w tej kategorii.</Text> : null}
+          {filteredItems.map((item) => {
+            const owned = Boolean(safeContractState?.ownedItems?.[item.id]);
+            const equipped = safeContractState?.loadout?.[item.category] === item.id;
+            const locked = safeGame.player.respect < item.respect;
+            return (
+              <View key={item.id} style={[styles.listCard, locked && styles.listCardLocked]}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={contractCategoryVisuals[item.category]} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{item.name}</Text>
+                      <Text style={styles.listCardMeta}>
+                        {item.summary}
+                      </Text>
+                    </View>
+                  </View>
+                  <Tag text={owned ? (equipped ? "ZALOZONE" : "MASZ") : `RES ${item.respect}`} warning={!owned} />
+                </View>
+                <Text style={styles.listCardMeta}>{getContractAssetEffectLine(item)}</Text>
+                <View style={styles.inlineRow}>
+                  <Text style={styles.costLabel}>
+                    Cena {formatMoney(item.price)} | Tagi {Object.keys(item.tags || {}).join(" | ")}
+                  </Text>
+                </View>
+                <View style={styles.marketButtons}>
+                  <Pressable
+                    onPress={() => actions.buyContractItem(item)}
+                    style={[styles.marketButton, (owned || locked || safeGame.player.cash < item.price) && styles.tileDisabled]}
+                  >
+                    <Text style={styles.marketButtonText}>{owned ? "Kupione" : `Kup za ${formatMoney(item.price)}`}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => actions.equipContractAsset(item.category, equipped ? null : item.id)}
+                    style={[styles.marketButton, !owned && styles.tileDisabled]}
+                  >
+                    <Text style={styles.marketButtonText}>{equipped ? "Zdejmij" : "Zaloz"}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </SectionCard>
+      </>
+    );
+  }
+
+  if (section === "cars") {
+    return (
+      <>
+        <SceneArtwork
+          eyebrow="Auta"
+          title="Garaz kontraktowy"
+          lines={["Rozne fury pasuja do roznych robot: escape, cargo albo ciche zejscie z miasta."]}
+          accent={["#2d2438", "#100f16", "#050505"]}
+          source={sceneBackgrounds.city}
+        />
+        <SectionCard title="Oferta aut" subtitle="Auto robi glownie pod kontrakt. Nie jest globalnym buffem do calej gry.">
+          {safeContractCars.map((car) => {
+            const owned = Boolean(safeContractState?.ownedCars?.[car.id]);
+            const equipped = safeContractState?.loadout?.car === car.id;
+            const locked = safeGame.player.respect < car.respect;
+            return (
+              <View key={car.id} style={[styles.listCard, locked && styles.listCardLocked]}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={contractCategoryVisuals.car} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{car.name}</Text>
+                      <Text style={styles.listCardMeta}>{car.summary}</Text>
+                    </View>
+                  </View>
+                  <Tag text={owned ? (equipped ? "W LOADOUCIE" : "GARAZ") : `RES ${car.respect}`} warning={!owned} />
+                </View>
+                <Text style={styles.listCardMeta}>{getContractAssetEffectLine(car)}</Text>
+                <Text style={styles.listCardMeta}>Tagi: {Object.keys(car.tags || {}).join(" | ")}</Text>
+                <View style={styles.marketButtons}>
+                  <Pressable
+                    onPress={() => actions.buyContractCar(car)}
+                    style={[styles.marketButton, (owned || locked || safeGame.player.cash < car.price) && styles.tileDisabled]}
+                  >
+                    <Text style={styles.marketButtonText}>{owned ? "Kupione" : `Kup za ${formatMoney(car.price)}`}</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => actions.equipContractAsset("car", equipped ? null : car.id)}
+                    style={[styles.marketButton, !owned && styles.tileDisabled]}
+                  >
+                    <Text style={styles.marketButtonText}>{equipped ? "Zdejmij" : "Wybierz"}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </SectionCard>
+      </>
+    );
+  }
 
   if (section === "street") {
     return (
@@ -164,58 +307,58 @@ export function MarketScreen({
                 const tradeSellTotal = dealerPayout * dealerTradeQuantity;
                 return (
                   <>
-              <View style={styles.listCardHeader}>
-                <View style={styles.entityHead}>
-                  <EntityBadge visual={drugVisuals[drug.id]} />
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{drug.name}</Text>
+                    <View style={styles.listCardHeader}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={drugVisuals[drug.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{drug.name}</Text>
+                          <Text style={styles.listCardMeta}>
+                            Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | U dilera: {safeGame.dealerInventory?.[drug.id] || 0} | Ulica: {formatMoney(drug.streetPrice)} | Skup: {formatMoney(dealerPayout)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Tag text={`OD ${Math.round(drug.overdoseRisk * 100)}%`} warning />
+                    </View>
+                    <View style={styles.oddsRow}>
+                      <View style={styles.oddsBlock}>
+                        <Text style={styles.oddsLabel}>Stock dilera</Text>
+                        <Text style={styles.oddsValue}>{safeGame.dealerInventory?.[drug.id] || 0}</Text>
+                      </View>
+                      <View style={styles.oddsBlock}>
+                        <Text style={styles.oddsLabel}>Respekt od</Text>
+                        <Text style={styles.oddsValue}>{drug.unlockRespect}</Text>
+                      </View>
+                    </View>
                     <Text style={styles.listCardMeta}>
-                      Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | U dilera: {safeGame.dealerInventory?.[drug.id] || 0} | Ulica: {formatMoney(drug.streetPrice)} | Skup: {formatMoney(dealerPayout)}
+                      Daje: {Object.entries(drug.effect).map(([key, value]) => `${key} +${value}`).join(" | ")} | Efekt trwa ok. {Math.round(drug.durationSeconds / 60)} min
                     </Text>
-                  </View>
-                </View>
-                <Tag text={`OD ${Math.round(drug.overdoseRisk * 100)}%`} warning />
-              </View>
-              <View style={styles.oddsRow}>
-                <View style={styles.oddsBlock}>
-                  <Text style={styles.oddsLabel}>Stock dilera</Text>
-                  <Text style={styles.oddsValue}>{safeGame.dealerInventory?.[drug.id] || 0}</Text>
-                </View>
-                <View style={styles.oddsBlock}>
-                  <Text style={styles.oddsLabel}>Respekt od</Text>
-                  <Text style={styles.oddsValue}>{drug.unlockRespect}</Text>
-                </View>
-              </View>
-              <Text style={styles.listCardMeta}>
-                Daje: {Object.entries(drug.effect).map(([key, value]) => `${key} +${value}`).join(" | ")} | Efekt trwa ok. {Math.round(drug.durationSeconds / 60)} min
-              </Text>
-              <Text style={styles.listCardMeta}>
-                Przy x{dealerTradeQuantity}: kupno {formatMoney(tradeBuyTotal)} | skup {formatMoney(tradeSellTotal)}
-              </Text>
-              <View style={styles.marketButtons}>
-                <Pressable
-                  onPress={() => actions.buyDrugFromDealer(drug, dealerTradeDraft)}
-                  style={[
-                    styles.marketButton,
-                    (
-                      safeGame.player.respect < drug.unlockRespect ||
-                      Number(safeGame.dealerInventory?.[drug.id] || 0) < dealerTradeQuantity ||
-                      Number(safeGame.player.cash || 0) < Number(drug.streetPrice || 0) * dealerTradeQuantity
-                    ) && styles.tileDisabled,
-                  ]}
-                >
-                  <Text style={styles.marketButtonText}>Kup za {formatMoney(tradeBuyTotal)}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => actions.sellDrugToDealer(drug, dealerTradeDraft)}
-                  style={[styles.marketButton, Number(safeGame.drugInventory[drug.id] || 0) < dealerTradeQuantity && styles.tileDisabled]}
-                >
-                  <Text style={styles.marketButtonText}>Sprzedaj za {formatMoney(tradeSellTotal)}</Text>
-                </Pressable>
-                <Pressable onPress={() => actions.consumeDrug(drug)} style={[styles.marketButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
-                  <Text style={styles.marketButtonText}>Zarzuc</Text>
-                </Pressable>
-              </View>
+                    <Text style={styles.listCardMeta}>
+                      Przy x{dealerTradeQuantity}: kupno {formatMoney(tradeBuyTotal)} | skup {formatMoney(tradeSellTotal)}
+                    </Text>
+                    <View style={styles.marketButtons}>
+                      <Pressable
+                        onPress={() => actions.buyDrugFromDealer(drug, dealerTradeDraft)}
+                        style={[
+                          styles.marketButton,
+                          (
+                            safeGame.player.respect < drug.unlockRespect ||
+                            Number(safeGame.dealerInventory?.[drug.id] || 0) < dealerTradeQuantity ||
+                            Number(safeGame.player.cash || 0) < Number(drug.streetPrice || 0) * dealerTradeQuantity
+                          ) && styles.tileDisabled,
+                        ]}
+                      >
+                        <Text style={styles.marketButtonText}>Kup za {formatMoney(tradeBuyTotal)}</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => actions.sellDrugToDealer(drug, dealerTradeDraft)}
+                        style={[styles.marketButton, Number(safeGame.drugInventory[drug.id] || 0) < dealerTradeQuantity && styles.tileDisabled]}
+                      >
+                        <Text style={styles.marketButtonText}>Sprzedaj za {formatMoney(tradeSellTotal)}</Text>
+                      </Pressable>
+                      <Pressable onPress={() => actions.consumeDrug(drug)} style={[styles.marketButton, (safeGame.drugInventory[drug.id] || 0) <= 0 && styles.tileDisabled]}>
+                        <Text style={styles.marketButtonText}>Zarzuc</Text>
+                      </Pressable>
+                    </View>
                   </>
                 );
               })()}

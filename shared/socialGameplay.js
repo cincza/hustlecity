@@ -260,6 +260,10 @@ export const CLUB_SYSTEM_RULES = {
   trafficTickMinutes: 10,
   actionCooldownMs: 3 * 60 * 1000,
   consumeCooldownMs: 90 * 1000,
+  accessWindowMs: 45 * 60 * 1000,
+  networkBoostWindowMs: 20 * 60 * 1000,
+  reportIntervalMs: 20 * 60 * 1000,
+  reportBackfillMaxCycles: 3,
   leadRequired: 100,
   visitDiminishingFloor: 0.16,
   ownerSelfTrafficFactor: 0.32,
@@ -269,6 +273,7 @@ export const CLUB_SYSTEM_RULES = {
   pressureDecayPerHour: 3.5,
   nightlyTrafficSoftCap: 18,
   nightlyTrafficHardCap: 34,
+  maxEntryFee: 240,
 };
 
 export const CLUB_NIGHT_PLANS = [
@@ -310,22 +315,22 @@ export const CLUB_NIGHT_PLANS = [
 export const CLUB_VISITOR_ACTIONS = [
   {
     id: "scout",
-    name: "Scout",
-    summary: "Szybki rekonesans sali.",
+    name: "Wejdz w obieg",
+    summary: "Wchodzisz w rytm lokalu i podbijasz kolejny kontakt.",
     costCash: 0,
     baseTraffic: 1.05,
   },
   {
     id: "hunt",
-    name: "Hunt Contacts",
-    summary: "Pchasz kontakt do przodu.",
+    name: "Szukaj kontaktu",
+    summary: "Placisz za wejscie glebiej i pchasz lead meter.",
     costCash: CLUB_ESCORT_SEARCH_COST,
     baseTraffic: 1.35,
   },
   {
     id: "laylow",
-    name: "Lay Low",
-    summary: "Schodzisz z oczu i lapiesz oddech.",
+    name: "Przyczaj sie",
+    summary: "Schodzisz z radarow i wracasz do pionu.",
     costCash: 0,
     baseTraffic: 0.72,
   },
@@ -373,6 +378,10 @@ export function createClubGuestVenueState() {
     tipDayKey: null,
     tipValueToday: 0,
     tipCountToday: 0,
+    accessUntil: 0,
+    lastAccessPaidAt: 0,
+    lastEntryFeePaid: 0,
+    networkUntil: 0,
   };
 }
 
@@ -392,6 +401,9 @@ export function createClubGuestState() {
 }
 
 export function createClubState(overrides = {}) {
+  const defaultEntryFee = clampClubEntryFee(
+    overrides?.entryFee ?? getDefaultClubEntryFee(overrides?.respect || 0)
+  );
   return {
     owned: false,
     name: "Velvet Static",
@@ -406,14 +418,21 @@ export function createClubState(overrides = {}) {
     traffic: 0,
     lastTrafficAt: 0,
     nightPlanId: getClubNightPlan().id,
+    entryFee: defaultEntryFee,
+    safeCash: 0,
+    lastSettlementAt: 0,
     recentIncident: null,
     lastNightSummary: null,
+    lastReportSummary: null,
     note: null,
     lastRunAt: 0,
     securityLevel: 0,
     defenseReadiness: 44,
     threatLevel: 0,
     lastFortifiedAt: 0,
+    pendingGuestCount: 0,
+    pendingEntryRevenue: 0,
+    pendingGuestConsumeCount: 0,
     stash: createDrugCounterMap(),
     guestState: createClubGuestState(),
     ...overrides,
@@ -436,6 +455,10 @@ export function normalizeClubGuestState(value) {
         tipDayKey: typeof entry.tipDayKey === "string" && entry.tipDayKey.trim() ? entry.tipDayKey.trim() : null,
         tipValueToday: Math.max(0, Math.floor(Number(entry.tipValueToday || 0))),
         tipCountToday: Math.max(0, Math.floor(Number(entry.tipCountToday || 0))),
+        accessUntil: Math.max(0, Math.floor(Number(entry.accessUntil || 0))),
+        lastAccessPaidAt: Math.max(0, Math.floor(Number(entry.lastAccessPaidAt || 0))),
+        lastEntryFeePaid: Math.max(0, Math.floor(Number(entry.lastEntryFeePaid || 0))),
+        networkUntil: Math.max(0, Math.floor(Number(entry.networkUntil || 0))),
       };
     });
   }
@@ -480,6 +503,9 @@ export function normalizeClubState(value) {
     traffic: Math.max(0, Number(value.traffic || 0)),
     lastTrafficAt: Math.max(0, Math.floor(Number(value.lastTrafficAt || 0))),
     nightPlanId: getClubNightPlan(value.nightPlanId).id,
+    entryFee: clampClubEntryFee(value.entryFee ?? base.entryFee),
+    safeCash: Math.max(0, Math.floor(Number(value.safeCash || 0))),
+    lastSettlementAt: Math.max(0, Math.floor(Number(value.lastSettlementAt || 0))),
     recentIncident:
       value.recentIncident && typeof value.recentIncident === "object" && !Array.isArray(value.recentIncident)
         ? JSON.parse(JSON.stringify(value.recentIncident))
@@ -488,12 +514,19 @@ export function normalizeClubState(value) {
       value.lastNightSummary && typeof value.lastNightSummary === "object" && !Array.isArray(value.lastNightSummary)
         ? JSON.parse(JSON.stringify(value.lastNightSummary))
         : null,
+    lastReportSummary:
+      value.lastReportSummary && typeof value.lastReportSummary === "object" && !Array.isArray(value.lastReportSummary)
+        ? JSON.parse(JSON.stringify(value.lastReportSummary))
+        : null,
     note: value.note ?? null,
     lastRunAt: Math.max(0, Math.floor(Number(value.lastRunAt || 0))),
     securityLevel: Math.max(0, Math.floor(Number(value.securityLevel || 0))),
     defenseReadiness: Math.max(0, Math.floor(Number(value.defenseReadiness || 44))),
     threatLevel: Math.max(0, Math.floor(Number(value.threatLevel || 0))),
     lastFortifiedAt: Math.max(0, Math.floor(Number(value.lastFortifiedAt || 0))),
+    pendingGuestCount: Math.max(0, Math.floor(Number(value.pendingGuestCount || 0))),
+    pendingEntryRevenue: Math.max(0, Math.floor(Number(value.pendingEntryRevenue || 0))),
+    pendingGuestConsumeCount: Math.max(0, Math.floor(Number(value.pendingGuestConsumeCount || 0))),
     stash: normalizeDrugInventory(value.stash),
     guestState: normalizeClubGuestState(value.guestState),
   };
@@ -521,6 +554,26 @@ export function normalizeDealerInventory(value) {
     base[drug.id] = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : base[drug.id];
   }
   return base;
+}
+
+export function getClubGuestVenueState(guestState, venueId) {
+  const safeGuestState =
+    guestState && typeof guestState === "object" && !Array.isArray(guestState)
+      ? guestState
+      : createClubGuestState();
+  const safeVenueId = String(venueId || "").trim();
+  const entry =
+    safeVenueId && safeGuestState.affinity && safeGuestState.affinity[safeVenueId]
+      ? safeGuestState.affinity[safeVenueId]
+      : null;
+  return {
+    ...createClubGuestVenueState(),
+    ...(entry && typeof entry === "object" ? entry : {}),
+  };
+}
+
+export function hasClubGuestAccess(guestState, venueId, now = Date.now()) {
+  return Number(getClubGuestVenueState(guestState, venueId).accessUntil || 0) > now;
 }
 
 export function findDrugById(drugId) {
@@ -562,6 +615,13 @@ export function getClubPressureLabel(pressure = 0) {
   return "Spokojnie";
 }
 
+export function getClubThreatLabel(threat = 0) {
+  if (threat >= 70) return "Wysokie";
+  if (threat >= 42) return "Napiete";
+  if (threat >= 18) return "Podbita uwaga";
+  return "Nisko";
+}
+
 export function getClubTrafficLabel(traffic = 0) {
   if (traffic >= 22) return "Pelny ruch";
   if (traffic >= 12) return "Dobry ruch";
@@ -569,19 +629,62 @@ export function getClubTrafficLabel(traffic = 0) {
   return "Cicho";
 }
 
+export function getDefaultClubEntryFee(respect = 0) {
+  return clampSocialValue(40 + Number(respect || 0) * 2, 60, 140);
+}
+
+export function clampClubEntryFee(value) {
+  return Math.floor(clampSocialValue(value, 0, CLUB_SYSTEM_RULES.maxEntryFee));
+}
+
+export function getClubEntryProfile(entryFee = 0) {
+  const fee = clampClubEntryFee(entryFee);
+  let trafficMultiplier = 1.03;
+  let contactMultiplier = 1.02;
+
+  if (fee >= 200) {
+    trafficMultiplier = 0.76;
+    contactMultiplier = 0.84;
+  } else if (fee >= 140) {
+    trafficMultiplier = 0.89;
+    contactMultiplier = 0.92;
+  } else if (fee >= 80) {
+    trafficMultiplier = 0.98;
+    contactMultiplier = 0.98;
+  }
+
+  return {
+    fee,
+    accessWindowMs: CLUB_SYSTEM_RULES.accessWindowMs,
+    trafficMultiplier,
+    contactMultiplier,
+    label: fee > 0 ? `${fee}$ wejscia` : "Lista otwarta",
+  };
+}
+
+export function getClubStashSupport(stash = {}) {
+  const totalUnits = DRUGS.reduce((sum, drug) => sum + Number(stash?.[drug.id] || 0), 0);
+  const activeKinds = DRUGS.reduce((sum, drug) => sum + (Number(stash?.[drug.id] || 0) > 0 ? 1 : 0), 0);
+  return Number(clampSocialValue(totalUnits * 0.065 + activeKinds * 0.07, 0, 1.18).toFixed(3));
+}
+
 export function getClubVenueProfile(venue, { planId } = {}) {
   if (!venue) {
     const plan = getClubNightPlan(planId);
+    const entryProfile = getClubEntryProfile(0);
     return {
       plan,
       prestige: 0,
       scoutTipValue: 0,
+      networkBoostValue: 0,
       huntProgressValue: 0,
       layLowHeat: 0,
       layLowHp: 0,
       trafficScale: 0,
       pressureScale: 0,
       nightIncomeFactor: 0.22 + plan.nightIncomeBonus,
+      stashSupport: 0,
+      entryProfile,
       label: "Poza lokalem",
     };
   }
@@ -591,18 +694,29 @@ export function getClubVenueProfile(venue, { planId } = {}) {
   const respect = Number(venue.respect || 0);
   const policeBase = Number(venue.policeBase || 0);
   const plan = getClubNightPlan(planId || venue.nightPlanId);
-  const prestige = popularity * 0.56 + mood * 0.38 + respect * 0.24 - policeBase * 1.35;
+  const entryProfile = getClubEntryProfile(Number(venue.entryFee || 0));
+  const stashSupport = getClubStashSupport(venue.stash || {});
+  const prestige =
+    popularity * 0.56 +
+    mood * 0.38 +
+    respect * 0.24 -
+    policeBase * 1.35 +
+    stashSupport * 12 -
+    Math.max(0, entryProfile.fee - 120) * 0.06;
 
-  const scoutTipValue = Math.floor(
+  const scoutTipValue = 0;
+  const networkBoostValue = Math.floor(
     clampSocialValue(
-      (68 + popularity * 1.8 + mood * 1.2 - policeBase * 2.6) * plan.scoutTipMultiplier,
-      68,
-      220
+      (14 + popularity * 0.08 + mood * 0.06 + stashSupport * 8) * plan.scoutTipMultiplier,
+      12,
+      30
     )
   );
   const huntProgressValue = Math.floor(
     clampSocialValue(
-      (18 + popularity * 0.18 + mood * 0.12 + respect * 0.08 - policeBase * 0.16) * plan.huntMultiplier,
+      (18 + popularity * 0.18 + mood * 0.12 + respect * 0.08 - policeBase * 0.16 + stashSupport * 5) *
+        plan.huntMultiplier *
+        entryProfile.contactMultiplier,
       18,
       42
     )
@@ -623,8 +737,10 @@ export function getClubVenueProfile(venue, { planId } = {}) {
   );
   const trafficScale = Number(
     clampSocialValue(
-      (1 + popularity / 90 + mood / 120 - policeBase / 80) * plan.trafficMultiplier,
-      0.72,
+      (1 + popularity / 90 + mood / 120 - policeBase / 80 + stashSupport * 0.18) *
+        plan.trafficMultiplier *
+        entryProfile.trafficMultiplier,
+      0.58,
       1.92
     ).toFixed(3)
   );
@@ -636,12 +752,16 @@ export function getClubVenueProfile(venue, { planId } = {}) {
     ).toFixed(3)
   );
   const nightIncomeFactor = Number(
-    clampSocialValue(0.22 + popularity / 300 + mood / 420 + plan.nightIncomeBonus, 0.2, 0.52).toFixed(3)
+    clampSocialValue(
+      0.18 + popularity / 320 + mood / 460 + stashSupport * 0.03 + plan.nightIncomeBonus,
+      0.16,
+      0.46
+    ).toFixed(3)
   );
 
   const label =
     prestige >= 78
-      ? "Topowy lokal. Wpada ruch, tipy i grubsze nazwiska."
+      ? "Topowy lokal. Wpada ruch, nazwiska i konkretne kontakty."
       : prestige >= 52
         ? "Mocny klub z konkretnym obrotem i dobrym zapleczem."
         : "Lokal pracuje, ale dalej trzeba go pompowac ruchem.";
@@ -650,13 +770,16 @@ export function getClubVenueProfile(venue, { planId } = {}) {
     plan,
     prestige: Number(prestige.toFixed(2)),
     scoutTipValue,
+    networkBoostValue,
     huntProgressValue,
     layLowHeat,
     layLowHp,
     trafficScale,
     pressureScale,
     nightIncomeFactor,
-    label,
+    stashSupport,
+    entryProfile,
+    label: `${label} ${entryProfile.label}.`,
   };
 }
 

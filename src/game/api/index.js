@@ -32,6 +32,10 @@ export async function fetchHeistsOnline(token) {
   return request("/heists", { token });
 }
 
+export async function fetchContractsOnline(token) {
+  return request("/contracts", { token });
+}
+
 export async function executeHeistOnline(token, heistId) {
   return request(`/heists/${heistId}/execute`, {
     method: "POST",
@@ -39,10 +43,72 @@ export async function executeHeistOnline(token, heistId) {
   });
 }
 
-export async function executeGangHeistOnline(token, heistId) {
-  return request(`/gang/heists/${encodeURIComponent(heistId)}/execute`, {
+export async function openGangHeistLobbyOnline(token, heistId, note = "") {
+  return request(`/gang/heists/${encodeURIComponent(heistId)}/open`, {
     method: "POST",
     token,
+    body: { note },
+  });
+}
+
+export async function joinGangHeistLobbyOnline(token, heistId) {
+  return request(`/gang/heists/${encodeURIComponent(heistId)}/join`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function leaveGangHeistLobbyOnline(token, heistId) {
+  return request(`/gang/heists/${encodeURIComponent(heistId)}/leave`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function startGangHeistLobbyOnline(token, heistId) {
+  return request(`/gang/heists/${encodeURIComponent(heistId)}/start`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function buyContractItemOnline(token, itemId) {
+  return request("/contracts/items/buy", {
+    method: "POST",
+    token,
+    body: { itemId },
+  });
+}
+
+export async function buyContractCarOnline(token, carId) {
+  return request("/contracts/cars/buy", {
+    method: "POST",
+    token,
+    body: { carId },
+  });
+}
+
+export async function equipContractLoadoutOnline(token, slotId, assetId = null) {
+  return request("/contracts/loadout/equip", {
+    method: "POST",
+    token,
+    body: { slotId, assetId },
+  });
+}
+
+export async function executeContractOnline(token, contractId) {
+  return request("/contracts/execute", {
+    method: "POST",
+    token,
+    body: { contractId },
+  });
+}
+
+export async function rescueGangHeistCrewOnline(token, optionId) {
+  return request("/gang/heists/rescue", {
+    method: "POST",
+    token,
+    body: { optionId },
   });
 }
 
@@ -467,8 +533,23 @@ export async function setClubPlanOnline(token, planId) {
   });
 }
 
+export async function setClubSettingsOnline(token, settings = {}) {
+  return request("/clubs/settings", {
+    method: "POST",
+    token,
+    body: settings,
+  });
+}
+
 export async function runClubNightOnline(token) {
   return request("/clubs/night", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function collectClubSafeOnline(token) {
+  return request("/clubs/safe/collect", {
     method: "POST",
     token,
   });
@@ -589,6 +670,13 @@ export async function investGangProjectOnline(token, projectId) {
 
 export async function claimGangGoalOnline(token) {
   return request("/gang/goals/claim", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function upgradeGangMembersOnline(token) {
+  return request("/gang/members/upgrade", {
     method: "POST",
     token,
   });
