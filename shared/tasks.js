@@ -87,3 +87,7 @@ export function getTaskStates(snapshot, { mode = "offline_demo", now = Date.now(
     };
   });
 }
+
+export function getActiveTaskStates(snapshot, options = {}) {
+  return getTaskStates(snapshot, options).filter((task) => !task.claimed);
+}

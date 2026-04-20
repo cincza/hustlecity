@@ -54,6 +54,9 @@ export function CityScreen({
   gymPasses,
   gymExercises,
   taskStates,
+  criticalCareStatus,
+  criticalCareModes,
+  criticalCareBlockedActions,
   helpers,
   actions,
 }) {
@@ -63,6 +66,12 @@ export function CityScreen({
   const escortCash = Number(game.collections?.escortCash || 0);
   const gangEffects = getGangProjectEffects(game.gang);
   const escortCollectableCash = Math.floor(escortCash);
+  const criticalCareActive = Boolean(criticalCareStatus?.active);
+  const criticalCareProtected = Boolean(criticalCareStatus?.protected);
+  const activeCriticalCareMode = criticalCareStatus?.mode || criticalCareModes?.public || null;
+  const publicCriticalCareMode = criticalCareModes?.public || null;
+  const privateCriticalCareMode = criticalCareModes?.private || null;
+  const canAffordPrivateClinic = Number(game.player.cash || 0) >= Number(privateCriticalCareMode?.cost || 0);
   const businessCollectionSubtitle =
     businessCash > 0
       ? businessCollectableCash > 0
@@ -182,6 +191,34 @@ export function CityScreen({
           accent={["#352215", "#120d09", "#050505"]}
           source={sceneBackgrounds.city}
         />
+        {criticalCareActive || criticalCareProtected ? (
+          <SectionCard
+            title={criticalCareActive ? "Stan krytyczny" : "Oslona po terapii"}
+            subtitle={
+              criticalCareActive
+                ? `${activeCriticalCareMode?.label || "Intensywna terapia"} po ${criticalCareStatus?.source || "ostrej akcji"}.`
+                : "Wlasnie wyszedles z terapii i przez chwile masz spokoj od dobijania."
+            }
+          >
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>
+                {criticalCareActive
+                  ? `Zostalo ${formatCooldown(criticalCareStatus?.remainingMs || 0)}`
+                  : `Oslona jeszcze ${formatCooldown(criticalCareStatus?.protectionRemainingMs || 0)}`}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {criticalCareActive
+                  ? `Wrocisz z okolo ${criticalCareStatus?.expectedRecoveryHp || 1}/${game.player.maxHp} HP.`
+                  : "Ataki PvP na Ciebie sa teraz zablokowane."}
+              </Text>
+              {criticalCareActive ? (
+                <Text style={styles.listCardMeta}>
+                  Zablokowane: {(criticalCareBlockedActions || []).join(", ")}.
+                </Text>
+              ) : null}
+            </View>
+          </SectionCard>
+        ) : null}
         <SectionCard title="Tablica glowna" subtitle="Najwazniejsze rzeczy od razu.">
           <View style={styles.grid}>
             {quickStartCards.map((card) => (
@@ -302,6 +339,7 @@ export function CityScreen({
   if (section === "tasks") {
     return (
       <SectionCard title="Zadania" subtitle="Misje i szybkie nagrody.">
+        {!taskStates.length ? <Text style={styles.emptyText}>Aktywna lista jest czysta. Odebrane nagrody nie wisza juz na ekranie.</Text> : null}
         {taskStates.map((task) => (
           <View key={task.id} style={styles.listCard}>
             <View style={styles.listCardHeader}>
@@ -315,14 +353,13 @@ export function CityScreen({
                   text={task.onlineDisabled ? "Online wkrotce" : task.completed ? "Gotowe" : "W toku"}
                   warning={task.onlineDisabled || !task.completed}
                 />
-                {task.claimed ? <Tag text="Odebrane" /> : null}
               </View>
             </View>
             <View style={styles.inlineRow}>
               <Text style={styles.costLabel}>{formatMoney(task.rewardCash)} i +{task.rewardXp} XP</Text>
-              <Pressable onPress={() => actions.claimTask(task)} style={[styles.inlineButton, (task.onlineDisabled || !task.completed || task.claimed) && styles.tileDisabled]}>
+              <Pressable onPress={() => actions.claimTask(task)} style={[styles.inlineButton, (task.onlineDisabled || !task.completed) && styles.tileDisabled]}>
                 <Text style={styles.inlineButtonText}>
-                  {task.claimed ? "Odebrane" : task.onlineDisabled ? "Czeka" : "Odbierz"}
+                  {task.onlineDisabled ? "Czeka" : "Odbierz"}
                 </Text>
               </Pressable>
             </View>
@@ -409,7 +446,7 @@ export function CityScreen({
             const maxSeries = Math.max(1, affordableSeries || 1);
             const selectedSeries = clampGymSeries(gymBatchByExercise[exercise.id] || 1, maxSeries);
             const totalEnergyCost = selectedSeries * exercise.costEnergy;
-            const canTrainNow = helpers.hasGymPass(game.player) && affordableSeries > 0;
+            const canTrainNow = helpers.hasGymPass(game.player) && affordableSeries > 0 && !criticalCareActive;
 
             return (
               <View key={exercise.id} style={styles.listCard}>
@@ -419,7 +456,7 @@ export function CityScreen({
                     <Text style={styles.listCardMeta}>{exercise.note} | 1 seria kosztuje {exercise.costEnergy} energii</Text>
                   </View>
                   <Text style={styles.costLabel}>
-                    {canTrainNow ? `Do ${affordableSeries} serii` : "Brak energii"}
+                    {canTrainNow ? `Do ${affordableSeries} serii` : criticalCareActive ? "Stan krytyczny" : "Brak energii"}
                   </Text>
                 </View>
 
@@ -459,8 +496,10 @@ export function CityScreen({
                 <View style={styles.inlineRow}>
                   <Text style={styles.gymBatchMeta}>
                     {canTrainNow
-                      ? `${selectedSeries} ${selectedSeries === 1 ? "seria" : selectedSeries < 5 ? "serie" : "serii"} · energia ${totalEnergyCost}`
-                      : "Najpierw doladuj energie albo kup karnet."}
+                      ? `${selectedSeries} ${selectedSeries === 1 ? "seria" : selectedSeries < 5 ? "serie" : "serii"} | energia ${totalEnergyCost}`
+                      : criticalCareActive
+                        ? "Na intensywnej terapii nie trenujesz. Wroc po wyjsciu ze szpitala."
+                        : "Najpierw doladuj energie albo kup karnet."}
                   </Text>
                   <Pressable
                     onPress={() => actions.handleTrain(exercise, selectedSeries)}
@@ -498,14 +537,100 @@ export function CityScreen({
   }
 
   return (
-    <SectionCard title="Szpital" subtitle="Jak wtopisz akcje albo przedawkujesz, tu wracasz do pionu.">
+    <SectionCard
+      title="Szpital"
+      subtitle={
+        criticalCareActive
+          ? "Tu wybierasz jak wychodzisz ze stanu krytycznego."
+          : "Jak wtopisz akcje albo przedawkujesz, tu wracasz do pionu."
+      }
+    >
       <StatLine label="Obecne zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} visual={systemVisuals.defense} />
       <StatLine label="Regeneracja" value={`+${healthRegenAmount} HP / ${Math.round(healthRegenSeconds / 60)} min`} visual={systemVisuals.defense} />
       <StatLine label="Heat" value={`${game.player.heat}%`} visual={systemVisuals.heat} />
-      <View style={styles.grid}>
-        <ActionTile title="Lekarz zaplecza" subtitle="Koszt $220, +30 HP i lekki zjazd heat." visual={systemVisuals.defense} onPress={actions.handleHeal} />
-        <ActionTile title="Kaucja" subtitle={helpers.inJail(game.player) ? `Wyjdz za ${formatMoney(400 + Math.ceil(jailRemaining / 1000) * 8)}` : "Niedostepne poza odsiadka."} visual={systemVisuals.bank} onPress={actions.bribeOutOfJail} disabled={!helpers.inJail(game.player)} />
-      </View>
+      {criticalCareActive ? (
+        <>
+          <View style={styles.listCard}>
+            <Text style={styles.listCardTitle}>
+              {activeCriticalCareMode?.label || "Intensywna terapia"} | {formatCooldown(criticalCareStatus?.remainingMs || 0)}
+            </Text>
+            <Text style={styles.listCardMeta}>
+              Zlapalo Cie po {criticalCareStatus?.source || "ciezkiej akcji"}. Ryzykowne akcje sa chwilowo wyciete, ale bank, rynek, gang i chat dalej dzialaja.
+            </Text>
+            <Text style={styles.listCardMeta}>
+              Po wyjsciu dostajesz krotka oslone od dobijania w PvP.
+            </Text>
+          </View>
+
+          {publicCriticalCareMode ? (
+            <View style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>{publicCriticalCareMode.label}</Text>
+                  <Text style={styles.listCardMeta}>
+                    Okolo {formatCooldown(publicCriticalCareMode.durationMs)} | koszt {formatMoney(publicCriticalCareMode.cost || 0)}
+                  </Text>
+                </View>
+                <Tag text={activeCriticalCareMode?.id === publicCriticalCareMode.id ? "Aktywna" : "Opcja"} warning={activeCriticalCareMode?.id !== publicCriticalCareMode.id} />
+              </View>
+              <Text style={styles.listCardMeta}>
+                Wracasz z okolo {Math.round(Number(publicCriticalCareMode.returnHpRatio || 0) * 100)}% HP. Kara glownie czasem, nie kasa.
+              </Text>
+            </View>
+          ) : null}
+
+          {privateCriticalCareMode ? (
+            <View style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>{privateCriticalCareMode.label}</Text>
+                  <Text style={styles.listCardMeta}>
+                    Okolo {formatCooldown(privateCriticalCareMode.durationMs)} | koszt {formatMoney(privateCriticalCareMode.cost || 0)}
+                  </Text>
+                </View>
+                <Tag text={activeCriticalCareMode?.id === privateCriticalCareMode.id ? "Aktywna" : "Szybka"} warning={activeCriticalCareMode?.id !== privateCriticalCareMode.id} />
+              </View>
+              <Text style={styles.listCardMeta}>
+                Wracasz z okolo {Math.round(Number(privateCriticalCareMode.returnHpRatio || 0) * 100)}% HP i zbijasz lekko heat.
+              </Text>
+              <View style={styles.inlineRow}>
+                <Text style={styles.costLabel}>Po wyjsciu dalej dostajesz oslone po terapii.</Text>
+                <Pressable
+                  onPress={actions.moveToPrivateClinic}
+                  style={[
+                    styles.inlineButton,
+                    (activeCriticalCareMode?.id === privateCriticalCareMode.id || !canAffordPrivateClinic) && styles.tileDisabled,
+                  ]}
+                  disabled={activeCriticalCareMode?.id === privateCriticalCareMode.id || !canAffordPrivateClinic}
+                >
+                  <Text style={styles.inlineButtonText}>
+                    {activeCriticalCareMode?.id === privateCriticalCareMode.id ? "Aktywna" : !canAffordPrivateClinic ? "Brak kasy" : "Przepisz"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          <Text style={styles.listCardMeta}>
+            Zablokowane: {(criticalCareBlockedActions || []).join(", ")}.
+          </Text>
+        </>
+      ) : (
+        <>
+          {criticalCareProtected ? (
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Oslona po terapii</Text>
+              <Text style={styles.listCardMeta}>
+                Jeszcze przez {formatCooldown(criticalCareStatus?.protectionRemainingMs || 0)} nie mozna Cie od razu dobic w PvP.
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.grid}>
+            <ActionTile title="Lekarz zaplecza" subtitle="Koszt $220, +30 HP i lekki zjazd heat." visual={systemVisuals.defense} onPress={actions.handleHeal} />
+            <ActionTile title="Kaucja" subtitle={helpers.inJail(game.player) ? `Wyjdz za ${formatMoney(400 + Math.ceil(jailRemaining / 1000) * 8)}` : "Niedostepne poza odsiadka."} visual={systemVisuals.bank} onPress={actions.bribeOutOfJail} disabled={!helpers.inJail(game.player)} />
+          </View>
+        </>
+      )}
     </SectionCard>
   );
 }

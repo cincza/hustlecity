@@ -609,3 +609,7 @@ export function getGangJobBoardProgress(gangState, now = Date.now()) {
     };
   });
 }
+
+export function getActiveGangJobBoardProgress(gangState, now = Date.now()) {
+  return getGangJobBoardProgress(gangState, now).filter((job) => !job.rewarded);
+}

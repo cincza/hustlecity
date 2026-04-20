@@ -21,6 +21,10 @@ import {
   recordGangJobProgress,
 } from "../../../shared/gangProjects.js";
 import { applyGangHeistDistrictOutcome } from "./districtService.js";
+import {
+  applyCriticalCareDamage,
+  assertPlayerNotInCriticalCare,
+} from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -178,6 +182,7 @@ export function openGangHeistLobbyForGang(gangEntries, actorUserId, heistId, not
   }
   const actor = getActorEntry(gangEntries, actorUserId, now);
   ensureGangHeistStats(actor.player);
+  assertPlayerNotInCriticalCare(actor.player, "Napady gangu", now);
 
   if (!actor.player?.gang?.joined) {
     fail("Najpierw musisz byc w gangu.");
@@ -230,6 +235,7 @@ export function openGangHeistLobbyForGang(gangEntries, actorUserId, heistId, not
 
 export function joinGangHeistLobbyForGang(gangEntries, actorUserId, now = Date.now()) {
   const actor = getActorEntry(gangEntries, actorUserId, now);
+  assertPlayerNotInCriticalCare(actor.player, "Napady gangu", now);
   const lobby = actor.player.gang.activeHeistLobby;
   if (!lobby || lobby.status !== "open") {
     fail("Nie ma teraz otwartego lobby napadu.");
@@ -361,6 +367,7 @@ export function upgradeGangCapacityForGang(gangEntries, actorUserId, now = Date.
 
 export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()) {
   const actor = getActorEntry(gangEntries, actorUserId, now);
+  assertPlayerNotInCriticalCare(actor.player, "Napady gangu", now);
   const lobby = actor.player.gang.activeHeistLobby;
   if (!lobby || lobby.status !== "open") {
     fail("Nie ma teraz aktywnego lobby napadu.");
@@ -383,6 +390,7 @@ export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()
 
   participantEntries.forEach((entry) => {
     ensureGangHeistStats(entry.player);
+    assertPlayerNotInCriticalCare(entry.player, "Napady gangu", now);
     if (Number(entry.player?.profile?.jailUntil || 0) > now) {
       fail(`${entry.player.profile?.name || "Gracz"} siedzi i nie wejdzie do skladu.`);
     }
@@ -445,13 +453,15 @@ export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()
     const hpLoss = randomBetween(8, 16);
     const heatGain = Math.max(4, Math.ceil(Number(heist.risk || 0) * 20));
     const jailed = Math.random() < jailChance;
-    player.profile.hp = clamp(
-      Number(player.profile.hp || 0) - hpLoss,
-      1,
-      Number(player.profile.maxHp || 100)
-    );
+    const damageState = applyCriticalCareDamage(player, hpLoss, {
+      now,
+      source: `wtopie na napadzie gangu ${heist.name}`,
+      allowCriticalCare: true,
+      minimumHp: 1,
+    });
     player.profile.heat = clamp(Number(player.profile.heat || 0) + heatGain, 0, 100);
-    if (jailed) {
+    const finalJailed = jailed && !damageState.criticalCareTriggered;
+    if (finalJailed) {
       player.profile.jailUntil = Math.max(Number(player.profile.jailUntil || 0), now + jailSentenceMs);
       jailedParticipantIds.push(entry.userId);
     }
@@ -461,13 +471,16 @@ export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()
       name: player.profile?.name || entry.username || "Gracz",
       cash: 0,
       xp: 0,
-      jailed,
+      criticalCareTriggered: damageState.criticalCareTriggered,
+      jailed: finalJailed,
       heat: heatGain,
       hpLoss,
     });
     pushLog(
       player,
-      jailed
+      damageState.criticalCareTriggered
+        ? `Wtopa na robocie: ${heist.name}. Trafiasz na intensywna terapie.`
+        : finalJailed
         ? `Wtopa na robocie: ${heist.name}. Lecisz do celi i tracisz ${hpLoss} HP.`
         : `Wtopa na robocie: ${heist.name}. Wracasz z ${hpLoss} HP straty i wiekszym heatem.`
     );

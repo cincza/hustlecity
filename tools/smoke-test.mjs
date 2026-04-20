@@ -144,6 +144,83 @@ async function forceUsersIntoJail(dataDir, logins, durationMs = 15 * 60 * 1000) 
   await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
 }
 
+async function forceUsersIntoCriticalCare(dataDir, logins, { durationMs = 15 * 60 * 1000, modeId = "public", source = "smoke-tescie" } = {}) {
+  const usersDbPath = path.join(dataDir, "users.db");
+  const safeLogins = new Set(
+    (Array.isArray(logins) ? logins : [logins])
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!safeLogins.size) {
+    throw new Error("Brak loginow do ustawienia critical care w smoke tescie.");
+  }
+
+  const now = Date.now();
+  const content = await readFile(usersDbPath, "utf8");
+  const nextLines = content
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const doc = JSON.parse(line);
+      const usernameLower = String(doc?.usernameLower || "").trim().toLowerCase();
+      if (!safeLogins.has(usernameLower)) {
+        return line;
+      }
+
+      doc.playerData = doc.playerData || {};
+      doc.playerData.profile = doc.playerData.profile || {};
+      doc.playerData.timers = doc.playerData.timers || {};
+      doc.playerData.profile.hp = 1;
+      doc.playerData.profile.jailUntil = null;
+      doc.playerData.profile.criticalCareUntil = now + durationMs;
+      doc.playerData.profile.criticalCareSource = source;
+      doc.playerData.profile.criticalCareMode = modeId;
+      doc.playerData.profile.criticalProtectionUntil = null;
+      doc.playerData.timers.hpUpdatedAt = now;
+      return JSON.stringify(doc);
+    });
+
+  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+}
+
+async function releaseUsersFromCriticalCare(dataDir, logins, modeId = "private") {
+  const usersDbPath = path.join(dataDir, "users.db");
+  const safeLogins = new Set(
+    (Array.isArray(logins) ? logins : [logins])
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!safeLogins.size) {
+    throw new Error("Brak loginow do zwolnienia z critical care w smoke tescie.");
+  }
+
+  const now = Date.now();
+  const content = await readFile(usersDbPath, "utf8");
+  const nextLines = content
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const doc = JSON.parse(line);
+      const usernameLower = String(doc?.usernameLower || "").trim().toLowerCase();
+      if (!safeLogins.has(usernameLower)) {
+        return line;
+      }
+
+      doc.playerData = doc.playerData || {};
+      doc.playerData.profile = doc.playerData.profile || {};
+      doc.playerData.timers = doc.playerData.timers || {};
+      doc.playerData.profile.criticalCareUntil = now - 1000;
+      doc.playerData.profile.criticalCareSource = "smoke-release";
+      doc.playerData.profile.criticalCareMode = modeId;
+      doc.playerData.profile.criticalProtectionUntil = null;
+      doc.playerData.profile.jailUntil = null;
+      doc.playerData.timers.hpUpdatedAt = now - 1000;
+      return JSON.stringify(doc);
+    });
+
+  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+}
+
 function assertFactoryRecipeProfitability() {
   const factoryNames = Object.fromEntries(FACTORIES.map((factory) => [factory.id, factory.name]));
 
@@ -969,7 +1046,11 @@ async function main() {
         throw new Error("Ratunek po wtopie gangu nie policzyl kosztu.");
       }
     }
-    if (Number(gangHeistResult?.user?.profile?.jailUntil || 0) > Date.now()) {
+    const postGangHeistState = await request("/me", {
+      token,
+    });
+
+    if (Number(postGangHeistState?.user?.profile?.jailUntil || 0) > Date.now()) {
       const bribeAfterGangHeist = await request("/player/jail/bribe", {
         method: "POST",
         token,
@@ -1475,6 +1556,11 @@ async function main() {
       method: "POST",
       body: { login: noEmailLoginOne, password },
     });
+    await delay(AUTH_LOGIN_DELAY_MS);
+    const neutralUserLogin = await request("/auth/login", {
+      method: "POST",
+      body: { login: rivalLogin, password },
+    });
 
     const prisonMessageText = `cela-${unique}`;
     const prisonFeedBefore = await request("/chat/prison", { token: jailedLogin.token });
@@ -1500,7 +1586,7 @@ async function main() {
     await expectRequestFailure(
       "/chat/prison",
       {
-        token: freeUserLogin.token,
+        token: neutralUserLogin.token,
       },
       /osadzeni|cela/i
     );
@@ -1509,7 +1595,7 @@ async function main() {
       "/chat/prison",
       {
         method: "POST",
-        token: freeUserLogin.token,
+        token: neutralUserLogin.token,
         body: { text: "wolny gracz" },
       },
       /osadzeni|cela/i
@@ -1618,6 +1704,61 @@ async function main() {
       throw new Error("Chat wiezienia nie przetrwal restartu backendu.");
     }
 
+    await stopServer(server);
+    await forceUsersIntoCriticalCare(dataDir, login);
+    server = startServer(dataDir);
+    await waitForHealth();
+
+    const criticalCareMe = await request("/me", { token: relogin.token });
+    if (Number(criticalCareMe?.user?.profile?.criticalCareUntil || 0) <= Date.now()) {
+      throw new Error("Smoke nie umial wymusic aktywnej intensywnej terapii.");
+    }
+    if (criticalCareMe?.user?.profile?.criticalCareMode !== "public") {
+      throw new Error("Smoke startuje critical care w zlym trybie.");
+    }
+
+    await expectRequestFailure(
+      "/fightclub/round",
+      {
+        method: "POST",
+        token: relogin.token,
+      },
+      /intensywnej|krytycznym|wraca/i
+    );
+
+    const movedToPrivateClinic = await request("/player/hospital/critical-care/private", {
+      method: "POST",
+      token: relogin.token,
+    });
+    if (movedToPrivateClinic?.user?.profile?.criticalCareMode !== "private") {
+      throw new Error("Prywatna klinika nie przepisala gracza na szybki tryb leczenia.");
+    }
+
+    await stopServer(server);
+    await releaseUsersFromCriticalCare(dataDir, login);
+    server = startServer(dataDir);
+    await waitForHealth();
+
+    const postCareMe = await request("/me", { token: relogin.token });
+    if (Number(postCareMe?.user?.profile?.criticalCareUntil || 0) > Date.now()) {
+      throw new Error("Wyjscie z intensywnej terapii nie zsynchronizowalo sie po terminie.");
+    }
+    if (Number(postCareMe?.user?.profile?.criticalProtectionUntil || 0) <= Date.now()) {
+      throw new Error("Wyjscie z terapii nie ustawilo oslonki po leczeniu.");
+    }
+    if (Number(postCareMe?.user?.profile?.hp || 0) <= 1) {
+      throw new Error("Po wyjsciu z terapii gracz nie wrocil z bezpiecznym HP.");
+    }
+
+    await expectRequestFailure(
+      `/social/players/${relogin.authUser.id}/attack`,
+      {
+        method: "POST",
+        token: neutralUserLogin.token,
+      },
+      /terapii|oslone/i
+    );
+
     const deletedGang = await request("/gang/delete", {
       method: "POST",
       token: relogin.token,
@@ -1668,6 +1809,7 @@ async function main() {
       clubSafe: collectedClubSafe.result.amount,
       operation: executedOperation.result.success ? "ok-success" : "ok-failed",
       prisonChat: "ok",
+      criticalCare: "ok",
       clientStateAuthority: "ok",
       persistenceAfterRestart: "ok",
       socialPlayers: players.players.length,

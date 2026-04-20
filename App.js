@@ -32,6 +32,7 @@ import {
   buyProductOnline,
   buyGymPassOnline,
   buyMealOnline,
+  choosePrivateClinicOnline,
   claimClubOnline,
   claimGangGoalOnline,
   claimTaskOnline,
@@ -198,7 +199,7 @@ import {
   GANG_INVITE_RESPECT_MAX,
   GANG_INVITE_RESPECT_MIN,
   GANG_MEMBER_MANAGEABLE_ROLES,
-  getGangJobBoardProgress,
+  getActiveGangJobBoardProgress,
   getGangMemberCapUpgrade,
   getGangProjectCost,
   getGangProjectEffects,
@@ -208,7 +209,14 @@ import {
   normalizeGangState,
 } from "./shared/gangProjects.js";
 import { normalizeAdminGrantPresets } from "./shared/admin.js";
-import { GYM_EXERCISES, GYM_PASSES, RESTAURANT_ITEMS } from "./shared/playerActions.js";
+import {
+  CRITICAL_CARE_RULES,
+  getCriticalCareMode,
+  getCriticalCareStatus,
+  GYM_EXERCISES,
+  GYM_PASSES,
+  RESTAURANT_ITEMS,
+} from "./shared/playerActions.js";
 import {
   createOperationsState,
   getActiveOperationStage,
@@ -218,7 +226,7 @@ import {
   OPERATION_CATALOG,
   OPERATION_STAGE_ORDER,
 } from "./shared/operations.js";
-import { getTaskStates as getSharedTaskStates } from "./shared/tasks.js";
+import { getActiveTaskStates as getSharedActiveTaskStates } from "./shared/tasks.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
   CLUB_NIGHT_PLANS,
@@ -633,6 +641,10 @@ const INITIAL = {
     gymPassTier: null,
     gymPassUntil: null,
     jailUntil: null,
+    criticalCareUntil: null,
+    criticalCareSource: null,
+    criticalCareMode: null,
+    criticalProtectionUntil: null,
     isAdmin: false,
     adminGrantPresets: [],
     adminRespectPresets: [],
@@ -843,6 +855,8 @@ const normalizeOnlinePlayerEntry = (entry, index = 0) => ({
   dexterity: Number.isFinite(entry?.dexterity) ? entry.dexterity : 0,
   charisma: Number.isFinite(entry?.charisma) ? entry.charisma : 0,
   bounty: Number.isFinite(entry?.bounty) ? entry.bounty : 0,
+  criticalCareUntil: Number.isFinite(entry?.criticalCareUntil) ? entry.criticalCareUntil : null,
+  criticalProtectionUntil: Number.isFinite(entry?.criticalProtectionUntil) ? entry.criticalProtectionUntil : null,
   heists: Number.isFinite(entry?.heists) ? entry.heists : 0,
   casino: Number.isFinite(entry?.casino) ? entry.casino : 0,
 });
@@ -1977,7 +1991,10 @@ function AppRuntime() {
     () => getGangMemberCapUpgrade(game.gang.memberCapLevel),
     [game.gang.memberCapLevel]
   );
-  const gangJobBoardProgress = useMemo(() => getGangJobBoardProgress(game.gang), [game.gang]);
+  const activeGangJobBoardProgress = useMemo(
+    () => getActiveGangJobBoardProgress(game.gang),
+    [game.gang]
+  );
   const protectedGangDistrict = useMemo(
     () => (game.gang.protectedClub?.districtId ? findDistrictById(game.city, game.gang.protectedClub.districtId) : null),
     [game.city, game.gang.protectedClub]
@@ -1993,14 +2010,21 @@ function AppRuntime() {
     [pendingGangRescue]
   );
   const jailRemaining = game.player.jailUntil ? Math.max(0, game.player.jailUntil - Date.now()) : 0;
-  const taskStates = useMemo(
-    () => getSharedTaskStates(game, { mode: gameMode }),
+  const criticalCareStatus = useMemo(() => getCriticalCareStatus(game.player), [game.player]);
+  const publicCriticalCareMode = useMemo(() => getCriticalCareMode(CRITICAL_CARE_RULES.public.id), []);
+  const privateCriticalCareMode = useMemo(() => getCriticalCareMode(CRITICAL_CARE_RULES.private.id), []);
+  const activeTaskStates = useMemo(
+    () => getSharedActiveTaskStates(game, { mode: gameMode }),
     [game, gameMode]
   );
   const topTask =
-    taskStates.find((task) => !task.claimed && !task.onlineDisabled) ||
-    taskStates.find((task) => !task.onlineDisabled) ||
-    taskStates[0];
+    activeTaskStates.find((task) => !task.onlineDisabled) ||
+    activeTaskStates[0] ||
+    null;
+  const visibleGangGoalProgress = useMemo(() => {
+    const progress = getGangWeeklyProgress(game.gang);
+    return progress.claimed ? null : progress;
+  }, [game.gang]);
   const nextHeistTier = getNextHeistTier(game.player.respect);
   const heistCatalog =
     Array.isArray(game.online?.heists) && game.online.heists.length
@@ -2015,6 +2039,14 @@ function AppRuntime() {
         ? game.cooldowns?.playerAttackTargets?.[selectedWorldPlayer.id] || 0
         : 0
     ) - Date.now()
+  );
+  const selectedWorldPlayerCriticalCareRemaining = Math.max(
+    0,
+    Number(selectedWorldPlayer?.criticalCareUntil || 0) - Date.now()
+  );
+  const selectedWorldPlayerProtectionRemaining = Math.max(
+    0,
+    Number(selectedWorldPlayer?.criticalProtectionUntil || 0) - Date.now()
   );
   const crewLockdownRemaining = Math.max(0, (game.gang.crewLockdownUntil || 0) - Date.now());
   const districtSummaries = useMemo(() => getDistrictSummaries(game.city), [game.city]);
@@ -2196,6 +2228,12 @@ function AppRuntime() {
         gymPassTier: hasProfileField("gymPassTier") ? safeProfile.gymPassTier : prev.player.gymPassTier,
         gymPassUntil: hasProfileField("gymPassUntil") ? safeProfile.gymPassUntil : prev.player.gymPassUntil,
         jailUntil: hasProfileField("jailUntil") ? safeProfile.jailUntil : prev.player.jailUntil,
+        criticalCareUntil: hasProfileField("criticalCareUntil") ? safeProfile.criticalCareUntil : prev.player.criticalCareUntil,
+        criticalCareSource: hasProfileField("criticalCareSource") ? safeProfile.criticalCareSource : prev.player.criticalCareSource,
+        criticalCareMode: hasProfileField("criticalCareMode") ? safeProfile.criticalCareMode : prev.player.criticalCareMode,
+        criticalProtectionUntil: hasProfileField("criticalProtectionUntil")
+          ? safeProfile.criticalProtectionUntil
+          : prev.player.criticalProtectionUntil,
         isAdmin: Boolean(serverUser?.admin?.isAdmin),
         adminGrantPresets: Array.isArray(serverUser?.admin?.grantPresets)
           ? normalizeAdminGrantPresets(serverUser.admin.grantPresets)
@@ -2695,13 +2733,14 @@ function AppRuntime() {
         const energyPool = prev.regenRemainder + elapsedSeconds;
         const energyRecovered = Math.floor(energyPool / ENERGY_REGEN_SECONDS);
         const regenRemainder = energyPool % ENERGY_REGEN_SECONDS;
+        const criticalCareStatus = getCriticalCareStatus(prev.player, now);
         const healthPool =
-          prev.player.hp >= prev.player.maxHp
+          criticalCareStatus.active || prev.player.hp >= prev.player.maxHp
             ? 0
             : (prev.hpRegenRemainder || 0) + elapsedSeconds;
         const hpRecovered = Math.floor(healthPool / HEALTH_REGEN_SECONDS) * HEALTH_REGEN_AMOUNT;
         let hpRegenRemainder =
-          prev.player.hp >= prev.player.maxHp
+          criticalCareStatus.active || prev.player.hp >= prev.player.maxHp
             ? 0
             : healthPool % HEALTH_REGEN_SECONDS;
         const passiveMinutes = elapsedSeconds / 60;
@@ -3033,6 +3072,16 @@ function AppRuntime() {
     return true;
   };
 
+  const canDoCriticalAction = (actionLabel = "Ta akcja") => {
+    if (!criticalCareStatus.active) return true;
+    pushLog(
+      `${actionLabel} wraca po wyjsciu z ${criticalCareStatus.mode.label.toLowerCase()}. Zostalo ${formatCooldown(
+        criticalCareStatus.remainingMs
+      )}.`
+    );
+    return false;
+  };
+
   const requireOfflineDemoAuthority = (featureLabel) =>
     !blockIfOnlineAlpha(gameMode, pushLog, featureLabel);
 
@@ -3154,6 +3203,7 @@ function AppRuntime() {
   const doGymExercise = async (exercise, repetitions = 1) => {
     const safeRepetitions = clamp(Math.floor(Number(repetitions) || 1), 1, 20);
     if (!canDoStreetAction("Z celi nie dojdziesz na silownie.")) return;
+    if (!canDoCriticalAction("Silownia")) return;
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await trainAtGymOnline(sessionToken, exercise.id, safeRepetitions);
@@ -3253,8 +3303,24 @@ function AppRuntime() {
     );
   };
 
+  const moveToPrivateClinic = async () => {
+    if (!criticalCareStatus.active) return pushLog("Nie jestes teraz w stanie krytycznym.");
+    if (hasOnlineAuthority) {
+      try {
+        const result = await choosePrivateClinicOnline(sessionToken);
+        mergeServerUser(result.user);
+        pushLog(result?.result?.logMessage || "Prywatna klinika bierze Cie od razu.");
+      } catch (error) {
+        pushLog(error.message);
+      }
+      return;
+    }
+    pushLog("Prywatna klinika w tej wersji dziala tylko online.");
+  };
+
   const fightClubRound = async () => {
     if (!canDoStreetAction("Fightclub nie dziala zza krat.")) return;
+    if (!canDoCriticalAction("Fightclub")) return;
     if (game.player.energy < FIGHT_CLUB_ENERGY_COST) return pushLog("Za malo energii na sparing.");
 
     if (sessionToken && apiStatus === "online") {
@@ -3344,6 +3410,7 @@ function AppRuntime() {
   const executeHeist = async (heist) => {
     if (!heist?.id) return pushLog("Ten napad nie jest teraz gotowy. Odswiez ekran i sprobuj jeszcze raz.");
     if (!canDoStreetAction()) return;
+    if (!canDoCriticalAction("Napady")) return;
     if (game.player.respect < heist.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${heist.respect}.`);
     if (game.player.energy < heist.energy) return pushLog(`Brakuje energii. Potrzebujesz ${heist.energy}.`);
 
@@ -3562,6 +3629,7 @@ function AppRuntime() {
   const executeContract = async (contract) => {
     if (!contract?.id) return pushLog("Ten kontrakt nie jest teraz gotowy.");
     if (!canDoStreetAction()) return;
+    if (!canDoCriticalAction("Kontrakty")) return;
 
     if (hasOnlineAuthority) {
       try {
@@ -3734,6 +3802,7 @@ function AppRuntime() {
 
   const openGangHeistLobby = async (heist) => {
     if (!canDoStreetAction()) return;
+    if (!canDoCriticalAction("Napady gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     if (!canRunGangHeistRole(game.gang.role)) return pushLog("Lobby napadu otwiera Boss, Vice Boss albo Zaufany.");
     if (game.gang.activeHeistLobby?.status === "open") return pushLog("Gang ma juz otwarte jedno lobby napadu.");
@@ -3787,6 +3856,7 @@ function AppRuntime() {
 
   const joinGangHeistLobby = async (heist) => {
     if (!canDoStreetAction()) return;
+    if (!canDoCriticalAction("Napady gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     if (!activeGangHeistLobby) return pushLog("Nie ma teraz otwartego lobby.");
 
@@ -3841,6 +3911,7 @@ function AppRuntime() {
 
   const startGangHeistLobby = async (heist) => {
     if (!canDoStreetAction()) return;
+    if (!canDoCriticalAction("Napady gangu")) return;
     if (!game.gang.joined) return pushLog("Najpierw musisz byc w gangu.");
     if (!activeGangHeistLobby) return pushLog("Najpierw otworz lobby i zbierz sklad.");
     if (!canRunGangHeistRole(game.gang.role)) return pushLog("Start odpala Boss, Vice Boss albo Zaufany.");
@@ -5694,6 +5765,7 @@ function AppRuntime() {
   };
 
   const startOperation = async (operationId) => {
+    if (!canDoCriticalAction("Operacje")) return;
     if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
     try {
       const result = await startOperationOnline(sessionToken, operationId);
@@ -5704,6 +5776,7 @@ function AppRuntime() {
   };
 
   const advanceOperation = async (choiceId) => {
+    if (!canDoCriticalAction("Operacje")) return;
     if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
     try {
       const result = await advanceOperationOnline(sessionToken, choiceId);
@@ -5714,6 +5787,7 @@ function AppRuntime() {
   };
 
   const executeOperationPlan = async () => {
+    if (!canDoCriticalAction("Operacje")) return;
     if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
     try {
       const result = await executeOperationPlanOnline(sessionToken);
@@ -6301,6 +6375,7 @@ function AppRuntime() {
   const attackGangProfile = async (gangProfile) => {
     if (!gangProfile || gangProfile.self) return pushLog("Nie zaatakujesz wlasnego gangu z poziomu tej akcji.");
     if (!canDoStreetAction("Atak na gang odpalasz dopiero po wyjsciu z celi.")) return;
+    if (!canDoCriticalAction("Najazdy gangu")) return;
     if (hasOnlineAuthority) {
       try {
         const result = await executeGangPvpOnline(sessionToken, gangProfile.name);
@@ -6587,6 +6662,13 @@ function AppRuntime() {
 
   const attackWorldPlayer = (player) => {
     if (!player?.id) return pushLog("Nie ma celu do ataku.");
+    if (!canDoCriticalAction("PvP")) return;
+    if (Number(player.criticalCareUntil || 0) > Date.now()) {
+      return pushLog(`${player.name} lezy teraz na intensywnej terapii.`);
+    }
+    if (Number(player.criticalProtectionUntil || 0) > Date.now()) {
+      return pushLog(`${player.name} dopiero wyszedl z terapii i ma jeszcze chwilowa oslone.`);
+    }
     const targetAttackCooldownRemaining = Math.max(0, Number(game.cooldowns?.playerAttackTargets?.[player.id] || 0) - Date.now());
     if (targetAttackCooldownRemaining > 0) {
       return pushLog(`Na tego gracza odpalisz kolejny atak za ${formatCooldown(targetAttackCooldownRemaining)}.`);
@@ -7900,13 +7982,14 @@ function AppRuntime() {
           <View style={styles.listCard}>
             <Text style={styles.listCardTitle}>Tablica roboty</Text>
             <Text style={styles.listCardMeta}>Krotka lista wspolnych celow, bez zasmiecania zakladki gangu.</Text>
-            {gangJobBoardProgress.map((job) => (
+            {!activeGangJobBoardProgress.length ? (
+              <Text style={styles.listCardMeta}>Tablica jest czysta. Wroc po kolejny ruch gangu.</Text>
+            ) : null}
+            {activeGangJobBoardProgress.map((job) => (
               <View key={`gang-job-${job.id}`} style={styles.listCard}>
                 <Text style={styles.listCardTitle}>{job.title}</Text>
                 <Text style={styles.listCardMeta}>{job.summary}</Text>
-                <Text style={styles.listCardMeta}>
-                  Postep {job.current}/{job.target}{job.rewarded ? " | odebrane" : ""}
-                </Text>
+                <Text style={styles.listCardMeta}>Postep {job.current}/{job.target}</Text>
                 <Text style={styles.listCardMeta}>
                   Nagroda: {formatMoney(job.rewards?.vaultCash || 0)} do skarbca, +{job.rewards?.focusInfluence || 0} influence{job.rewards?.pressureRelief ? `, pressure -${job.rewards.pressureRelief}` : ""}.
                 </Text>
@@ -8010,22 +8093,24 @@ function AppRuntime() {
               );
             })}
           </View>
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Nagroda tygodnia</Text>
-            <Text style={styles.listCardMeta}>{gangGoalProgress.goal?.summary}</Text>
-            <Text style={styles.listCardMeta}>
-              Nagroda: {formatMoney(gangGoalProgress.goal?.rewards?.vaultCash || 0)} do skarbca i puls w fokusie.
-            </Text>
-            <Text style={styles.listCardMeta}>
-              Fokus dostaje +{gangGoalProgress.goal?.rewards?.focusInfluence || 0} influence, a pressure schodzi o {gangGoalProgress.goal?.rewards?.pressureRelief || 0}.
-            </Text>
-            <Pressable
-              onPress={claimGangGoal}
-              style={[styles.inlineButton, (!gangGoalProgress.completed || gangGoalProgress.claimed) && styles.tileDisabled]}
-            >
-              <Text style={styles.inlineButtonText}>{gangGoalProgress.claimed ? "Odebrane" : "Odbierz"}</Text>
-            </Pressable>
-          </View>
+          {visibleGangGoalProgress ? (
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Nagroda tygodnia</Text>
+              <Text style={styles.listCardMeta}>{visibleGangGoalProgress.goal?.summary}</Text>
+              <Text style={styles.listCardMeta}>
+                Nagroda: {formatMoney(visibleGangGoalProgress.goal?.rewards?.vaultCash || 0)} do skarbca i puls w fokusie.
+              </Text>
+              <Text style={styles.listCardMeta}>
+                Fokus dostaje +{visibleGangGoalProgress.goal?.rewards?.focusInfluence || 0} influence, a pressure schodzi o {visibleGangGoalProgress.goal?.rewards?.pressureRelief || 0}.
+              </Text>
+              <Pressable
+                onPress={claimGangGoal}
+                style={[styles.inlineButton, !visibleGangGoalProgress.completed && styles.tileDisabled]}
+              >
+                <Text style={styles.inlineButtonText}>Odbierz</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </>
       )}
     </SectionCard>
@@ -8072,7 +8157,14 @@ function AppRuntime() {
                   <Pressable onPress={() => openGangProfile(selectedWorldPlayer.gang)} disabled={selectedWorldPlayer.gang === "No gang"}>
                     <Text style={[styles.playerProfileGang, selectedWorldPlayer.gang === "No gang" && styles.mutedLink]}>{selectedWorldPlayer.gang}</Text>
                   </Pressable>
-                  <Text style={styles.playerProfileStatus}>{selectedWorldPlayer.online ? "Online" : "Offline"} | {getRankTitle(selectedWorldPlayer.respect)}</Text>
+                  <Text style={styles.playerProfileStatus}>
+                    {selectedWorldPlayer.online ? "Online" : "Offline"} | {getRankTitle(selectedWorldPlayer.respect)}
+                    {selectedWorldPlayerCriticalCareRemaining > 0
+                      ? ` | Intensywna ${formatCooldown(selectedWorldPlayerCriticalCareRemaining)}`
+                      : selectedWorldPlayerProtectionRemaining > 0
+                        ? ` | Oslona ${formatCooldown(selectedWorldPlayerProtectionRemaining)}`
+                        : ""}
+                  </Text>
                 </View>
               </LinearGradient>
 
@@ -8108,15 +8200,33 @@ function AppRuntime() {
               </Pressable>
               <Pressable
                 onPress={() => attackWorldPlayer(selectedWorldPlayer)}
-                disabled={!selectedWorldPlayer.online || selectedWorldPlayerAttackCooldownRemaining > 0}
+                disabled={
+                  !selectedWorldPlayer.online ||
+                  selectedWorldPlayerAttackCooldownRemaining > 0 ||
+                  selectedWorldPlayerCriticalCareRemaining > 0 ||
+                  selectedWorldPlayerProtectionRemaining > 0 ||
+                  criticalCareStatus.active
+                }
                 style={[
                   styles.inlineButton,
-                  (!selectedWorldPlayer.online || selectedWorldPlayerAttackCooldownRemaining > 0) && styles.tileDisabled,
+                  (
+                    !selectedWorldPlayer.online ||
+                    selectedWorldPlayerAttackCooldownRemaining > 0 ||
+                    selectedWorldPlayerCriticalCareRemaining > 0 ||
+                    selectedWorldPlayerProtectionRemaining > 0 ||
+                    criticalCareStatus.active
+                  ) && styles.tileDisabled,
                 ]}
               >
                 <Text style={styles.inlineButtonText}>
                   {!selectedWorldPlayer.online
                     ? "Offline"
+                    : criticalCareStatus.active
+                      ? "Intensywna"
+                      : selectedWorldPlayerCriticalCareRemaining > 0
+                        ? "Na terapii"
+                        : selectedWorldPlayerProtectionRemaining > 0
+                          ? `Oslona ${formatCooldown(selectedWorldPlayerProtectionRemaining)}`
                     : selectedWorldPlayerAttackCooldownRemaining > 0
                       ? `Atak za ${formatCooldown(selectedWorldPlayerAttackCooldownRemaining)}`
                       : "Atakuj"}
@@ -8478,6 +8588,12 @@ function AppRuntime() {
     healthRegenSeconds: HEALTH_REGEN_SECONDS,
     healthRegenAmount: HEALTH_REGEN_AMOUNT,
     jailRemaining,
+    criticalCareStatus,
+    criticalCareModes: {
+      public: publicCriticalCareMode,
+      private: privateCriticalCareMode,
+    },
+    criticalCareBlockedActions: CRITICAL_CARE_RULES.blockedActions,
     totalBusinessIncome,
     totalEscortIncome,
     businessCollectionCap,
@@ -8494,7 +8610,7 @@ function AppRuntime() {
     restaurantItems: RESTAURANT_ITEMS,
     gymPasses: GYM_PASSES,
     gymExercises: GYM_EXERCISES,
-    taskStates,
+    taskStates: activeTaskStates,
     helpers: {
       hasGymPass,
       inJail,
@@ -8518,6 +8634,7 @@ function AppRuntime() {
       handleTrain: doGymExercise,
       handleEat: buyMeal,
       handleHeal: heal,
+      moveToPrivateClinic,
       bribeOutOfJail,
     },
   };
@@ -8531,7 +8648,9 @@ function AppRuntime() {
     sceneBackgrounds: SCENE_BACKGROUNDS,
     systemVisuals: SYSTEM_VISUALS,
     formatMoney,
+    formatCooldown,
     topTask,
+    criticalCareStatus,
     totalBusinessIncome,
     totalEscortIncome,
     onlinePlayerCount: game.online.roster.length,
@@ -8667,10 +8786,12 @@ function AppRuntime() {
     setAvatar,
     pickCustomAvatar,
     formatMoney,
+    formatCooldown,
     getRankTitle,
     heists: heistCatalog,
     getSoloHeistOdds,
     sceneBackgrounds: SCENE_BACKGROUNDS,
+    criticalCareStatus,
     contractState,
     contractItems: ownedContractItems,
     contractCars: ownedContractCars,
@@ -8702,7 +8823,9 @@ function AppRuntime() {
     StatLine,
     Tag,
     formatMoney,
+    formatCooldown,
     districtSummaries,
+    criticalCareStatus,
     contractBoard,
     contractState,
     contractHistory,

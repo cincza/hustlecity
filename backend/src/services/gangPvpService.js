@@ -8,6 +8,7 @@ import {
   getClubSecurityUpkeep,
 } from "../config/economy.js";
 import { appendPlayerMessage } from "./socialActionService.js";
+import { applyCriticalCareDamage, assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -242,6 +243,7 @@ export function executeGangRaidForPlayers(
   targetGangEntry,
   now = Date.now()
 ) {
+  assertPlayerNotInCriticalCare(attackerPlayer, "Najazdy gangu", now);
   const preview = buildGangRaidPreview(
     attackerPlayer,
     attackerGangEntry,
@@ -330,11 +332,12 @@ export function executeGangRaidForPlayers(
 
   hpLoss = Math.max(8, Math.round(10 + Math.random() * 10));
   gearLoss = Math.max(1, Math.round(1 + Math.random() * 3));
-  attackerPlayer.profile.hp = clamp(
-    Number(attackerPlayer.profile.hp || 0) - hpLoss,
-    0,
-    Number(attackerPlayer.profile.maxHp || 0)
-  );
+  const damageState = applyCriticalCareDamage(attackerPlayer, hpLoss, {
+    now,
+    source: `nieudanym najezdzie na ${targetGangName}`,
+    allowCriticalCare: true,
+    minimumHp: 0,
+  });
   attackerPlayer.profile.heat = clamp(Number(attackerPlayer.profile.heat || 0) + 4, 0, 100);
   if (actorLeader?.gang && typeof actorLeader.gang === "object") {
     actorLeader.gang.gearScore = clamp(Number(actorLeader.gang.gearScore || 0) - gearLoss, 18, 100);
@@ -363,9 +366,12 @@ export function executeGangRaidForPlayers(
     targetGangName,
     steal: 0,
     hpLoss,
+    criticalCareTriggered: damageState.criticalCareTriggered,
     gearLoss,
     preview,
-    logMessage: `Najazd na ${targetGangName} nie wyszedl. Obity wylot i ${gearLoss} pkt sprzetu w dol.`,
+    logMessage: damageState.criticalCareTriggered
+      ? `Najazd na ${targetGangName} nie wyszedl. Ladujesz na intensywnej terapii i tracisz ${gearLoss} pkt sprzetu.`
+      : `Najazd na ${targetGangName} nie wyszedl. Obity wylot i ${gearLoss} pkt sprzetu w dol.`,
   };
 }
 

@@ -12,6 +12,7 @@ import {
 } from "../../../shared/operations.js";
 import { getGangProjectEffects } from "../../../shared/gangProjects.js";
 import { getDistrictModifierSummary } from "../../../shared/districts.js";
+import { applyCriticalCareDamage, assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -32,6 +33,7 @@ export function ensurePlayerOperationState(player) {
 
 export function startOperationForPlayer(player, operationId, now = Date.now()) {
   ensurePlayerOperationState(player);
+  assertPlayerNotInCriticalCare(player, "Operacje", now);
   const operation = getOperationById(operationId);
   if (!operation) {
     fail("Nie ma takiej operacji.");
@@ -82,6 +84,7 @@ export function startOperationForPlayer(player, operationId, now = Date.now()) {
 
 export function advanceOperationForPlayer(player, choiceId, now = Date.now()) {
   ensurePlayerOperationState(player);
+  assertPlayerNotInCriticalCare(player, "Operacje", now);
   if (!player.operations.active) {
     fail("Nie masz aktywnej operacji.");
   }
@@ -122,6 +125,7 @@ export function advanceOperationForPlayer(player, choiceId, now = Date.now()) {
 
 export function executeOperationForPlayer(player, now = Date.now()) {
   ensurePlayerOperationState(player);
+  assertPlayerNotInCriticalCare(player, "Operacje", now);
   const active = player.operations.active;
   if (!active) {
     fail("Nie masz aktywnej operacji.");
@@ -196,9 +200,15 @@ export function executeOperationForPlayer(player, now = Date.now()) {
   const jailSeconds = jailed ? randomBetween(120, 260) : 0;
 
   player.profile.cash = Math.max(0, Number(player.profile.cash || 0) - loss);
-  player.profile.hp = Math.max(1, Number(player.profile.hp || 0) - damage);
+  const damageState = applyCriticalCareDamage(player, damage, {
+    now,
+    source: `spalonej operacji ${operation.name}`,
+    allowCriticalCare: true,
+    minimumHp: 1,
+  });
   player.profile.heat = Math.min(100, Number(player.profile.heat || 0) + Number(preview?.heatGain || 0) + 3);
-  if (jailed) {
+  const finalJailed = jailed && !damageState.criticalCareTriggered;
+  if (finalJailed) {
     player.profile.jailUntil = Math.max(Number(player.profile.jailUntil || 0), now + jailSeconds * 1000);
   }
   player.operations.history = [
@@ -209,8 +219,8 @@ export function executeOperationForPlayer(player, now = Date.now()) {
       success: false,
       loss,
       damage,
-      jailed,
-      jailSeconds,
+      jailed: finalJailed,
+      jailSeconds: finalJailed ? jailSeconds : 0,
       time: now,
     },
     ...(player.operations.history || []),
@@ -221,11 +231,14 @@ export function executeOperationForPlayer(player, now = Date.now()) {
     success: false,
     loss,
     damage,
-    jailed,
-    jailSeconds,
+    criticalCareTriggered: damageState.criticalCareTriggered,
+    jailed: finalJailed,
+    jailSeconds: finalJailed ? jailSeconds : 0,
     heatGain: Number(preview?.heatGain || 0) + 3,
     districtId: active.districtId,
-    logMessage: jailed
+    logMessage: damageState.criticalCareTriggered
+      ? `${operation.name} sie pali. Tracisz ${loss}$ i ladujesz na intensywnej terapii.`
+      : finalJailed
       ? `${operation.name} sie pali. Tracisz ${loss}$, ${damage} HP i siadasz na chwile.`
       : `${operation.name} siada bokiem. Tracisz ${loss}$ i ${damage} HP.`,
   };

@@ -16,6 +16,7 @@ import {
   normalizeContractState,
 } from "../../../shared/contracts.js";
 import { getDistrictModifierSummary } from "../../../shared/districts.js";
+import { applyCriticalCareDamage, assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -157,6 +158,7 @@ export function equipContractLoadoutForPlayer(player, slotId, assetId = null) {
 
 export function executeContractForPlayer(player, contractId, now = Date.now()) {
   ensurePlayerContractState(player);
+  assertPlayerNotInCriticalCare(player, "Kontrakty", now);
   const contract = getContractById(contractId);
   if (!contract) {
     fail("Nie ma takiego kontraktu.", 404);
@@ -259,14 +261,16 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     Math.random() < Number(preview.jailChanceOnFail || 0.1) ? randomBetween(180, 420) : 0;
 
   player.profile.cash = Math.max(0, Number(player.profile.cash || 0) - extraLoss);
-  player.profile.hp = clamp(
-    Number(player.profile.hp || 0) - failDamage,
-    1,
-    Number(player.profile.maxHp || 100)
-  );
+  const damageState = applyCriticalCareDamage(player, failDamage, {
+    now,
+    source: `spalonym kontrakcie ${contract.name}`,
+    allowCriticalCare: true,
+    minimumHp: 1,
+  });
   player.profile.heat = clamp(Number(player.profile.heat || 0) + Number(preview.heatGain || 0) + 4, 0, 100);
-  if (jailSeconds > 0) {
-    player.profile.jailUntil = Math.max(Number(player.profile.jailUntil || 0), now + jailSeconds * 1000);
+  const finalJailSeconds = damageState.criticalCareTriggered ? 0 : jailSeconds;
+  if (finalJailSeconds > 0) {
+    player.profile.jailUntil = Math.max(Number(player.profile.jailUntil || 0), now + finalJailSeconds * 1000);
   }
 
   const historyEntry = {
@@ -278,8 +282,8 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     entryCost: entryCost + extraLoss,
     damage: failDamage,
     heatGain: Number(preview.heatGain || 0) + 4,
-    jailed: jailSeconds > 0,
-    jailSeconds,
+    jailed: finalJailSeconds > 0,
+    jailSeconds: finalJailSeconds,
     time: now,
   };
   pushContractHistory(player, historyEntry);
@@ -290,11 +294,14 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     preview,
     extraLoss,
     damage: failDamage,
-    jailed: jailSeconds > 0,
-    jailSeconds,
+    criticalCareTriggered: damageState.criticalCareTriggered,
+    jailed: finalJailSeconds > 0,
+    jailSeconds: finalJailSeconds,
     historyEntry,
     logMessage:
-      jailSeconds > 0
+      damageState.criticalCareTriggered
+        ? `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$ i trafiasz na intensywna terapie.`
+        : finalJailSeconds > 0
         ? `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$, tracisz ${failDamage} HP i wpadasz do celi.`
         : `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$ i wracasz z ${failDamage} HP straty.`,
   };

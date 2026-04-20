@@ -5,6 +5,7 @@ import {
   PROFILE_AVATAR_IDS,
   RESTAURANT_ITEMS,
 } from "../../../shared/playerActions.js";
+import { assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -51,6 +52,7 @@ export function trainPlayerAtGym(player, exerciseId, repetitions = 1, now = Date
   if (Number(player?.profile?.jailUntil || 0) > now) {
     fail("Z celi nie dojdziesz na silownie.");
   }
+  assertPlayerNotInCriticalCare(player, "Trening", now);
   if (!hasGymPass(player?.profile, now)) {
     fail("Najpierw kup karnet na silownie.");
   }
@@ -115,7 +117,8 @@ export function buyRestaurantItemForPlayer(player, itemId, now = Date.now()) {
   };
 }
 
-export function healPlayer(player) {
+export function healPlayer(player, now = Date.now()) {
+  assertPlayerNotInCriticalCare(player, "Zwykle leczenie", now);
   if (Number(player?.profile?.cash || 0) < HOSPITAL_RULES.healCost) {
     fail("Brakuje kasy na lekarza.");
   }

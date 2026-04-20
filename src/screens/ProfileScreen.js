@@ -26,10 +26,12 @@ export function ProfileScreen({
   setAvatar,
   pickCustomAvatar,
   formatMoney,
+  formatCooldown,
   getRankTitle,
   heists,
   getSoloHeistOdds,
   sceneBackgrounds,
+  criticalCareStatus,
   contractState,
   contractItems,
   contractCars,
@@ -106,6 +108,16 @@ export function ProfileScreen({
         <StatLine label="Zrecznosc" value={`${effectivePlayer.dexterity}`} />
         <StatLine label="Charyzma" value={`${effectivePlayer.charisma}`} />
         <StatLine label="Zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} />
+        {criticalCareStatus?.active ? (
+          <>
+            <StatLine label="Stan" value={criticalCareStatus.mode?.label || "Intensywna terapia"} />
+            <StatLine label="Do wyjscia" value={formatCooldown(criticalCareStatus.remainingMs || 0)} />
+            <StatLine label="Powrot" value={`Okolo ${criticalCareStatus.expectedRecoveryHp || 1} HP`} />
+          </>
+        ) : null}
+        {criticalCareStatus?.protected ? (
+          <StatLine label="Oslona" value={formatCooldown(criticalCareStatus.protectionRemainingMs || 0)} />
+        ) : null}
         <StatLine label="Laczny zarobek" value={formatMoney(game.stats.totalEarned)} />
         <StatLine label="Wygrane napady" value={`${game.stats.heistsWon}`} />
       </SectionCard>

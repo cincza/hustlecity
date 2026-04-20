@@ -343,6 +343,20 @@ export async function healOnline(token) {
   });
 }
 
+export async function choosePublicCriticalCareOnline(token) {
+  return request("/player/hospital/critical-care/public", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function choosePrivateClinicOnline(token) {
+  return request("/player/hospital/critical-care/private", {
+    method: "POST",
+    token,
+  });
+}
+
 export async function bribeOutOfJailOnline(token) {
   return request("/player/jail/bribe", {
     method: "POST",

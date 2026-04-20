@@ -26,6 +26,8 @@ export function HubScreen({
   focusDistrictSummary,
   hottestDistrictSummary,
   nextHeistTierLabel,
+  criticalCareStatus,
+  formatCooldown,
   actions,
 }) {
   const quickActions = [
@@ -38,6 +40,44 @@ export function HubScreen({
 
   return (
     <>
+      {criticalCareStatus?.active || criticalCareStatus?.protected ? (
+        <SectionCard
+          title={criticalCareStatus?.active ? "Stan krytyczny" : "Oslona po terapii"}
+          subtitle={
+            criticalCareStatus?.active
+              ? `${criticalCareStatus?.mode?.label || "Intensywna terapia"} po ${criticalCareStatus?.source || "ostrej akcji"}.`
+              : "Dopiero wyszedles ze szpitala i przez chwile masz spokoj."
+          }
+        >
+          <StatLine
+            label={criticalCareStatus?.active ? "Do wyjscia" : "Oslona"}
+            value={formatCooldown(
+              criticalCareStatus?.active
+                ? criticalCareStatus?.remainingMs || 0
+                : criticalCareStatus?.protectionRemainingMs || 0
+            )}
+            visual={systemVisuals.defense}
+          />
+          <StatLine
+            label={criticalCareStatus?.active ? "Powrot" : "Status"}
+            value={
+              criticalCareStatus?.active
+                ? `Okolo ${criticalCareStatus?.expectedRecoveryHp || 1} HP`
+                : "PvP przeciwko Tobie jest chwilowo zablokowane"
+            }
+            visual={systemVisuals.heat}
+          />
+          <View style={styles.inlineRow}>
+            <Pressable onPress={() => actions.openSection("city", "hospital")} style={styles.inlineButton}>
+              <Text style={styles.inlineButtonText}>Szpital</Text>
+            </Pressable>
+            <Pressable onPress={() => actions.openSection("profile", "summary")} style={styles.inlineButton}>
+              <Text style={styles.inlineButtonText}>Profil</Text>
+            </Pressable>
+          </View>
+        </SectionCard>
+      ) : null}
+
       <SectionCard title="Szybkie akcje" subtitle="Bank, stol, leczenie i trening sa od razu pod reka.">
         <View style={styles.quickActionGrid}>
           {quickActions.map((action) => (

@@ -17,7 +17,9 @@ export function HeistsScreen({
   StatLine,
   Tag,
   formatMoney,
+  formatCooldown,
   districtSummaries,
+  criticalCareStatus,
   contractBoard,
   contractHistory,
   contractLoadoutSummaryLines,
@@ -43,6 +45,10 @@ export function HeistsScreen({
   const safeContractBoard = contractBoard && typeof contractBoard === "object" ? contractBoard : { active: [], history: [] };
   const safeContracts = Array.isArray(safeContractBoard.active) ? safeContractBoard.active : [];
   const safeContractHistory = Array.isArray(contractHistory) ? contractHistory : [];
+  const criticalCareActive = Boolean(criticalCareStatus?.active);
+  const criticalCareLockLabel = criticalCareActive
+    ? `Wroc za ${formatCooldown ? formatCooldown(criticalCareStatus?.remainingMs || 0) : `${Math.max(1, Math.ceil(Number(criticalCareStatus?.remainingMs || 0) / 60000))} min`}`
+    : "";
   const grouped = useMemo(() => groupHeistsByTier(safeHeists), [safeHeists]);
   const unlockedTierIds = HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).map((tier) => tier.id);
   const [selectedTier, setSelectedTier] = useState(unlockedTierIds[unlockedTierIds.length - 1] || HEIST_TIERS[0].id);
@@ -94,6 +100,11 @@ export function HeistsScreen({
 
   const renderOperationsSection = () => (
     <SectionCard title="Operacje" subtitle="Grubsza robota ponad kontraktem. Jedna planowka naraz.">
+      {criticalCareActive ? (
+        <Text style={styles.listCardMeta}>
+          Operacje wracaja po wyjsciu z {criticalCareStatus?.mode?.label?.toLowerCase() || "intensywnej terapii"}.
+        </Text>
+      ) : null}
       {activeOperation ? (
         <View style={styles.listCard}>
           <Text style={styles.listCardTitle}>{activeOperationTitle}</Text>
@@ -118,15 +129,19 @@ export function HeistsScreen({
                       </Text>
                     ))}
                   </View>
-                  <Pressable onPress={() => onAdvanceOperation(choice.id)} style={styles.inlineButton}>
-                    <Text style={styles.inlineButtonText}>Wybierz</Text>
+                  <Pressable
+                    onPress={() => onAdvanceOperation(choice.id)}
+                    style={[styles.inlineButton, criticalCareActive && styles.tileDisabled]}
+                    disabled={criticalCareActive}
+                  >
+                    <Text style={styles.inlineButtonText}>{criticalCareActive ? "Intensywna" : "Wybierz"}</Text>
                   </Pressable>
                 </View>
               </View>
             ))
           ) : (
-            <Pressable onPress={onExecuteOperation} style={styles.inlineButton}>
-              <Text style={styles.inlineButtonText}>Odpal final</Text>
+            <Pressable onPress={onExecuteOperation} style={[styles.inlineButton, criticalCareActive && styles.tileDisabled]} disabled={criticalCareActive}>
+              <Text style={styles.inlineButtonText}>{criticalCareActive ? "Intensywna" : "Odpal final"}</Text>
             </Pressable>
           )}
         </View>
@@ -157,8 +172,8 @@ export function HeistsScreen({
               ))}
               <View style={styles.inlineRow}>
                 <Text style={styles.costLabel}>Przygotowanie {formatMoney(operation.prepCost)} | Energia {operation.energyCost}</Text>
-                <Pressable onPress={() => onStartOperation(operation.id)} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>Zacznij</Text>
+                <Pressable onPress={() => onStartOperation(operation.id)} style={[styles.inlineButton, criticalCareActive && styles.tileDisabled]} disabled={criticalCareActive}>
+                  <Text style={styles.inlineButtonText}>{criticalCareActive ? "Intensywna" : "Zacznij"}</Text>
                 </Pressable>
               </View>
             </View>
@@ -177,6 +192,17 @@ export function HeistsScreen({
           lines={["Sprzet, auto i staty sklejaja wynik. Bez loadoutu robi sie naprawde goraco."]}
           source={sceneBackgrounds.heists}
         />
+
+        {criticalCareActive ? (
+          <SectionCard title="Stan krytyczny" subtitle="Kontrakty i operacje sa teraz zablokowane.">
+            <Text style={styles.listCardTitle}>
+              {criticalCareStatus?.mode?.label || "Intensywna terapia"} | {criticalCareLockLabel}
+            </Text>
+            <Text style={styles.listCardMeta}>
+              Wrocisz z okolo {criticalCareStatus?.expectedRecoveryHp || 1} HP. W tym czasie mozesz dalej ogarniac bank, rynek, gang i raporty.
+            </Text>
+          </SectionCard>
+        ) : null}
 
         <SectionCard title="Loadout" subtitle="Kontrakty licza pelny set. Kazdy pusty slot boli.">
           {(contractLoadoutSummaryLines || []).map((line) => (
@@ -198,8 +224,9 @@ export function HeistsScreen({
             const preview = getContractPreviewForContract(contract);
             const previewLines = getContractPreviewLinesForContract(contract);
             const locked = game.player.respect < contract.respect;
+            const disabled = locked || criticalCareActive;
             return (
-              <View key={contract.id} style={[styles.listCard, locked && styles.listCardLocked]}>
+              <View key={contract.id} style={[styles.listCard, disabled && styles.listCardLocked]}>
                 <View style={styles.listCardHeader}>
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{contract.name}</Text>
@@ -237,9 +264,12 @@ export function HeistsScreen({
                   </Text>
                   <Pressable
                     onPress={() => onExecuteContract(contract)}
-                    style={[styles.inlineButton, locked && styles.tileDisabled]}
+                    style={[styles.inlineButton, disabled && styles.tileDisabled]}
+                    disabled={disabled}
                   >
-                    <Text style={styles.inlineButtonText}>{locked ? "Za niski RES" : "Odpal"}</Text>
+                    <Text style={styles.inlineButtonText}>
+                      {criticalCareActive ? "Intensywna" : locked ? "Za niski RES" : "Odpal"}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -282,6 +312,17 @@ export function HeistsScreen({
         source={sceneBackgrounds.heists}
       />
 
+      {criticalCareActive ? (
+        <SectionCard title="Stan krytyczny" subtitle="Napady wracaja po wyjsciu ze szpitala.">
+          <Text style={styles.listCardTitle}>
+            {criticalCareStatus?.mode?.label || "Intensywna terapia"} | {criticalCareLockLabel}
+          </Text>
+          <Text style={styles.listCardMeta}>
+            Ryzykowne akcje sa zgaszone, ale nadal mozesz ogarniac rynek, gang, czat i raporty.
+          </Text>
+        </SectionCard>
+      ) : null}
+
       <SectionCard title="Napady" subtitle="Wybierasz prog, widzisz tylko akcje z tego progu i od razu wchodzisz do roboty.">
         <StatLine label="Aktualny szacunek" value={`${game.player.respect}`} />
         <StatLine
@@ -315,9 +356,9 @@ export function HeistsScreen({
               chance={`${Math.round(odds.chance * 100)}%`}
               energy={`${heist.energy}`}
               risk={`${Math.round(heist.risk * 100)}%`}
-              lockedLabel={locked ? `Wymagany szacunek: ${heist.respect}` : "Wykonaj"}
-              onPress={() => !locked && onExecuteHeist(heist)}
-              disabled={locked}
+              lockedLabel={criticalCareActive ? criticalCareLockLabel : locked ? `Wymagany szacunek: ${heist.respect}` : "Wykonaj"}
+              onPress={() => !locked && !criticalCareActive && onExecuteHeist(heist)}
+              disabled={locked || criticalCareActive}
             />
           );
         })}

@@ -59,6 +59,14 @@ import {
   updatePlayerAvatar,
 } from "./services/playerActionService.js";
 import {
+  applyCriticalCareDamage,
+  assertPlayerNotInCriticalCare,
+  assertPlayerNotProtectedAfterCriticalCare,
+  keepPlayerOnPublicCriticalCare,
+  movePlayerToPrivateClinic,
+  syncPlayerCriticalCare,
+} from "./services/criticalCareService.js";
+import {
   applyClubVisitDeltaToOwnerClub,
   addFriendForPlayer,
   appendPlayerMessage,
@@ -444,6 +452,10 @@ function createInitialPlayerData(username = "gracz") {
       bounty: 0,
       cash: ALPHA_TEST_STARTING_CASH,
       bank: ALPHA_TEST_STARTING_BANK,
+      criticalCareUntil: null,
+      criticalCareSource: null,
+      criticalCareMode: null,
+      criticalProtectionUntil: null,
     },
     stats: {
       heistsDone: 0,
@@ -573,6 +585,20 @@ function ensurePlayerExtendedState(player) {
   const now = Date.now();
   player.timers.energyUpdatedAt = Math.max(0, Math.floor(Number(player.timers.energyUpdatedAt || now)));
   player.timers.hpUpdatedAt = Math.max(0, Math.floor(Number(player.timers.hpUpdatedAt || now)));
+  player.profile.criticalCareUntil = Number.isFinite(Number(player.profile.criticalCareUntil))
+    ? Number(player.profile.criticalCareUntil)
+    : null;
+  player.profile.criticalCareSource =
+    typeof player.profile.criticalCareSource === "string" && player.profile.criticalCareSource.trim()
+      ? player.profile.criticalCareSource.trim()
+      : null;
+  player.profile.criticalCareMode =
+    typeof player.profile.criticalCareMode === "string" && player.profile.criticalCareMode.trim()
+      ? player.profile.criticalCareMode.trim()
+      : null;
+  player.profile.criticalProtectionUntil = Number.isFinite(Number(player.profile.criticalProtectionUntil))
+    ? Number(player.profile.criticalProtectionUntil)
+    : null;
   player.drugInventory = normalizeDrugInventory(player.drugInventory);
   player.dealerInventory = normalizeDealerInventory(player.dealerInventory);
   if (!player.online || typeof player.online !== "object" || Array.isArray(player.online)) {
@@ -705,6 +731,8 @@ function buildDirectoryEntry(userRecord, now = Date.now()) {
       0,
       Number(profile.bounty || 0) || Math.round(Number(profile.heat || 0) * 140)
     ),
+    criticalCareUntil: Number(profile.criticalCareUntil || 0) || null,
+    criticalProtectionUntil: Number(profile.criticalProtectionUntil || 0) || null,
     online: isUserOnline(userRecord._id, now),
     heists: Number(stats.heistsWon || 0),
     casino: Number(stats.casinoWins || 0),
@@ -1465,6 +1493,7 @@ function syncClubState(player, now = Date.now()) {
 function syncPlayerState(player, now = Date.now()) {
   ensurePlayerExtendedState(player);
   syncPlayerEnergy(player, now);
+  syncPlayerCriticalCare(player, now);
   syncPlayerHealth(player, now);
   syncClubState(player, now);
   syncBusinessCollections(player, now);
@@ -2432,6 +2461,11 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
     let damage = 0;
     let message = "";
 
+    syncPlayerCriticalCare(attacker, now);
+    syncPlayerCriticalCare(target, now);
+    assertPlayerNotInCriticalCare(attacker, "Atak na gracza", now);
+    assertPlayerNotProtectedAfterCriticalCare(target, now);
+
     attacker.profile.energy = Math.max(0, Number(attacker.profile.energy || 0) - 2);
     attacker.cooldowns.playerAttackTargets = {
       ...(attacker.cooldowns?.playerAttackTargets || {}),
@@ -2453,10 +2487,17 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
       pushLog(target, `${attackerName} zaatakowal Cie i zabral ${formatMoney(steal)}.`);
     } else {
       damage = randomBetween(8, 18);
-      attacker.profile.hp = clamp(Number(attacker.profile.hp || 0) - damage, 0, Number(attacker.profile.maxHp || 0));
+      const damageState = applyCriticalCareDamage(attacker, damage, {
+        now,
+        source: `nieudanym ataku na ${targetName}`,
+        allowCriticalCare: true,
+        minimumHp: 0,
+      });
       attacker.profile.heat = clamp(Number(attacker.profile.heat || 0) + 3, 0, 100);
 
-      message = `Atak na ${targetName} nie wyszedl. Dostales po lapach.`;
+      message = damageState.criticalCareTriggered
+        ? `Atak na ${targetName} nie wyszedl. Konczysz na intensywnej terapii.`
+        : `Atak na ${targetName} nie wyszedl. Dostales po lapach.`;
       pushLog(attacker, message);
       pushLog(target, `${attackerName} probowal Cie zaatakowac, ale nie dowiozl akcji.`);
     }
@@ -2940,15 +2981,46 @@ app.post("/player/restaurant/eat", auth, asyncHandler(async (req, res) => {
 }));
 
 app.post("/player/hospital/heal", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
   await withPlayerActionLock(req, "player-hospital-heal", async () => {
     await commitPlayerMutation(req, "player-hospital-heal", async (player) => {
-      const { logMessage } = healPlayer(player);
+      const { logMessage } = healPlayer(player, now);
       pushLog(player, logMessage);
       return null;
     });
   });
 
-  res.json({ user: publicPlayer(req.player) });
+  res.json({ user: publicPlayer(req.player, now) });
+}));
+
+app.post("/player/hospital/critical-care/public", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+
+  await withPlayerActionLock(req, "player-hospital-critical-public", async () => {
+    await commitPlayerMutation(req, "player-hospital-critical-public", async (player) => {
+      result = keepPlayerOnPublicCriticalCare(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/player/hospital/critical-care/private", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+
+  await withPlayerActionLock(req, "player-hospital-critical-private", async () => {
+    await commitPlayerMutation(req, "player-hospital-critical-private", async (player) => {
+      result = movePlayerToPrivateClinic(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  res.json({ user: publicPlayer(req.player, now), result });
 }));
 
 app.post("/player/jail/bribe", auth, asyncHandler(async (req, res) => {
@@ -5343,6 +5415,7 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const player = req.player;
   syncPlayerState(player, now);
+  assertPlayerNotInCriticalCare(player, "Napady", now);
 
   if (isPlayerJailed(player, now)) {
     res.status(423).json({ error: "Siedzisz w wiezieniu. Najpierw odsiadka albo kaucja." });
@@ -5408,6 +5481,9 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   const jailChance = getHeistJailChance(player, heist);
   const jailed = Math.random() < jailChance;
   const jailSeconds = jailed ? getHeistJailSentenceSeconds(player, heist) : 0;
+  let criticalCareTriggered = false;
+  let finalJailed = false;
+  let finalJailSeconds = 0;
 
   await withPlayerActionLock(req, `heist:${heist.id}`, async () => {
     await commitPlayerMutation(req, "heist-failure", async (currentPlayer) => {
@@ -5415,15 +5491,25 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
       currentPlayer.timers.energyUpdatedAt = now;
       currentPlayer.stats.heistsDone += 1;
       currentPlayer.profile.cash = Math.max(0, currentPlayer.profile.cash - loss);
-      currentPlayer.profile.hp = Math.max(1, currentPlayer.profile.hp - damage);
+      const damageState = applyCriticalCareDamage(currentPlayer, damage, {
+        now,
+        source: `wtopie na napadzie ${heist.name}`,
+        allowCriticalCare: Number(heist.tier || 0) >= 4,
+        minimumHp: 1,
+      });
       currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnFailure, 0, 100);
       applyHeistDistrictOutcome(currentPlayer, heist, { success: false, now });
-      if (jailed) {
+      criticalCareTriggered = Boolean(damageState.criticalCareTriggered);
+      finalJailed = jailed && !criticalCareTriggered;
+      finalJailSeconds = finalJailed ? jailSeconds : 0;
+      if (finalJailed) {
         currentPlayer.profile.jailUntil = Math.max(currentPlayer.profile.jailUntil || 0, now + jailSeconds * 1000);
         pushLog(
           currentPlayer,
           `Wtopa na akcji: ${heist.name}. Tracisz $${loss}, ${damage} HP i siadasz na ${Math.ceil(jailSeconds / 60)} min.`
         );
+      } else if (damageState.criticalCareTriggered) {
+        pushLog(currentPlayer, `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ladujesz na intensywnej terapii.`);
       } else {
         pushLog(currentPlayer, `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ${damage} HP.`);
       }
@@ -5436,20 +5522,22 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
     damage,
     chance,
     jailChance,
-    jailed,
-    jailSeconds,
+    criticalCareTriggered,
+    jailed: finalJailed,
+    jailSeconds: finalJailSeconds,
     user: publicPlayer(player, now),
   });
   logHeistEvent(
-    `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: failure loss=$${loss} damage=${damage} jailed=${jailed ? "yes" : "no"}`
+    `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: failure loss=$${loss} damage=${damage} jailed=${finalJailed ? "yes" : "no"}${criticalCareTriggered ? " critical=yes" : ""}`
   );
   logWarn("heists", "execute-failure", {
     userId: req.user.id,
     heistId: heist.id,
     loss,
     damage,
-    jailed,
-    jailSeconds,
+    jailed: finalJailed,
+    jailSeconds: finalJailSeconds,
+    criticalCareTriggered,
   });
 }));
 

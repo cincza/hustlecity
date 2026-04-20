@@ -30,6 +30,7 @@ import {
   getLeadTargetEscortForVenue,
   normalizeClubState,
 } from "../../../shared/socialGameplay.js";
+import { applyCriticalCareDamage, assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -107,11 +108,12 @@ function ensureEscortOwnedEntry(player, escort) {
   return created;
 }
 
-export function fightClubRoundForPlayer(player) {
+export function fightClubRoundForPlayer(player, now = Date.now()) {
   ensurePlayerSocialState(player);
-  if (Number(player?.profile?.jailUntil || 0) > Date.now()) {
+  if (Number(player?.profile?.jailUntil || 0) > now) {
     fail("Fightclub nie dziala zza krat.");
   }
+  assertPlayerNotInCriticalCare(player, "Fightclub", now);
   if (Number(player?.profile?.energy || 0) < FIGHT_CLUB_ENERGY_COST) {
     fail("Za malo energii na sparing.");
   }
@@ -228,18 +230,22 @@ export function applyDrugConsumptionToPlayer(player, drug, now = Date.now()) {
 
   if (Math.random() < Number(drug.overdoseRisk || 0)) {
     const damage = randomBetween(28, 55);
-    player.profile.hp = clampSocialValue(
-      Number(player.profile?.hp || 0) - damage,
-      1,
-      Number(player.profile?.maxHp || 0)
-    );
+    const damageState = applyCriticalCareDamage(player, damage, {
+      now,
+      source: `przedawkowaniu po ${drug.name}`,
+      allowCriticalCare: true,
+      minimumHp: 1,
+    });
     player.profile.heat = clampSocialValue(Number(player.profile?.heat || 0) + 8, 0, 100);
 
     return {
       drug,
       overdose: true,
       damage,
-      logMessage: `Przedawkowanie po ${drug.name}. Ledwo stoisz na nogach.`,
+      criticalCareTriggered: damageState.criticalCareTriggered,
+      logMessage: damageState.criticalCareTriggered
+        ? `Przedawkowanie po ${drug.name}. Trafiasz na intensywna terapie.`
+        : `Przedawkowanie po ${drug.name}. Ledwo stoisz na nogach.`,
     };
   }
 
