@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getDistrictAlertText, getDistrictEffectLines } from "../game/selectors/metaGameplay";
+import { HeroPanel } from "../components/GameScreenPrimitives";
 
 const MAX_GYM_BATCH = 10;
 
@@ -182,6 +183,14 @@ export function CityScreen({
   );
 
   if (section === "dashboard") {
+    const dashboardHeroTitle = criticalCareActive
+      ? "Najpierw dojdz do siebie"
+      : focusDistrictSummary?.name
+        ? `${focusDistrictSummary.name} trzyma dzis puls miasta`
+        : "Miasto po zmroku";
+    const dashboardHeroSummary = criticalCareActive
+      ? `Jestes na ${activeCriticalCareMode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ostrej akcji"}. Wroc przez szpital, potem od razu wskocz z powrotem do miasta.`
+      : `Najwazniejsze fronty sa trzy: szybki ruch, cashflow z zaplecza i walka o dzielnice. ${hottestDistrictSummary?.name || "Miasto"} jest teraz ${String(hottestDistrictSummary?.pressureLabel || "spokojne").toLowerCase()}.`;
     return (
       <>
         <SceneArtwork
@@ -191,35 +200,56 @@ export function CityScreen({
           accent={["#352215", "#120d09", "#050505"]}
           source={sceneBackgrounds.city}
         />
-        {criticalCareActive || criticalCareProtected ? (
-          <SectionCard
-            title={criticalCareActive ? "Stan krytyczny" : "Oslona po terapii"}
-            subtitle={
-              criticalCareActive
-                ? `${activeCriticalCareMode?.label || "Intensywna terapia"} po ${criticalCareStatus?.source || "ostrej akcji"}.`
-                : "Wlasnie wyszedles z terapii i przez chwile masz spokoj od dobijania."
-            }
-          >
-            <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>
-                {criticalCareActive
-                  ? `Zostalo ${formatCooldown(criticalCareStatus?.remainingMs || 0)}`
-                  : `Oslona jeszcze ${formatCooldown(criticalCareStatus?.protectionRemainingMs || 0)}`}
-              </Text>
-              <Text style={styles.listCardMeta}>
-                {criticalCareActive
-                  ? `Wrocisz z okolo ${criticalCareStatus?.expectedRecoveryHp || 1}/${game.player.maxHp} HP.`
-                  : "Ataki PvP na Ciebie sa teraz zablokowane."}
-              </Text>
-              {criticalCareActive ? (
-                <Text style={styles.listCardMeta}>
-                  Zablokowane: {(criticalCareBlockedActions || []).join(", ")}.
-                </Text>
-              ) : null}
-            </View>
-          </SectionCard>
-        ) : null}
-        <SectionCard title="Tablica glowna" subtitle="Najwazniejsze rzeczy od razu.">
+        <HeroPanel
+          eyebrow={criticalCareActive ? "Stan krytyczny" : criticalCareProtected ? "Oslona po terapii" : "Miasto"}
+          title={dashboardHeroTitle}
+          summary={dashboardHeroSummary}
+          tone={criticalCareActive ? "danger" : criticalCareProtected ? "gold" : "gold"}
+          pills={[
+            {
+              label: criticalCareActive ? "Do wyjscia" : "Fokus",
+              value: criticalCareActive
+                ? formatCooldown(criticalCareStatus?.remainingMs || 0)
+                : focusDistrictSummary?.shortName || "-",
+              note: criticalCareActive ? "Ryzykowne akcje sa zablokowane." : focusDistrictSummary?.pressureLabel || "Brak fokusu",
+              tone: criticalCareActive ? "danger" : "gold",
+              icon: criticalCareActive ? "hospital-box-outline" : "target-variant",
+            },
+            {
+              label: "Biznes / min",
+              value: formatMoney(totalBusinessIncome),
+              note: businessCash > 0 ? businessCollectionSubtitle : "Czysta skrytka.",
+              tone: "success",
+              icon: "cash-multiple",
+            },
+            {
+              label: "Ulica / min",
+              value: formatMoney(totalEscortIncome),
+              note: escortCash > 0 ? escortCollectionSubtitle : "Noc dopiero sie rozpedza.",
+              tone: "info",
+              icon: "storefront-outline",
+            },
+            {
+              label: "Najgorecej",
+              value: hottestDistrictSummary?.shortName || "-",
+              note: hottestDistrictSummary?.pressureLabel || "Spokojnie",
+              tone: criticalCareActive ? "danger" : "neutral",
+              icon: "alert-outline",
+            },
+          ]}
+          primaryAction={{
+            label: criticalCareActive ? "Szpital" : "Napad na szybko",
+            meta: criticalCareActive ? "Publiczna terapia albo prywatna klinika." : "Od razu wejdz w akcje z tablicy miasta.",
+            onPress: criticalCareActive ? () => actions.openSection("city", "hospital") : actions.quickHeist,
+          }}
+          secondaryAction={{
+            label: "Odbiory i zaplecze",
+            meta: "Biznes, ulica, klub i cashflow.",
+            onPress: () => actions.openSection("empire", "businesses"),
+          }}
+        />
+
+        <SectionCard title="Teraz w miescie" subtitle="Najpierw to, co daje Ci natychmiastowy ruch albo szybka decyzje.">
           <View style={styles.grid}>
             {quickStartCards.map((card) => (
               <ActionTile key={card.id} title={card.title} subtitle={card.subtitle} visual={card.visual} onPress={card.onPress} danger={card.danger} />
@@ -227,7 +257,7 @@ export function CityScreen({
           </View>
         </SectionCard>
 
-        <SectionCard title="Imperium i odbiory" subtitle="Cashflow, noc i szybkie wejscia.">
+        <SectionCard title="Imperium i zaplecze" subtitle="Tu wchodzisz po cashflow, raport klubu i stale koperty.">
           <View style={styles.grid}>
             {empireCards.map((card) => (
               <ActionTile key={card.id} title={card.title} subtitle={card.subtitle} visual={card.visual} onPress={card.onPress} />
@@ -240,12 +270,26 @@ export function CityScreen({
           </View>
         </SectionCard>
 
-        <SectionCard title="Dzielnice" subtitle="Trzy fronty miasta. Widzisz, gdzie cisniesz i gdzie robi sie goraco.">
+        {renderCollectionsPanel("Cashflow i odbiory", "Dwa szybkie raporty. Widzisz ile jest do wziecia i kiedy dobijesz do capu.")}
+
+        <SectionCard title="Fronty miasta" subtitle="Jedna karta pokazuje gdzie cisniesz, druga gdzie robi sie za goraco.">
+          <View style={styles.mobileStatusGrid}>
+            <View style={styles.mobileStatusCard}>
+              <Text style={styles.mobileStatusLabel}>Fokus gangu</Text>
+              <Text style={styles.mobileStatusValue}>{focusDistrictSummary?.name || "-"}</Text>
+              <Text style={styles.listCardMeta}>{focusDistrictSummary?.bonusLabel || "Brak aktywnego fokusu."}</Text>
+            </View>
+            <View style={styles.mobileStatusCard}>
+              <Text style={styles.mobileStatusLabel}>Najgoretsza strefa</Text>
+              <Text style={styles.mobileStatusValue}>{hottestDistrictSummary?.name || "-"}</Text>
+              <Text style={styles.listCardMeta}>{getDistrictAlertText(hottestDistrictSummary) || hottestDistrictSummary?.pressureLabel || "Spokojnie"}</Text>
+            </View>
+          </View>
           {Array.isArray(districtSummaries)
             ? districtSummaries.map((district) => (
                 <View key={district.id} style={styles.listCard}>
                   <View style={styles.listCardHeader}>
-                    <View style={styles.flexOne}>
+                  <View style={styles.flexOne}>
                       <Text style={styles.listCardTitle}>{district.name}</Text>
                       <Text style={styles.listCardMeta}>
                         {district.controlLabel} | Presja: {district.pressureLabel} | {district.bonusLabel}
@@ -277,18 +321,6 @@ export function CityScreen({
                 </View>
               ))
             : null}
-        </SectionCard>
-
-        <SectionCard title="Puls miasta" subtitle="Najwazniejsze liczby bez sciany tekstu.">
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Najgoretsza dzielnica</Text>
-            <Text style={styles.listCardMeta}>
-              {hottestDistrictSummary?.name || "-"} | {hottestDistrictSummary?.pressureLabel || "Spokojnie"} | {hottestDistrictSummary?.bonusLabel || "-"}
-            </Text>
-            {getDistrictAlertText(hottestDistrictSummary) ? (
-              <Text style={styles.listCardMeta}>{getDistrictAlertText(hottestDistrictSummary)}</Text>
-            ) : null}
-          </View>
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Energia</Text>

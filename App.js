@@ -137,6 +137,7 @@ import { CityScreen } from "./src/screens/CityScreen";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ProfileMenuScreen } from "./src/screens/ProfileMenuScreen";
 import { HeistsScreen } from "./src/screens/HeistsScreen";
+import { HeroPanel } from "./src/components/GameScreenPrimitives";
 import { GameHeader, QuickActionModal, ResultModal } from "./src/components/GameShellUI";
 import { BUSINESSES } from "./src/game/config/businesses";
 import { blockIfOnlineAlpha } from "./src/game/authority";
@@ -1543,12 +1544,35 @@ function StatLine({ label, value, visual }) {
 
 function ActionTile({ title, subtitle, onPress, disabled, danger, visual }) {
   return (
-    <Pressable onPress={onPress} accessibilityState={{ disabled }} style={[styles.actionTile, danger && styles.actionTileDanger, disabled && styles.tileDisabled]}>
-      <View style={styles.actionTileHeader}>
-        {visual ? <MiniBadge visual={visual} large /> : null}
-        <Text style={styles.actionTileTitle}>{title}</Text>
-      </View>
-      <Text style={styles.actionTileSubtitle}>{subtitle}</Text>
+    <Pressable
+      onPress={onPress}
+      accessibilityState={{ disabled }}
+      style={({ pressed }) => [
+        styles.actionTile,
+        danger && styles.actionTileDanger,
+        disabled && styles.tileDisabled,
+        pressed && !disabled && styles.actionTilePressed,
+      ]}
+    >
+      <LinearGradient
+        colors={danger ? ["#2b1517", "#161113"] : ["#191c23", "#101218"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.actionTileGradient}
+      >
+        <View style={styles.actionTileHeader}>
+          {visual ? (
+            <View style={styles.actionTileVisualWrap}>
+              <View style={styles.actionTileVisualGlow} />
+              <MiniBadge visual={visual} large />
+            </View>
+          ) : null}
+          <View style={styles.flexOne}>
+            <Text style={styles.actionTileTitle}>{title}</Text>
+            <Text style={styles.actionTileSubtitle}>{subtitle}</Text>
+          </View>
+        </View>
+      </LinearGradient>
     </Pressable>
   );
 }
@@ -1557,6 +1581,7 @@ function SectionCard({ title, subtitle, children }) {
   return (
     <View style={styles.sectionCard}>
       <View style={styles.sectionHeader}>
+        <View style={styles.sectionHeaderAccent} />
         <Text style={styles.sectionTitle}>{title}</Text>
         {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
       </View>
@@ -1567,8 +1592,8 @@ function SectionCard({ title, subtitle, children }) {
 
 function Tag({ text, warning }) {
   return (
-    <View style={[styles.tag, warning && styles.tagWarning]}>
-      <Text style={styles.tagText}>{text}</Text>
+    <View style={[styles.tag, warning ? styles.tagWarning : styles.tagPositive]}>
+      <Text style={[styles.tagText, warning ? styles.tagTextWarning : styles.tagTextPositive]}>{text}</Text>
     </View>
   );
 }
@@ -1835,9 +1860,10 @@ function AppRuntime() {
   const [dealerTradeDraft, setDealerTradeDraft] = useState("1");
   const [notice, setNotice] = useState(null);
   const [quickActionModal, setQuickActionModal] = useState(null);
-  const [adminDeleteBusyLogin, setAdminDeleteBusyLogin] = useState("");
-  const [gangSettingsBusy, setGangSettingsBusy] = useState(false);
-  const [gangRoleBusyMemberId, setGangRoleBusyMemberId] = useState("");
+const [adminDeleteBusyLogin, setAdminDeleteBusyLogin] = useState("");
+const [gangSettingsBusy, setGangSettingsBusy] = useState(false);
+const [gangRoleBusyMemberId, setGangRoleBusyMemberId] = useState("");
+const [rankingCategory, setRankingCategory] = useState("respect");
   const noticeOpacity = useRef(new Animated.Value(0)).current;
   const noticeTranslateY = useRef(new Animated.Value(-12)).current;
   const previousGameRef = useRef(INITIAL);
@@ -7414,6 +7440,39 @@ function AppRuntime() {
         accent={["#422418", "#160f0c", "#050505"]}
         source={SCENE_BACKGROUNDS.gangWide}
       />
+      <HeroPanel
+        eyebrow="Napady gangu"
+        title={activeGangHeistLobby ? activeGangHeistDefinition?.name || "Aktywne lobby" : "Jedno lobby, jeden sklad, jeden start"}
+        summary={
+          activeGangHeistLobby
+            ? "Najpierw zbierasz pelny sklad, potem dopiero odpalasz start. Szansa i trudnosc sa liczone z realnej mocy calej ekipy, nie z jednego klikniecia."
+            : "Boss, Vice albo Zaufany otwieraja lobby i zostawiaja krotki sygnal dla ekipy. Zwykli czlonkowie tylko dolaczaja i realnie dokladaja moc skladu."
+        }
+        tone="danger"
+        pills={[
+          {
+            label: "Sklad",
+            value: activeGangHeistLobby ? `${activeGangHeistParticipants.length}/${activeGangHeistLobby.requiredMembers}` : `${game.gang.members}/${game.gang.maxMembers}`,
+            note: "Licza sie tylko wolni ludzie bez odsiadki.",
+            tone: "gold",
+            icon: "account-group-outline",
+          },
+          {
+            label: "Szansa",
+            value: activeGangHeistLobby ? `${Math.round(Number(activeGangHeistLobby.summary?.chance || activeGangHeistLobby.chance || 0) * 100)}%` : "--",
+            note: activeGangHeistLobby ? "Liczona z calego skladu." : "Pojawi sie po otwarciu lobby.",
+            tone: "info",
+            icon: "target",
+          },
+          {
+            label: "Cela skladu",
+            value: game.gang.jailedCrew ? `${game.gang.jailedCrew}` : "0",
+            note: crewLockdownRemaining > 0 ? formatDuration(crewLockdownRemaining) : "Ekipa jest wolna.",
+            tone: crewLockdownRemaining > 0 ? "danger" : "neutral",
+            icon: "lock-outline",
+          },
+        ]}
+      />
       <SectionCard title="Napady gangu" subtitle="Jedno lobby, jeden sklad, jeden start.">
         {!game.gang.joined ? (
           <View style={styles.lockedPanel}>
@@ -7770,6 +7829,65 @@ function AppRuntime() {
         }
         accent={["#3d2418", "#17100c", "#050505"]}
         source={SCENE_BACKGROUNDS.gangWide}
+      />
+      <HeroPanel
+        eyebrow="Gang"
+        title={game.gang.joined ? game.gang.name : "Warstwa meta dla ekipy"}
+        summary={
+          game.gang.joined
+            ? "Najpierw lapiesz stan ekipy: role, sklad, skarbiec, aktywna robote i protektorat klubu. Dopiero nizej schodzisz do szczegolow."
+            : "Tu ma byc od razu jasne czy zakladasz swoj gang, czy lepiej wejsc do zywej ekipy z miasta. Bez zbednych ekranow i pustych kart."
+        }
+        tone={game.gang.joined ? "gold" : "info"}
+        pills={
+          game.gang.joined
+            ? [
+                {
+                  label: "Rola",
+                  value: game.gang.role,
+                  note: `${game.gang.members}/${game.gang.maxMembers} ludzi w ekipie.`,
+                  tone: "gold",
+                  icon: "shield-crown-outline",
+                },
+                {
+                  label: "Skarbiec",
+                  value: formatMoney(game.gang.vault),
+                  note: "Wspolna kasa na projekty i akcje.",
+                  tone: "success",
+                  icon: "bank-outline",
+                },
+                {
+                  label: "Aktywna robota",
+                  value: activeGangHeistDefinition?.name || "Brak lobby",
+                  note: game.gang.protectedClub?.name ? `Chroni ${game.gang.protectedClub.name}.` : "Bez aktywnego protektoratu klubu.",
+                  tone: "danger",
+                  icon: "briefcase-outline",
+                },
+              ]
+            : [
+                {
+                  label: "Zaproszenia",
+                  value: `${game.gang.invites.length}`,
+                  note: "Aktywne wejscia do zywych ekip.",
+                  tone: "info",
+                  icon: "email-outline",
+                },
+                {
+                  label: "Gangi online",
+                  value: `${game.online.gangs.length}`,
+                  note: "Prawdziwe ekipy z miasta.",
+                  tone: "gold",
+                  icon: "account-group-outline",
+                },
+                {
+                  label: "Koszt zalozenia",
+                  value: formatMoney(game.gang.createCost),
+                  note: "Do tego potrzebujesz 15 RES.",
+                  tone: "danger",
+                  icon: "cash-multiple",
+                },
+              ]
+        }
       />
       {!game.gang.joined ? (
         <>
@@ -8339,29 +8457,31 @@ function AppRuntime() {
           </View>
         ) : null}
         {game.online.roster.map((player) => (
-          <Pressable key={player.id} style={styles.listCard} onPress={() => openWorldPlayerProfile(player.id)}>
-            <View style={styles.listCardHeader}>
+          <Pressable key={player.id} style={[styles.listCard, styles.playerRosterCard]} onPress={() => openWorldPlayerProfile(player.id)}>
+            <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
               <View style={styles.entityHead}>
                 <EntityBadge visual={getPlayerAvatarVisual(player)} />
                 <View style={styles.flexOne}>
                   <Text style={styles.listCardTitle}>{player.name}</Text>
-                  <Text style={styles.listCardMeta}>{player.gang} | Szacun {player.respect} | Kasa {formatMoney(player.cash)}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {player.gang === "No gang" ? "Solo" : player.gang} | Szacun {player.respect} | Kasa {formatMoney(player.cash)}
+                  </Text>
                 </View>
               </View>
               <Tag text={player.online ? "ONLINE" : "OFFLINE"} warning={!player.online} />
             </View>
-            <View style={styles.oddsRow}>
-              <View style={styles.oddsBlock}>
-                <Text style={styles.oddsLabel}>Atak / Obrona</Text>
-                <Text style={styles.oddsValue}>{player.attack}/{player.defense}</Text>
+            <View style={styles.playerRosterStats}>
+              <View style={styles.playerRosterStat}>
+                <Text style={styles.playerRosterStatLabel}>ATK / DEF</Text>
+                <Text style={styles.playerRosterStatValue}>{player.attack}/{player.defense}</Text>
               </View>
-              <View style={styles.oddsBlock}>
-                <Text style={styles.oddsLabel}>Zrecznosc</Text>
-                <Text style={styles.oddsValue}>{player.dexterity}</Text>
+              <View style={styles.playerRosterStat}>
+                <Text style={styles.playerRosterStatLabel}>DEX</Text>
+                <Text style={styles.playerRosterStatValue}>{player.dexterity}</Text>
               </View>
-              <View style={styles.oddsBlock}>
-                <Text style={styles.oddsLabel}>Bounty</Text>
-                <Text style={styles.oddsValue}>{formatMoney(player.bounty)}</Text>
+              <View style={styles.playerRosterStat}>
+                <Text style={styles.playerRosterStatLabel}>BOUNTY</Text>
+                <Text style={styles.playerRosterStatValue}>{formatMoney(player.bounty)}</Text>
               </View>
             </View>
           </Pressable>
@@ -8484,40 +8604,77 @@ function AppRuntime() {
     const byCash = (game.online?.rankings?.byCash?.length ? game.online.rankings.byCash : [...rankingPool].sort((a, b) => b.cash - a.cash)).slice(0, 6);
     const byHeists = (game.online?.rankings?.byHeists?.length ? game.online.rankings.byHeists : [...rankingPool].sort((a, b) => b.heists - a.heists)).slice(0, 6);
     const byCasino = (game.online?.rankings?.byCasino?.length ? game.online.rankings.byCasino : [...rankingPool].sort((a, b) => b.casino - a.casino)).slice(0, 6);
-
-    const RankingCard = ({ title, entries }) => (
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {entries.map((entry, index) => (
-          <View key={`${title}-${entry.id}`} style={styles.listCard}>
-            <View style={styles.inlineRow}>
-              <View style={styles.entityHead}>
-                <EntityBadge visual={getPlayerAvatarVisual(entry)} />
-                <View>
-                  <Text style={styles.listCardTitle}>#{index + 1} {entry.name}</Text>
-                  <Text style={styles.listCardMeta}>{entry.gang}</Text>
-                </View>
-              </View>
-              <Tag text={entry.id === "self" ? "TY" : "GRACZ"} />
-            </View>
-          </View>
-        ))}
-      </View>
-    );
+    const rankingGroups = {
+      respect: {
+        id: "respect",
+        label: "Szacun",
+        title: "Topka szacunku",
+        entries: byRespect,
+        renderValue: (entry) => `${entry.respect} RES`,
+      },
+      cash: {
+        id: "cash",
+        label: "Kasa",
+        title: "Topka kasy",
+        entries: byCash,
+        renderValue: (entry) => formatMoney(entry.cash),
+      },
+      heists: {
+        id: "heists",
+        label: "Napady",
+        title: "Topka napadow",
+        entries: byHeists,
+        renderValue: (entry) => `${entry.heists} runow`,
+      },
+      casino: {
+        id: "casino",
+        label: "Kasyno",
+        title: "Topka kasyna",
+        entries: byCasino,
+        renderValue: (entry) => `${entry.casino} wygr.`,
+      },
+    };
+    const activeRanking = rankingGroups[rankingCategory] || rankingGroups.respect;
 
     return (
       <>
       <SceneArtwork
         eyebrow="Rankingi"
         title="Topka miasta"
-        lines={["Szacun, kasa, napady i kasyno."]}
+        lines={["Wybierasz kategorie i widzisz jedna czysta liste zamiast sciany kart."]}
           accent={["#382417", "#140f0c", "#050505"]}
           source={SCENE_BACKGROUNDS.profile}
         />
-        <RankingCard title="Szacun" entries={byRespect} />
-        <RankingCard title="Kasa" entries={byCash} />
-        <RankingCard title="Napady" entries={byHeists} />
-        <RankingCard title="Kasyno" entries={byCasino} />
+        <View style={styles.planChipRow}>
+          {Object.values(rankingGroups).map((group) => (
+            <Pressable
+              key={group.id}
+              onPress={() => setRankingCategory(group.id)}
+              style={[styles.planChip, rankingCategory === group.id && styles.planChipActive]}
+            >
+              <Text style={[styles.planChipText, rankingCategory === group.id && styles.planChipTextActive]}>{group.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <SectionCard title={activeRanking.title} subtitle="Jedna kategoria naraz. Szybciej to zeskanowac i latwiej znalezc swoja pozycje.">
+          {activeRanking.entries.map((entry, index) => (
+            <View key={`${activeRanking.id}-${entry.id}`} style={styles.listCard}>
+              <View style={styles.listCardHeader}>
+                <View style={styles.entityHead}>
+                  <EntityBadge visual={getPlayerAvatarVisual(entry)} />
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>#{index + 1} {entry.name}</Text>
+                    <Text style={styles.listCardMeta}>{entry.gang === "No gang" ? "Solo" : entry.gang}</Text>
+                  </View>
+                </View>
+                <View style={styles.alignEnd}>
+                  <Text style={styles.listCardReward}>{activeRanking.renderValue(entry)}</Text>
+                  <Tag text={entry.id === "self" ? "TY" : "GRACZ"} />
+                </View>
+              </View>
+            </View>
+          ))}
+        </SectionCard>
       </>
     );
   };
@@ -9357,16 +9514,16 @@ const styles = StyleSheet.create({
   noticeDeltaChipNegative: { backgroundColor: "rgba(112,36,46,0.28)", borderColor: "rgba(218,105,122,0.5)" },
   noticeDeltaChipWarning: { backgroundColor: "rgba(115,83,22,0.28)", borderColor: "rgba(227,182,77,0.48)" },
   noticeDeltaText: { color: "#f7f2ea", fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
-  tabBarShell: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#3c2f1f", backgroundColor: "#060606" },
-  tabBarClassic: { flex: 1, backgroundColor: "#060606", maxHeight: 66 },
-  tabBarClassicContent: { paddingHorizontal: 8, paddingVertical: 10, gap: 10, alignItems: "center" },
-  tabButtonClassic: { minWidth: 110, height: 52, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", borderRadius: 999, borderWidth: 1, borderColor: "#5d4418", backgroundColor: "#0b0b0b" },
-  tabButtonClassicActive: { borderColor: "#c7902e", backgroundColor: "#14120d" },
+  tabBarShell: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#292c33", backgroundColor: "#07080b" },
+  tabBarClassic: { flex: 1, backgroundColor: "#07080b", maxHeight: 70 },
+  tabBarClassicContent: { paddingHorizontal: 10, paddingVertical: 10, gap: 10, alignItems: "center" },
+  tabButtonClassic: { minWidth: 108, height: 50, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", borderRadius: 18, borderWidth: 1, borderColor: "#2f333b", backgroundColor: "#101216" },
+  tabButtonClassicActive: { borderColor: "#c7902e", backgroundColor: "#17140f" },
   tabButtonHub: { marginLeft: 8 },
   tabButtonClassicInner: { flexDirection: "row", alignItems: "center", gap: 8 },
-  tabButtonClassicIcon: { color: "#c7902e", fontSize: 16, fontWeight: "900" },
+  tabButtonClassicIcon: { color: "#949bab", fontSize: 16, fontWeight: "900" },
   tabButtonClassicIconActive: { color: "#f0c24d" },
-  tabButtonClassicText: { color: "#d7d7d7", fontSize: 12, fontWeight: "800", textTransform: "uppercase" },
+  tabButtonClassicText: { color: "#c8ccd6", fontSize: 12, fontWeight: "800" },
   tabButtonClassicTextActive: { color: "#f0c24d" },
   mainBoard: { flexDirection: "row", alignItems: "flex-start" },
   mainBoardCompact: { flexDirection: "column" },
@@ -9375,37 +9532,42 @@ const styles = StyleSheet.create({
   railCompact: { width: "100%", minHeight: 0, borderLeftWidth: 0, borderRightWidth: 0, borderTopWidth: 1 },
   railPhone: { paddingHorizontal: 8 },
   railHeading: { color: "#9a9a9a", fontSize: 11, textTransform: "uppercase", marginBottom: 10, letterSpacing: 1 },
-  railLink: { borderBottomWidth: 1, borderColor: "#151515", paddingVertical: 5, paddingHorizontal: 4 },
-  railLinkActive: { backgroundColor: "#151515", borderLeftWidth: 2, borderLeftColor: "#d6a04f" },
-  railLinkText: { color: "#d0d0d0", fontSize: 11 },
-  railLinkTextActive: { color: "#f4d37e", fontWeight: "700" },
+  railLink: { borderRadius: 14, borderWidth: 1, borderColor: "transparent", paddingVertical: 8, paddingHorizontal: 10, marginBottom: 6, backgroundColor: "transparent" },
+  railLinkActive: { backgroundColor: "#14171d", borderColor: "#4a3b24" },
+  railLinkText: { color: "#b9bec8", fontSize: 11, fontWeight: "700" },
+  railLinkTextActive: { color: "#f4d37e", fontWeight: "800" },
   cashButtonFrame: { marginTop: 14, borderWidth: 1, borderColor: "#6b6b6b", paddingVertical: 18, paddingHorizontal: 10, alignItems: "center", backgroundColor: "#111111" },
   cashButtonText: { color: "#ffffff", fontWeight: "800", fontSize: 12, textTransform: "uppercase" },
   centerStage: { flex: 1, minHeight: 980, padding: 8, backgroundColor: "#030303" },
   centerStagePhone: { minHeight: 0, padding: 10, backgroundColor: "#050505" },
-  contentHeaderBar: { height: 28, backgroundColor: "#09090b", borderWidth: 1, borderColor: "#2c2c2f", marginBottom: 8, paddingHorizontal: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  contentHeaderLabel: { color: "#f0c24d", fontSize: 18, fontWeight: "800" },
-  contentHeaderSub: { color: "#666666", fontSize: 11, textTransform: "uppercase" },
-  sectionCard: { backgroundColor: "rgba(12,12,13,0.95)", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#2a2a2d", marginBottom: 10 },
-  sectionHeader: { marginBottom: 12 },
-  sectionTitle: { color: "#d3d3d3", fontSize: 20, fontWeight: "700", marginBottom: 4 },
-  sectionSubtitle: { color: "#8c8c8c", fontSize: 12, lineHeight: 18 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  quickActionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  contentHeaderBar: { minHeight: 42, backgroundColor: "#0a0c10", borderWidth: 1, borderColor: "#242831", marginBottom: 12, paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderRadius: 18 },
+  contentHeaderLabel: { color: "#f0ece5", fontSize: 19, fontWeight: "900" },
+  contentHeaderSub: { color: "#7d8594", fontSize: 11, textTransform: "uppercase", letterSpacing: 1 },
+  sectionCard: { backgroundColor: "rgba(11,12,16,0.98)", borderRadius: 24, padding: 16, borderWidth: 1, borderColor: "#23262d", marginBottom: 12, overflow: "hidden" },
+  sectionHeader: { marginBottom: 14, gap: 6 },
+  sectionHeaderAccent: { width: 42, height: 4, borderRadius: 999, backgroundColor: "#c7902e" },
+  sectionTitle: { color: "#f3efe7", fontSize: 19, fontWeight: "900" },
+  sectionSubtitle: { color: "#9ea5b2", fontSize: 12, lineHeight: 18 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  quickActionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   quickActionCard: { width: "31%", minWidth: 92, flexGrow: 1, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 16, backgroundColor: "#121315", borderWidth: 1, borderColor: "#2d2f36", alignItems: "center", gap: 8 },
   quickActionIconWrap: { width: 42, height: 42, borderRadius: 12, backgroundColor: "#1c1d22", borderWidth: 1, borderColor: "#3a3c44", alignItems: "center", justifyContent: "center" },
   quickActionIconText: { color: "#f0c24d", fontSize: 11, fontWeight: "900", letterSpacing: 0.7 },
   quickActionTitle: { color: "#f4efe8", fontSize: 12, fontWeight: "800", textAlign: "center" },
-  actionTile: { flexBasis: 220, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 106, padding: 14, borderRadius: 18, backgroundColor: "#141414", borderWidth: 1, borderColor: "#303030", justifyContent: "space-between" },
-  actionTileDanger: { backgroundColor: "#24110f", borderColor: "#6a2b20" },
+  actionTile: { flexBasis: 220, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 118, borderRadius: 22, borderWidth: 1, borderColor: "#2a2e37", overflow: "hidden" },
+  actionTileDanger: { borderColor: "#6a2b31" },
+  actionTilePressed: { transform: [{ scale: 0.985 }] },
   tileDisabled: { opacity: 0.45 },
-  actionTileHeader: { gap: 10, marginBottom: 8 },
-  actionTileTitle: { color: "#f0f0f0", fontSize: 16, fontWeight: "800", marginBottom: 6 },
-  actionTileSubtitle: { color: "#aaa79d", fontSize: 12, lineHeight: 18 },
-  statLine: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#1b1b1d", gap: 12 },
+  actionTileGradient: { flex: 1, padding: 14, justifyContent: "space-between" },
+  actionTileHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  actionTileVisualWrap: { position: "relative" },
+  actionTileVisualGlow: { position: "absolute", width: 50, height: 50, borderRadius: 999, backgroundColor: "rgba(240,194,77,0.12)", left: 4, top: 4 },
+  actionTileTitle: { color: "#f4efe8", fontSize: 16, fontWeight: "900", marginBottom: 6 },
+  actionTileSubtitle: { color: "#b4ac9f", fontSize: 12, lineHeight: 18 },
+  statLine: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: "#1a1d24", gap: 12 },
   statLineLabelWrap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  statLineLabel: { color: "#a69e93", fontSize: 13, flex: 1 },
-  statLineValue: { color: "#f4efe8", fontSize: 13, fontWeight: "700", maxWidth: "58%", flexShrink: 1, textAlign: "right" },
+  statLineLabel: { color: "#a6adba", fontSize: 13, flex: 1 },
+  statLineValue: { color: "#f4efe8", fontSize: 13, fontWeight: "800", maxWidth: "58%", flexShrink: 1, textAlign: "right" },
   progressBar: { height: 8, borderRadius: 999, backgroundColor: "#1e1e20", overflow: "hidden", marginTop: 6 },
   progressFill: { height: "100%", backgroundColor: "#c49539" },
   dotRow: { flexDirection: "row", gap: 6, marginTop: 8 },
@@ -9413,8 +9575,8 @@ const styles = StyleSheet.create({
   progressDotActive: { backgroundColor: "#d5a045" },
   logEntry: { paddingVertical: 10, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: "#d6a04f", marginBottom: 8, backgroundColor: "#111111", borderRadius: 2 },
   logText: { color: "#ddd8d0", lineHeight: 19, fontSize: 12 },
-  listCard: { padding: 12, borderRadius: 18, backgroundColor: "#111214", borderWidth: 1, borderColor: "#2b2b31", marginBottom: 10 },
-  districtCard: { padding: 10, borderRadius: 16, backgroundColor: "#17181c", borderWidth: 1, borderColor: "#2f3138", marginTop: 10 },
+  listCard: { padding: 13, borderRadius: 20, backgroundColor: "#12141a", borderWidth: 1, borderColor: "#252a33", marginBottom: 10 },
+  districtCard: { padding: 10, borderRadius: 18, backgroundColor: "#171a22", borderWidth: 1, borderColor: "#2d333d", marginTop: 10 },
   listCardLocked: { opacity: 0.55 },
   listCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 12 },
   entityHead: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
@@ -9434,10 +9596,31 @@ const styles = StyleSheet.create({
   entityEmojiLarge: { fontSize: 32 },
   entityCodePill: { position: "absolute", bottom: 6, right: 6, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.72)", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   entityCode: { color: "#f4efe8", fontSize: 9, fontWeight: "800", letterSpacing: 0.8 },
-  listCardTitle: { color: "#f3eee7", fontSize: 15, fontWeight: "800", marginBottom: 4 },
-  listCardMeta: { color: "#999082", fontSize: 12, lineHeight: 18 },
-  listCardReward: { color: "#d6a04f", fontSize: 13, fontWeight: "800", maxWidth: "100%", flexShrink: 1, textAlign: "right" },
+  listCardTitle: { color: "#f3eee7", fontSize: 15, fontWeight: "900", marginBottom: 4 },
+  listCardMeta: { color: "#9ca4b2", fontSize: 12, lineHeight: 18 },
+  listCardReward: { color: "#d6a04f", fontSize: 13, fontWeight: "900", maxWidth: "100%", flexShrink: 1, textAlign: "right" },
   listActionsRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", marginTop: 12 },
+  playerRosterCard: { paddingVertical: 10 },
+  playerRosterHeader: { marginBottom: 8, alignItems: "center" },
+  playerRosterStats: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  playerRosterStat: {
+    flexGrow: 1,
+    minWidth: 82,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#27282d",
+    backgroundColor: "#101114",
+  },
+  playerRosterStatLabel: {
+    color: "#948a7d",
+    fontSize: 10,
+    textTransform: "uppercase",
+    marginBottom: 4,
+    letterSpacing: 0.7,
+  },
+  playerRosterStatValue: { color: "#f4d37e", fontSize: 14, fontWeight: "800" },
   planChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
   planChip: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: "#3a2a21", backgroundColor: "#151110" },
   planChipActive: { borderColor: "#c49539", backgroundColor: "#21170f" },
@@ -9447,9 +9630,9 @@ const styles = StyleSheet.create({
   oddsBlock: { flex: 1, minWidth: 132, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: "#27282d", backgroundColor: "#101114" },
   oddsLabel: { color: "#948a7d", fontSize: 11, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.8 },
   oddsValue: { color: "#f4d37e", fontSize: 18, fontWeight: "800" },
-  inlineButton: { alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 2, backgroundColor: "#201712", borderWidth: 1, borderColor: "#5b3529" },
-  inlineButtonText: { color: "#f6efe6", fontWeight: "700", fontSize: 13 },
-  inlineButtonDanger: { backgroundColor: "#2a1214", borderColor: "#8a3438" },
+  inlineButton: { alignSelf: "flex-start", paddingVertical: 11, paddingHorizontal: 14, borderRadius: 16, backgroundColor: "#151821", borderWidth: 1, borderColor: "#333746" },
+  inlineButtonText: { color: "#f6efe6", fontWeight: "800", fontSize: 13 },
+  inlineButtonDanger: { backgroundColor: "#221316", borderColor: "#8a3438" },
   inlineButtonDangerText: { color: "#ffb8be" },
   inlineRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 },
   gymBatchControls: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12, marginBottom: 10 },
@@ -9483,12 +9666,12 @@ const styles = StyleSheet.create({
   sidebarNumberSmall: { color: "#ffffff", fontSize: 20, fontWeight: "800", lineHeight: 22, marginBottom: 8 },
   mobileTopSectionRail: { borderBottomWidth: 1, borderBottomColor: "#24262c", backgroundColor: "#090a0d", paddingVertical: 8, paddingHorizontal: 8 },
   mobileTopSectionRailContent: { gap: 8, paddingRight: 4 },
-  mobileTopSectionChip: { minHeight: 42, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: "#5d4418", backgroundColor: "#101114", alignItems: "center", justifyContent: "center" },
-  mobileTopSectionChipActive: { borderColor: "#c7902e", backgroundColor: "#17140d" },
+  mobileTopSectionChip: { minHeight: 44, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: "#2e323a", backgroundColor: "#111318", alignItems: "center", justifyContent: "center" },
+  mobileTopSectionChipActive: { borderColor: "#c7902e", backgroundColor: "#17140f" },
   mobileTopSectionInner: { flexDirection: "row", alignItems: "center", gap: 8 },
-  mobileTopSectionIcon: { color: "#c7902e", fontSize: 14, fontWeight: "900" },
+  mobileTopSectionIcon: { color: "#9098a7", fontSize: 14, fontWeight: "900" },
   mobileTopSectionIconActive: { color: "#f0c24d" },
-  mobileTopSectionText: { color: "#d7d7d7", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
+  mobileTopSectionText: { color: "#c8ccd6", fontSize: 11, fontWeight: "800" },
   mobileTopSectionTextActive: { color: "#f0c24d" },
   mobileHudRail: { borderBottomWidth: 1, borderBottomColor: "#1f2126", backgroundColor: "#0b0c10", paddingVertical: 8 },
   mobileHudRailContent: { gap: 8, paddingHorizontal: 8, paddingRight: 14 },
@@ -9517,9 +9700,12 @@ const styles = StyleSheet.create({
   mobileStatusCard: { flexBasis: 160, flexGrow: 1, width: undefined, maxWidth: "100%", minWidth: 0, minHeight: 74, padding: 12, borderRadius: 16, backgroundColor: "#101114", borderWidth: 1, borderColor: "#292c33" },
   mobileStatusLabel: { color: "#8d9199", fontSize: 10, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 },
   mobileStatusValue: { color: "#f5efe6", fontSize: 15, fontWeight: "800" },
-  tag: { paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "#1f271f", borderRadius: 999, alignSelf: "flex-start" },
-  tagWarning: { backgroundColor: "#3b261c" },
-  tagText: { color: "#d7d7d7", fontSize: 11, fontWeight: "700" },
+  tag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, alignSelf: "flex-start", borderWidth: 1 },
+  tagPositive: { backgroundColor: "rgba(44,97,67,0.18)", borderColor: "rgba(84,182,126,0.32)" },
+  tagWarning: { backgroundColor: "rgba(113,51,40,0.18)", borderColor: "rgba(208,109,88,0.32)" },
+  tagText: { fontSize: 11, fontWeight: "800" },
+  tagTextPositive: { color: "#d8f6e4" },
+  tagTextWarning: { color: "#ffd6cb" },
   choiceRow: { flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" },
   choiceChip: { paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#3c1717", borderWidth: 1, borderColor: "#6c2d2d" },
   choiceChipActive: { backgroundColor: "#8c2424" },
@@ -9605,6 +9791,7 @@ const styles = StyleSheet.create({
   emptyText: { color: "#9a9187", fontSize: 13 },
   taskMeta: { gap: 6, alignItems: "flex-end" },
   flexOne: { flex: 1 },
+  alignEnd: { alignItems: "flex-end", justifyContent: "center", gap: 6 },
 });
 
 

@@ -1,5 +1,6 @@
 import React from "react";
 import { View } from "react-native";
+import { HeroPanel } from "../components/GameScreenPrimitives";
 
 export function ProfileMenuScreen({
   section,
@@ -52,6 +53,21 @@ export function ProfileMenuScreen({
         lines={[subtitle]}
         accent={isUtilities ? ["#2e2a18", "#15110c", "#050505"] : ["#291e2c", "#120f17", "#050505"]}
         source={isUtilities ? sceneBackgrounds.profile : sceneBackgrounds.city}
+      />
+      <HeroPanel
+        eyebrow={isUtilities ? "Narzedzia" : "Spolecznosc"}
+        title={title}
+        summary={subtitle}
+        tone={isUtilities ? "gold" : "info"}
+        pills={[
+          {
+            label: "Sekcje",
+            value: `${visibleCards.length}`,
+            note: isUtilities ? "Ruchy techniczne i regeneracja." : "Kontakt z ludzmi i zyciem miasta.",
+            tone: isUtilities ? "gold" : "info",
+            icon: isUtilities ? "tools" : "account-group-outline",
+          },
+        ]}
       />
       <SectionCard title={title} subtitle={subtitle}>
         <View style={styles.grid}>

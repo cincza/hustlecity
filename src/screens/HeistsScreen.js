@@ -5,6 +5,7 @@ import { HeistCard, HeistTabs } from "../components/GameShellUI";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getOperationChoiceImpactLines, getOperationPreviewDetails } from "../game/selectors/metaGameplay";
 import { getContractTagText } from "../../shared/contracts.js";
+import { HeroPanel } from "../components/GameScreenPrimitives";
 
 export function HeistsScreen({
   section = "solo",
@@ -203,25 +204,48 @@ export function HeistsScreen({
           lines={["Sprzet, auto i staty sklejaja wynik. Bez loadoutu robi sie naprawde goraco."]}
           source={sceneBackgrounds.heists}
         />
-
-        {criticalCareActive ? (
-          <SectionCard title="Stan krytyczny" subtitle="Kontrakty i operacje sa teraz zablokowane.">
-            <Text style={styles.listCardTitle}>
-              {criticalCareStatus?.mode?.label || "Intensywna terapia"} | {criticalCareLockLabel}
-            </Text>
-            <Text style={styles.listCardMeta}>
-              Jestes w szpitalu po {criticalCareStatus?.source || "ciezkiej akcji"}. Wrocisz z okolo {criticalCareStatus?.expectedRecoveryHp || 1} HP. W tym czasie mozesz dalej ogarniac bank, rynek, gang i raporty.
-            </Text>
-            <Text style={styles.listCardMeta}>To nie jest zwykly cooldown. Zablokowane sa tylko akcje bojowe i ryzykowne.</Text>
-            {typeof onOpenHospital === "function" ? (
-              <View style={styles.inlineRow}>
-                <Pressable onPress={onOpenHospital} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>Szpital</Text>
-                </Pressable>
-              </View>
-            ) : null}
-          </SectionCard>
-        ) : null}
+        <HeroPanel
+          eyebrow={criticalCareActive ? "Stan krytyczny" : "Kontrakty"}
+          title={criticalCareActive ? "Kontrakty poczekaja do wyjscia ze szpitala" : "Robota premium dla mocniejszych graczy"}
+          summary={
+            criticalCareActive
+              ? `Jestes na ${criticalCareStatus?.mode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ciezkiej akcji"}. To nie zwykly cooldown - bojowe akcje wracaja dopiero po wyjsciu z terapii.`
+              : "Kontrakty siedza pomiedzy zwyklymi napadami a operacjami. Najpierw dobierasz loadout i tagi, potem dopiero odpalasz wejscie."
+          }
+          tone={criticalCareActive ? "danger" : "gold"}
+          pills={[
+            {
+              label: criticalCareActive ? "Do wyjscia" : "Aktywne kontrakty",
+              value: criticalCareActive ? criticalCareLockLabel : `${safeContracts.length}`,
+              note: criticalCareActive ? `Powrot z okolo ${criticalCareStatus?.expectedRecoveryHp || 1} HP.` : "Na tablicy wisza trzy mocniejsze roboty.",
+              tone: criticalCareActive ? "danger" : "gold",
+              icon: criticalCareActive ? "hospital-box-outline" : "briefcase-outline",
+            },
+            {
+              label: "Loadout",
+              value: contractLoadoutSummaryLines?.length ? `${contractLoadoutSummaryLines.length} slotow` : "Brak seta",
+              note: "Puste sloty mocno tna szanse i retencje lupu.",
+              tone: "info",
+            icon: "shield-outline",
+            },
+            {
+              label: "Historia",
+              value: `${safeContractHistory.length}`,
+              note: "Ostatnie rozliczenia pod reka.",
+              tone: "neutral",
+              icon: "history",
+            },
+          ]}
+          primaryAction={
+            typeof onOpenHospital === "function" && criticalCareActive
+              ? {
+                  label: "Szpital",
+                  meta: "Wroc do terapii i wybierz leczenie.",
+                  onPress: onOpenHospital,
+                }
+              : null
+          }
+        />
 
         <SectionCard title="Loadout" subtitle="Kontrakty licza pelny set. Kazdy pusty slot boli.">
           {(contractLoadoutSummaryLines || []).map((line) => (
@@ -330,34 +354,48 @@ export function HeistsScreen({
         lines={["Ulica, sklepy i szybkie roboty bez zbednego scrolla."]}
         source={sceneBackgrounds.heists}
       />
-
-      {criticalCareActive ? (
-        <SectionCard title="Stan krytyczny" subtitle="Napady wracaja po wyjsciu ze szpitala.">
-          <Text style={styles.listCardTitle}>
-            {criticalCareStatus?.mode?.label || "Intensywna terapia"} | {criticalCareLockLabel}
-          </Text>
-          <Text style={styles.listCardMeta}>
-            Jestes w szpitalu po {criticalCareStatus?.source || "ciezkiej akcji"}. Ryzykowne akcje sa zgaszone, ale nadal mozesz ogarniac rynek, gang, czat i raporty.
-          </Text>
-          <Text style={styles.listCardMeta}>To nie jest zwykly cooldown. Napady, kontrakty, operacje i fight wroca dopiero po wyjsciu z terapii.</Text>
-          {typeof onOpenHospital === "function" ? (
-            <View style={styles.inlineRow}>
-              <Pressable onPress={onOpenHospital} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Idz do szpitala</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </SectionCard>
-      ) : null}
-
-      <SectionCard title="Napady" subtitle="Wybierasz prog, widzisz tylko akcje z tego progu i od razu wchodzisz do roboty.">
-        <StatLine label="Aktualny szacunek" value={`${game.player.respect}`} />
-        <StatLine
-          label="Odblokowany tier"
-          value={HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).slice(-1)[0]?.title || HEIST_TIERS[0].title}
-        />
-        <StatLine label="Nastepny prog" value={nextTier ? `${nextTier.title} przy Szacunku ${nextTier.unlockRespect}` : "Masz wszystkie progi"} />
-      </SectionCard>
+      <HeroPanel
+        eyebrow={criticalCareActive ? "Stan krytyczny" : "Napady"}
+        title={criticalCareActive ? "Napady sa chwilowo zgaszone" : "Szybkie roboty na teraz"}
+        summary={
+          criticalCareActive
+            ? `Jestes na ${criticalCareStatus?.mode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ciezkiej akcji"}. To nie cooldown - napady, kontrakty i fight wracaja dopiero po wyjsciu z terapii.`
+            : "Tu najszybciej bierzesz ryzyko, energie i payout. Najpierw wybierasz prog, potem widzisz tylko sensowne karty z tego tieru."
+        }
+        tone={criticalCareActive ? "danger" : "gold"}
+        pills={[
+          {
+            label: "Szacunek",
+            value: `${game.player.respect}`,
+            note: "To od niego zalezy dostep do kolejnych progow.",
+            tone: "gold",
+            icon: "star-four-points",
+          },
+          {
+            label: "Odblokowany tier",
+            value: HEIST_TIERS.filter((tier) => game.player.respect >= tier.unlockRespect).slice(-1)[0]?.shortLabel || HEIST_TIERS[0].shortLabel,
+            note: nextTier ? `Nastepny: ${nextTier.shortLabel} od ${nextTier.unlockRespect} RES.` : "Pelna drabinka odblokowana.",
+            tone: "info",
+            icon: "chevron-double-up",
+          },
+          {
+            label: "Karty w tym progu",
+            value: `${activeHeists.length}`,
+            note: criticalCareActive ? criticalCareLockLabel : "Widok jest filtrowany do wybranego progu.",
+            tone: criticalCareActive ? "danger" : "neutral",
+            icon: "cards-outline",
+          },
+        ]}
+        primaryAction={
+          typeof onOpenHospital === "function" && criticalCareActive
+            ? {
+                label: "Idz do szpitala",
+                meta: "Leczenie i szybki powrot do roboty.",
+                onPress: onOpenHospital,
+              }
+            : null
+        }
+      />
 
       <SectionCard title="Progi" subtitle="Ulica, sklepy, firmy i high risk w jednym czystym przejsciu.">
         <HeistTabs tabs={tierTabs} selected={selectedTier} onSelect={setSelectedTier} />

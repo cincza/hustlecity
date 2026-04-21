@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getDealerPayoutForDrug } from "../../shared/socialGameplay.js";
+import { HeroPanel } from "../components/GameScreenPrimitives";
 
 export function MarketScreen({
   section,
@@ -75,6 +76,7 @@ export function MarketScreen({
 
   if (section === "items") {
     const filteredItems = safeContractItems.filter((item) => item.category === selectedContractCategory);
+    const ownedItemsCount = safeContractItems.filter((item) => safeContractState?.ownedItems?.[item.id]).length;
     return (
       <>
         <SceneArtwork
@@ -83,6 +85,17 @@ export function MarketScreen({
           lines={["Bron, ochrona, narzedzia i elektronika pod grubsze roboty."]}
           accent={["#3b2717", "#14100c", "#050505"]}
           source={sceneBackgrounds.market}
+        />
+        <HeroPanel
+          eyebrow="Itemy"
+          title="Sprzet pod Kontrakty"
+          summary="Najpierw wybierasz kategorie, potem patrzysz czy dany item pasuje do tagow roboty. To ma byc czytelny sklep, nie smietnik z RPG."
+          tone="gold"
+          pills={[
+            { label: "Kategorie", value: `${contractCategories.length}`, note: "Bron, ochrona, narzedzia i elektronika.", tone: "info", icon: "view-grid-outline" },
+            { label: "Masz itemow", value: `${ownedItemsCount}`, note: "Kupione i gotowe do loadoutu.", tone: "success", icon: "briefcase-outline" },
+            { label: "Slot teraz", value: selectedContractCategory === "weapon" ? "Bron" : selectedContractCategory === "armor" ? "Ochrona" : selectedContractCategory === "tool" ? "Narzedzia" : "Elektronika", note: `${filteredItems.length} pozycji w tej kategorii.`, tone: "neutral", icon: "tune" },
+          ]}
         />
         <SectionCard title="Kategorie" subtitle="Najpierw wybierasz slot, potem sprzet pod konkretne tagi kontraktu.">
           <View style={styles.marketButtons}>
@@ -155,6 +168,17 @@ export function MarketScreen({
           accent={["#2d2438", "#100f16", "#050505"]}
           source={sceneBackgrounds.city}
         />
+        <HeroPanel
+          eyebrow="Auta"
+          title="Garaz pod kontrakty"
+          summary="Auta robia glownie pod ucieczke, cargo i stealth. Tu tez nie ma jednego najlepszego wyboru pod wszystko."
+          tone="info"
+          pills={[
+            { label: "Modele", value: `${safeContractCars.length}`, note: "Rozne profile pod escape i cargo.", tone: "info", icon: "car-sports" },
+            { label: "Masz w garazu", value: `${safeContractCars.filter((car) => safeContractState?.ownedCars?.[car.id]).length}`, note: "Kupione fury pod loadout.", tone: "success", icon: "garage" },
+            { label: "Wybrane auto", value: safeContractCars.find((car) => car.id === safeContractState?.loadout?.car)?.name || "Brak", note: "Aktywne tylko jedno auto naraz.", tone: "gold", icon: "key-variant" },
+          ]}
+        />
         <SectionCard title="Oferta aut" subtitle="Auto robi glownie pod kontrakt. Nie jest globalnym buffem do calej gry.">
           {safeContractCars.map((car) => {
             const owned = Boolean(safeContractState?.ownedCars?.[car.id]);
@@ -205,6 +229,16 @@ export function MarketScreen({
           lines={["Kupujesz, sprzedajesz i pilnujesz ruchu rynku."]}
           accent={["#372417", "#160f0c", "#050505"]}
           source={sceneBackgrounds.market}
+        />
+        <HeroPanel
+          eyebrow="Towar"
+          title="Rynek miasta"
+          summary="To jest czysty handel: podaz, trend i szybkie kupno albo sprzedaz. Bez dodatkowego chaosu i bez mieszania z klubem."
+          tone="info"
+          pills={[
+            { label: "Produkty", value: `${products.length}`, note: "Towary zalezne od podazy ulicy i fallbacku NPC.", tone: "info", icon: "package-variant-closed" },
+            { label: "Gotowka", value: formatMoney(safeGame.player.cash || 0), note: "Kupujesz tylko tym, co masz przy sobie.", tone: "gold", icon: "cash-multiple" },
+          ]}
         />
         <SectionCard title="Handel" subtitle="Ulica, fallback NPC i ceny na zywo.">
           <View style={styles.listCard}>
@@ -271,6 +305,17 @@ export function MarketScreen({
           lines={["Kupujesz, sprzedajesz albo zarzucasz."]}
           accent={["#3a2617", "#16100c", "#050505"]}
           source={sceneBackgrounds.escort}
+        />
+        <HeroPanel
+          eyebrow="Diler"
+          title="Szybki obrot towarem"
+          summary="Kupujesz, sprzedajesz albo zarzucasz. Jedna ilosc obsluguje kupno i sprzedaz, a cena skupu jest od razu widoczna na karcie."
+          tone="danger"
+          pills={[
+            { label: "Towary", value: `${drugs.length}`, note: "Rozne efekty i rozne ryzyko przedawkowania.", tone: "danger", icon: "flask-outline" },
+            { label: "Ilosc transakcji", value: `${dealerTradeQuantity}`, note: "Ta sama liczba dla kupna i sprzedazy.", tone: "gold", icon: "numeric" },
+            { label: "Na stanie", value: `${drugs.reduce((sum, drug) => sum + Number(safeGame.drugInventory?.[drug.id] || 0), 0)}`, note: "Laczna liczba sztuk przy sobie.", tone: "info", icon: "briefcase-outline" },
+          ]}
         />
         <SectionCard title="Towar" subtitle="Stan, cena i szybki obrot.">
           <View style={styles.listCard}>

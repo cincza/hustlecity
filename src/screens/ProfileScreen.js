@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { HeroPanel } from "../components/GameScreenPrimitives";
 
 const LOADOUT_LABELS = {
   weapon: "Bron",
@@ -50,7 +51,7 @@ export function ProfileScreen({
 
   if (section === "summary") {
     return (
-      <SectionCard title="Profil" subtitle="Twarz, staty i progres.">
+      <>
         <SceneArtwork
           eyebrow="Profil"
           title="Twoja twarz w Hustle City"
@@ -58,6 +59,18 @@ export function ProfileScreen({
           accent={["#3f2818", "#16100c", "#050505"]}
           source={sceneBackgrounds.profile}
         />
+        <HeroPanel
+          eyebrow="Status gracza"
+          title={game.player.name}
+          summary="Tu najpierw lapiesz twarz postaci, biezacy stan i glowne liczby. Dopiero nizej schodzisz do avatarow, statow i progresu."
+          tone={criticalCareStatus?.active ? "danger" : "gold"}
+          pills={[
+            { label: "Szacunek", value: `${game.player.respect}`, note: getRankTitle(game.player.respect), tone: "gold", icon: "star-four-points" },
+            { label: "Kasa", value: formatMoney(game.player.cash), note: "Gotowka przy sobie.", tone: "success", icon: "cash-multiple" },
+            { label: "HP", value: `${game.player.hp}/${game.player.maxHp}`, note: criticalCareStatus?.active ? criticalCareStatus.mode?.label || "Stan krytyczny" : "Aktualne zdrowie.", tone: criticalCareStatus?.active ? "danger" : "neutral", icon: "heart-pulse" },
+          ]}
+        />
+        <SectionCard title="Profil" subtitle="Twarz, staty i progres.">
         <View style={styles.avatarPanel}>
           <LinearGradient colors={activeAvatar.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatarHero}>
             {activeAvatar.image ? <Image source={activeAvatar.image} style={styles.avatarHeroImage} /> : null}
@@ -120,7 +133,8 @@ export function ProfileScreen({
         ) : null}
         <StatLine label="Laczny zarobek" value={formatMoney(game.stats.totalEarned)} />
         <StatLine label="Wygrane napady" value={`${game.stats.heistsWon}`} />
-      </SectionCard>
+        </SectionCard>
+      </>
     );
   }
 
@@ -133,6 +147,16 @@ export function ProfileScreen({
           lines={["Rosniesz szacunek po szacunku."]}
           accent={["#412517", "#160f0c", "#050505"]}
           source={sceneBackgrounds.profile}
+        />
+        <HeroPanel
+          eyebrow="Progres"
+          title={`Szacunek ${game.player.respect}`}
+          summary="Ta karta ma od razu pokazywac ile Ci zostalo do kolejnego progu i czy teraz bardziej oplaca sie cisnac napady, kontrakty czy zwykle misje."
+          tone="gold"
+          pills={[
+            { label: "XP", value: `${respectInfo.currentXp}/${respectInfo.requirement}`, note: `Brakuje ${respectInfo.xpRemaining} XP.`, tone: "gold", icon: "chart-line" },
+            { label: "Nastepny prog", value: `${respectInfo.nextLevel}`, note: "Kolejny poziom szacunku.", tone: "info", icon: "chevron-double-up" },
+          ]}
         />
         <SectionCard title="Szacun" subtitle="Pasek progresu i kolejny prog.">
           <StatLine label="Aktualny szacun" value={`${game.player.respect}`} />
@@ -155,6 +179,17 @@ export function ProfileScreen({
           lines={["Tu widzisz co masz, co jest zalozone i czym wchodzisz do roboty premium."]}
           accent={["#2f2537", "#110f15", "#050505"]}
           source={sceneBackgrounds.profile}
+        />
+        <HeroPanel
+          eyebrow="Loadout"
+          title="Aktualny set pod kontrakty"
+          summary="Najpierw widzisz co masz zalozone, potem dopiero schodzisz do listy posiadanego sprzetu i garazu."
+          tone="info"
+          pills={[
+            { label: "Sloty", value: `${Object.keys(LOADOUT_LABELS).length}`, note: "Bron, ochrona, narzedzia, elektronika i auto.", tone: "info", icon: "shield-outline" },
+            { label: "Masz itemow", value: `${(contractItems || []).length}`, note: "Kupiony sprzet pod kontrakty.", tone: "gold", icon: "briefcase-outline" },
+            { label: "Masz aut", value: `${(contractCars || []).length}`, note: "Fury dostepne w garazu.", tone: "success", icon: "car-sports" },
+          ]}
         />
 
         <SectionCard title="Aktualny loadout" subtitle="Jeden slot na kategorie. Bez setu kontrakt boli duzo bardziej.">
@@ -242,6 +277,17 @@ export function ProfileScreen({
           lines={["Atak, obrona i heat decyduja o ryzyku."]}
           accent={["#38271a", "#15100c", "#050505"]}
           source={sceneBackgrounds.profile}
+        />
+        <HeroPanel
+          eyebrow="Bezpieczenstwo"
+          title="Jak bardzo boli ryzyko"
+          summary="To jest szybki panel pod walke i wysokie ryzyko. Najpierw lapiesz staty, potem widzisz jak heat i gang zmieniaja realne szanse."
+          tone="danger"
+          pills={[
+            { label: "ATK", value: `${game.player.attack}`, note: "Wejscie w brutalna akcje.", tone: "danger", icon: "sword" },
+            { label: "DEF", value: `${game.player.defense}`, note: "Ile wytrzymasz przy failu.", tone: "info", icon: "shield-outline" },
+            { label: "DEX", value: `${game.player.dexterity}`, note: "Czyste wyjscie i unik.", tone: "gold", icon: "run-fast" },
+          ]}
         />
         <SectionCard title="Ochrona" subtitle="Staty, gang i ryzyko.">
           <StatLine label="Obrona bazowa" value={`${game.player.defense}`} />
