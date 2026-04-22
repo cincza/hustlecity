@@ -1,4 +1,5 @@
 import { applyXpProgression } from "../../../shared/progression.js";
+import { consumeArenaActionBoosts, getArenaActionModifiers } from "../../../shared/arena.js";
 import { clamp, CONTRACT_RULES } from "../../../shared/economy.js";
 import {
   canAffordContractAsset,
@@ -195,6 +196,7 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     profile: player.profile,
     contractState: player.contracts,
     districtSummary,
+    activeBoosts: player.activeBoosts,
   });
   if (!preview) {
     fail("Nie udalo sie zlozyc podgladu kontraktu.", 500);
@@ -204,13 +206,20 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
   const baseReward = randomBetween(contract.baseReward[0], contract.baseReward[1]);
   const reward = Math.max(0, Math.floor(baseReward * Number(preview.rewardMultiplier || 1)));
   const entryCost = Number(contract.entryCost || 0);
+  const arenaModifiers = getArenaActionModifiers(player.activeBoosts, "contract", now);
+  const { nextBoosts, consumed } = consumeArenaActionBoosts(player.activeBoosts, "contract", now);
   player.profile.cash = Math.max(0, Number(player.profile.cash || 0) - entryCost);
   player.profile.energy = Math.max(0, Number(player.profile.energy || 0) - Number(contract.energyCost || 0));
+  player.activeBoosts = nextBoosts;
 
   if (success) {
+    const finalXpGain = Math.max(
+      1,
+      Math.round(Number(contract.xpGain || 0) * (1 + Number(arenaModifiers.xpMultiplier || 0)))
+    );
     const progression = applyXpProgression(
       { respect: Number(player.profile?.respect || 0), xp: Number(player.profile?.xp || 0) },
-      Number(contract.xpGain || 0)
+      finalXpGain
     );
     player.profile.cash = Number(player.profile.cash || 0) + reward;
     player.profile.heat = clamp(Number(player.profile.heat || 0) + Number(preview.heatGain || 0), 0, 100);
@@ -239,10 +248,11 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
       success: true,
       contractId: contract.id,
       reward,
-      xpGain: Number(contract.xpGain || 0),
+      xpGain: finalXpGain,
       preview,
       historyEntry,
-      logMessage: `${contract.name} siada. Wpada ${reward}$ po koszcie ${entryCost}$.`,
+      consumedBoosts: consumed,
+      logMessage: `${contract.name} siada. Wpada ${reward}$ po koszcie ${entryCost}$.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`,
     };
   }
 
@@ -303,11 +313,12 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     jailed: finalJailSeconds > 0,
     jailSeconds: finalJailSeconds,
     historyEntry,
+    consumedBoosts: consumed,
     logMessage:
       damageState.criticalCareTriggered
-        ? `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$ i trafiasz na intensywna terapie.`
+        ? `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$ i trafiasz na intensywna terapie.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`
         : finalJailSeconds > 0
-        ? `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$, tracisz ${failDamage} HP i wpadasz do celi.`
-        : `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$ i wracasz z ${failDamage} HP straty.`,
+        ? `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$, tracisz ${failDamage} HP i wpadasz do celi.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`
+        : `${contract.name} sie pali. Palisz ${entryCost + extraLoss}$ i wracasz z ${failDamage} HP straty.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`,
   };
 }

@@ -79,13 +79,18 @@ import {
   appendPlayerMessage,
   buyDrugFromDealerForPlayer,
   consumeDrugForPlayer,
-  fightClubRoundForPlayer,
   placeBountyOnPlayer,
   performClubActionForPlayer,
   sellDrugToDealerForPlayer,
   sendPlayerMessageBetweenPlayers,
   sendQuickMessageBetweenPlayers,
 } from "./services/socialActionService.js";
+import {
+  buyArenaBoostForPlayer,
+  ensurePlayerArenaState,
+  resolveArenaFightForPlayer,
+  startArenaRunForPlayer,
+} from "./services/arenaService.js";
 import {
   assignEscortToStreetForPlayer,
   buyBusinessForPlayer,
@@ -207,6 +212,12 @@ import { createCityState, findDistrictById, getDistrictSummaries } from "../../s
 import { createGangState } from "../../shared/gangProjects.js";
 import { createOperationsState, getOperationById, OPERATION_CATALOG } from "../../shared/operations.js";
 import { createContractState } from "../../shared/contracts.js";
+import {
+  consumeArenaActionBoosts,
+  createArenaState,
+  getArenaActionModifiers,
+  normalizeArenaState,
+} from "../../shared/arena.js";
 import {
   ADMIN_CASH_GRANT_MAX,
   ADMIN_DEFAULT_USERNAME,
@@ -493,6 +504,9 @@ function createInitialPlayerData(username = "gracz") {
       contractLoadoutEquips: 0,
       contractsCompleted: 0,
       operationsCompleted: 0,
+      arenaRuns: 0,
+      arenaFightWins: 0,
+      arenaTokensEarned: 0,
       districtActionsById: {},
     },
     inventory: Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0])),
@@ -532,6 +546,7 @@ function createInitialPlayerData(username = "gracz") {
     city: createCityState(),
     operations: createOperationsState(),
     contracts: createContractState(),
+    arena: createArenaState(),
     businessesOwned: [],
     businessUpgrades: {},
     factoriesOwned: {},
@@ -614,6 +629,9 @@ function ensurePlayerExtendedState(player) {
   player.stats.contractLoadoutEquips = Math.max(0, Math.floor(Number(player.stats.contractLoadoutEquips || 0)));
   player.stats.contractsCompleted = Math.max(0, Math.floor(Number(player.stats.contractsCompleted || 0)));
   player.stats.operationsCompleted = Math.max(0, Math.floor(Number(player.stats.operationsCompleted || 0)));
+  player.stats.arenaRuns = Math.max(0, Math.floor(Number(player.stats.arenaRuns || 0)));
+  player.stats.arenaFightWins = Math.max(0, Math.floor(Number(player.stats.arenaFightWins || 0)));
+  player.stats.arenaTokensEarned = Math.max(0, Math.floor(Number(player.stats.arenaTokensEarned || 0)));
   if (!player.stats.districtActionsById || typeof player.stats.districtActionsById !== "object" || Array.isArray(player.stats.districtActionsById)) {
     player.stats.districtActionsById = {};
   } else {
@@ -685,6 +703,8 @@ function ensurePlayerExtendedState(player) {
   ensurePlayerCityState(player);
   ensurePlayerOperationState(player);
   ensurePlayerContractState(player);
+  player.arena = normalizeArenaState(player.arena || createArenaState());
+  ensurePlayerArenaState(player);
   if (player.club?.owned && !player.club.districtId) {
     player.club.districtId = resolveClubDistrictId(player, player.club.sourceId);
   }
@@ -1642,9 +1662,14 @@ function getHeistSuccessChance(player, heist) {
     player.profile.stamina * 0.5;
   const heatPenalty = player.profile.heat * 0.0045;
   const hpPenalty = player.profile.hp < player.profile.maxHp * 0.4 ? 0.05 : 0;
+  const arenaModifiers = getArenaActionModifiers(player.activeBoosts, "heist");
 
   return clamp(
-    heist.baseSuccess + (statScore - heist.difficultyScore) / 100 - heatPenalty - hpPenalty,
+    heist.baseSuccess +
+      (statScore - heist.difficultyScore) / 100 +
+      Number(arenaModifiers.heistSuccessBonus || 0) -
+      heatPenalty -
+      hpPenalty,
     heist.minSuccess,
     heist.maxSuccess
   );
@@ -1697,6 +1722,7 @@ function publicPlayer(player, now = Date.now()) {
     city: player.city,
     operations: player.operations,
     contracts: player.contracts,
+    arena: player.arena,
     businessesOwned: player.businessesOwned,
     businessUpgrades: player.businessUpgrades,
     factoriesOwned: player.factoriesOwned,
@@ -3408,27 +3434,85 @@ app.post("/factories/produce", auth, asyncHandler(async (req, res) => {
   });
 }));
 
-app.post("/fightclub/round", auth, asyncHandler(async (req, res) => {
+app.post("/fightclub/run/start", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
+  const modeId = String(req.body?.modeId || "round").trim();
+  const styleId = String(req.body?.styleId || "aggression").trim();
   let result = null;
 
-  await withPlayerActionLock(req, "fightclub-round", async () => {
-    await commitPlayerMutation(req, "fightclub-round", async (player) => {
-      result = fightClubRoundForPlayer(player);
+  await withPlayerActionLock(req, "fightclub-run-start", async () => {
+    await commitPlayerMutation(req, "fightclub-run-start", async (player) => {
+      result = startArenaRunForPlayer(player, modeId, styleId, now);
       pushLog(player, result.logMessage);
       return null;
     });
   });
 
-  logInfo("fightclub", "round", {
+  logInfo("arena", "run-start", {
     userId: req.user.id,
-    success: Boolean(result?.success),
+    modeId,
+    styleId,
   });
+  emitProfileRealtimeUpdate([req.user.id], "arena.run.start");
 
   res.json({
     user: publicPlayer(req.player, now),
     result,
   });
+}));
+
+app.post("/fightclub/run/fight", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result = null;
+
+  await withPlayerActionLock(req, "fightclub-run-fight", async () => {
+    await commitPlayerMutation(req, "fightclub-run-fight", async (player) => {
+      result = resolveArenaFightForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("arena", "run-fight", {
+    userId: req.user.id,
+    success: Boolean(result?.success),
+    finished: Boolean(result?.finished),
+  });
+  emitProfileRealtimeUpdate([req.user.id], "arena.run.fight");
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/fightclub/boosts/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const boostId = String(req.body?.boostId || "").trim();
+  let result = null;
+
+  await withPlayerActionLock(req, "fightclub-boost-buy", async () => {
+    await commitPlayerMutation(req, "fightclub-boost-buy", async (player) => {
+      result = buyArenaBoostForPlayer(player, boostId, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+
+  logInfo("arena", "boost-buy", {
+    userId: req.user.id,
+    boostId,
+  });
+  emitProfileRealtimeUpdate([req.user.id], "arena.boost.buy");
+
+  res.json({
+    user: publicPlayer(req.player, now),
+    result,
+  });
+}));
+
+app.post("/fightclub/round", auth, asyncHandler(async (_req, res) => {
+  res.status(409).json({ error: "Fightclub idzie teraz przez run Areny: start, walka i boosty." });
 }));
 
 app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
@@ -5763,42 +5847,58 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
   if (Math.random() < chance) {
     const gain = randomBetween(heist.reward[0], heist.reward[1]);
     const xpGain = randomBetween(heist.xpGain[0], heist.xpGain[1]);
+    let resolvedXpGain = xpGain;
     await withPlayerActionLock(req, `heist:${heist.id}`, async () => {
       await commitPlayerMutation(req, "heist-success", async (currentPlayer) => {
+        const arenaModifiers = getArenaActionModifiers(currentPlayer.activeBoosts, "heist", now);
+        const { nextBoosts, consumed } = consumeArenaActionBoosts(currentPlayer.activeBoosts, "heist", now);
+        const finalXpGain = Math.max(
+          1,
+          Math.round(xpGain * (1 + Number(arenaModifiers.xpMultiplier || 0)))
+        );
+        resolvedXpGain = finalXpGain;
         currentPlayer.profile.energy -= heist.energy;
         currentPlayer.timers.energyUpdatedAt = now;
         currentPlayer.stats.heistsDone += 1;
         currentPlayer.profile.cash += gain;
         const progression = applyXpProgression(
           { respect: currentPlayer.profile.respect, xp: currentPlayer.profile.xp },
-          xpGain
+          finalXpGain
         );
         currentPlayer.profile.respect = progression.respect;
         currentPlayer.profile.xp = progression.xp;
         currentPlayer.profile.level = progression.respect;
-        currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnSuccess, 0, 100);
+        currentPlayer.profile.heat = clamp(
+          currentPlayer.profile.heat + heist.heatOnSuccess - Math.floor(Number(arenaModifiers.heatReduction || 0)),
+          0,
+          100
+        );
         currentPlayer.stats.heistsWon += 1;
         currentPlayer.stats.totalEarned += gain;
+        currentPlayer.activeBoosts = nextBoosts;
         applyHeistDistrictOutcome(currentPlayer, heist, { success: true, now });
-        pushLog(currentPlayer, `Napad udany: ${heist.name}. Wpada $${gain} i +${xpGain} XP.`);
+        pushLog(
+          currentPlayer,
+          `Napad udany: ${heist.name}. Wpada $${gain} i +${finalXpGain} XP.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`
+        );
         return null;
       });
     });
     res.json({
       result: "success",
       reward: gain,
-      xpGain,
+      xpGain: resolvedXpGain,
       chance,
       user: publicPlayer(player, now),
     });
     logHeistEvent(
-      `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: success reward=$${gain} xp=${xpGain} energy=${player.profile.energy}`
+      `${req.user?.username || req.user?.id || "unknown"} -> ${heist.id} :: success reward=$${gain} xp=${resolvedXpGain} energy=${player.profile.energy}`
     );
     logInfo("heists", "execute-success", {
       userId: req.user.id,
       heistId: heist.id,
       reward: gain,
-      xpGain,
+      xpGain: resolvedXpGain,
     });
     return;
   }
@@ -5814,6 +5914,8 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
 
   await withPlayerActionLock(req, `heist:${heist.id}`, async () => {
     await commitPlayerMutation(req, "heist-failure", async (currentPlayer) => {
+      const arenaModifiers = getArenaActionModifiers(currentPlayer.activeBoosts, "heist", now);
+      const { nextBoosts, consumed } = consumeArenaActionBoosts(currentPlayer.activeBoosts, "heist", now);
       currentPlayer.profile.energy -= heist.energy;
       currentPlayer.timers.energyUpdatedAt = now;
       currentPlayer.stats.heistsDone += 1;
@@ -5824,7 +5926,12 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
         allowCriticalCare: Number(heist.tier || 0) >= 4,
         minimumHp: 0,
       });
-      currentPlayer.profile.heat = clamp(currentPlayer.profile.heat + heist.heatOnFailure, 0, 100);
+      currentPlayer.profile.heat = clamp(
+        currentPlayer.profile.heat + heist.heatOnFailure - Math.floor(Number(arenaModifiers.heatReduction || 0)),
+        0,
+        100
+      );
+      currentPlayer.activeBoosts = nextBoosts;
       applyHeistDistrictOutcome(currentPlayer, heist, { success: false, now });
       criticalCareTriggered = Boolean(damageState.criticalCareTriggered);
       finalJailed = jailed && !criticalCareTriggered;
@@ -5833,12 +5940,18 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
         currentPlayer.profile.jailUntil = Math.max(currentPlayer.profile.jailUntil || 0, now + jailSeconds * 1000);
         pushLog(
           currentPlayer,
-          `Wtopa na akcji: ${heist.name}. Tracisz $${loss}, ${damage} HP i siadasz na ${Math.ceil(jailSeconds / 60)} min.`
+          `Wtopa na akcji: ${heist.name}. Tracisz $${loss}, ${damage} HP i siadasz na ${Math.ceil(jailSeconds / 60)} min.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`
         );
       } else if (damageState.criticalCareTriggered) {
-        pushLog(currentPlayer, `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ladujesz na intensywnej terapii.`);
+        pushLog(
+          currentPlayer,
+          `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ladujesz na intensywnej terapii.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`
+        );
       } else {
-        pushLog(currentPlayer, `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ${damage} HP.`);
+        pushLog(
+          currentPlayer,
+          `Wtopa na akcji: ${heist.name}. Tracisz $${loss} i ${damage} HP.${consumed.length ? ` Boost schodzi: ${consumed.join(", ")}.` : ""}`
+        );
       }
       return null;
     });

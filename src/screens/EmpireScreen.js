@@ -100,7 +100,40 @@ export function EmpireScreen({
     .filter(Boolean);
   const lockedBusinesses = businesses.filter((business) => safeGame.player.respect < business.respect);
   const nextBusinessUnlock = lockedBusinesses[0] || null;
+  const [businessPane, setBusinessPane] = React.useState("owned");
+  const totalOwnedBusinessCount = ownedBusinesses.reduce((sum, business) => sum + Number(business.count || 0), 0);
+  const totalCollectableCash = businessCollectableCash + escortCollectableCash;
+  const bestBusinessUpgrade = ownedBusinesses.reduce((best, business) => {
+    const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, business.count);
+    if (!preview) return best;
+
+    const speedGain = Math.max(0, Number(preview.nextSpeedIncome || 0) - Number(preview.currentIncome || 0));
+    const cashGain = Math.max(0, Number(preview.nextCashIncome || 0) - Number(preview.currentIncome || 0));
+    const speedCandidate = {
+      business,
+      path: "speed",
+      cost: Number(preview.speedCost || 0),
+      gain: speedGain,
+      label: "Szybszy obrot",
+    };
+    const cashCandidate = {
+      business,
+      path: "cash",
+      cost: Number(preview.cashCost || 0),
+      gain: cashGain,
+      label: "Grubsza koperta",
+    };
+    const candidate = speedCandidate.cost <= cashCandidate.cost ? speedCandidate : cashCandidate;
+    if (!best) return candidate;
+    if (candidate.cost < best.cost) return candidate;
+    if (candidate.cost === best.cost && candidate.gain > best.gain) return candidate;
+    return best;
+  }, null);
   const ownedFactoryCount = factories.filter((factory) => helpers.hasFactory(safeGame, factory.id)).length;
+  const [factoryPane, setFactoryPane] = React.useState("owned");
+  const [managedFactoryId, setManagedFactoryId] = React.useState(null);
+  const [buyFactoryDetailsId, setBuyFactoryDetailsId] = React.useState(null);
+  const [selectedSupplyId, setSelectedSupplyId] = React.useState(() => suppliers?.[0]?.id || null);
   const getUpgradeState = (businessId) => helpers.getBusinessUpgradeState?.(safeGame, businessId) || { speedLevel: 0, cashLevel: 0, totalLevel: 0 };
   const getBusinessMinuteIncome = (business, count = 1) => {
     const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, count);
@@ -115,6 +148,62 @@ export function EmpireScreen({
     { respect: 25, title: "Top fabryki", unlocks: factories.filter((factory) => factory.respect === 25) },
   ].filter((entry) => entry.unlocks.length);
   const nextFactoryUnlock = factoryMilestones.find((entry) => safeGame.player.respect < entry.respect) || null;
+  const ownedFactories = factories.filter((factory) => helpers.hasFactory(safeGame, factory.id));
+  const buyableFactories = factories.filter(
+    (factory) => safeGame.player.respect >= factory.respect && !helpers.hasFactory(safeGame, factory.id)
+  );
+  const getFactoryDrugs = (factoryId) => drugs.filter((drug) => drug.factoryId === factoryId);
+  const getDrugRecipeState = (drug) => {
+    const recipe = Object.entries(drug.supplies || {}).map(([supplyId, needed]) => {
+      const supply = suppliers.find((entry) => entry.id === supplyId);
+      const available = Math.max(0, Number(safeGame.supplies?.[supplyId] || 0));
+      return {
+        id: supplyId,
+        name: supply?.name || supplyId,
+        needed: Number(needed || 0),
+        available,
+        ready: available >= Number(needed || 0),
+      };
+    });
+    const maxBatches = recipe.length
+      ? recipe.reduce((min, entry) => Math.min(min, Math.floor(entry.available / Math.max(1, entry.needed))), Number.POSITIVE_INFINITY)
+      : 0;
+    return {
+      recipe,
+      maxBatches: Number.isFinite(maxBatches) ? Math.max(0, maxBatches) : 0,
+      stock: Math.max(0, Number(safeGame.drugInventory?.[drug.id] || 0)),
+      producedStock: Math.max(0, Number(safeGame.producedDrugInventory?.[drug.id] || 0)),
+    };
+  };
+  const getFactoryCardState = (factory) => {
+    const factoryDrugs = getFactoryDrugs(factory.id);
+    const readyRecipes = factoryDrugs.filter((drug) => getDrugRecipeState(drug).maxBatches > 0);
+    const totalStock = factoryDrugs.reduce((sum, drug) => sum + Math.max(0, Number(safeGame.drugInventory?.[drug.id] || 0)), 0);
+    if (readyRecipes.length > 0) {
+      return {
+        label: "Gotowe",
+        tone: "success",
+        summary: `${readyRecipes.length} recept. gotowe teraz`,
+      };
+    }
+    if (totalStock > 0) {
+      return {
+        label: "Na stanie",
+        tone: "info",
+        summary: `${totalStock} szt. towaru juz lezy`,
+      };
+    }
+    return {
+      label: "Brak skladnikow",
+      tone: "warning",
+      summary: "Najpierw dokup skladniki w hurtowniach",
+    };
+  };
+  const selectedSupply = suppliers.find((supply) => supply.id === selectedSupplyId) || suppliers[0] || null;
+  const selectedSupplyStock = selectedSupply ? Math.max(0, Number(safeGame.supplies?.[selectedSupply.id] || 0)) : 0;
+  const selectedSupplyMaxAffordable = selectedSupply
+    ? Math.max(0, Math.floor(Number(safeGame.player?.cash || 0) / Math.max(1, Number(selectedSupply.price || 1))))
+    : 0;
   const clubGuestState = safeGame.club?.guestState || {};
   const [clubTradeDraft, setClubTradeDraft] = React.useState("1");
   const [clubEntryFeeDraft, setClubEntryFeeDraft] = React.useState(
@@ -242,33 +331,217 @@ export function EmpireScreen({
   const threatLabel = getClubThreatLabel(
     Number((insideOwnClub ? safeGame.club?.threatLevel : currentClubVenue?.threatLevel) || 0)
   );
+  const [clubListSelectionId, setClubListSelectionId] = React.useState(() => currentClubVenue?.id || safeGame.clubListings?.[0]?.id || null);
+  const [clubOwnerTab, setClubOwnerTab] = React.useState("status");
+  const [clubGuestTab, setClubGuestTab] = React.useState("actions");
+  const clubListingIdsKey = safeGame.clubListings.map((listing) => String(listing.id || "")).join("|");
+  const selectedClubListing =
+    safeGame.clubListings.find((listing) => listing.id === clubListSelectionId) || safeGame.clubListings[0] || null;
+  const selectedClubProfile = selectedClubListing ? helpers.getClubVenueProfile?.(safeGame, selectedClubListing) : null;
+  const selectedClubPressure = selectedClubListing
+    ? Number(selectedClubListing.policePressure || (selectedClubListing.policeBase || 0) * 3)
+    : 0;
+  const selectedClubPressureLabel =
+    selectedClubPressure >= 72
+      ? "Goraco"
+      : selectedClubPressure >= 46
+        ? "Pod obserwacja"
+        : selectedClubPressure >= 24
+          ? "Czuja ruch"
+          : "Spokojnie";
+  const selectedClubTraffic = Math.round(Number(selectedClubListing?.traffic || 0));
+  const selectedClubTrafficLabel =
+    selectedClubTraffic >= 22
+      ? "Pelny ruch"
+      : selectedClubTraffic >= 12
+        ? "Dobry ruch"
+        : selectedClubTraffic >= 5
+          ? "Cos sie dzieje"
+          : "Cicho";
+  const selectedClubPlan =
+    helpers.getClubNightPlan?.(selectedClubListing?.nightPlanId) ||
+    clubNightPlans?.find((plan) => plan.id === selectedClubListing?.nightPlanId) ||
+    clubNightPlans?.[0] ||
+    null;
+  const canFoundClub = !safeGame.club.owned && safeGame.gang.joined && safeGame.gang.role === "Boss";
+  const foundingPreviewDistrict = focusDistrictSummary || districtSummaries?.[0] || null;
+  const clubStatLabels = {
+    attack: "Atak",
+    defense: "Obrona",
+    charisma: "Charyzma",
+    dexterity: "Refleks",
+  };
+  const formatClubDrugEffect = (drug) => {
+    const effectLine = Object.entries(drug?.effect || {})
+      .map(([stat, value]) => `+${Number(value || 0)} ${clubStatLabels[stat] || stat}`)
+      .join(" • ");
+    const durationMinutes = Math.max(0, Math.round(Number(drug?.durationSeconds || 0) / 60));
+    return [effectLine, durationMinutes > 0 ? `${durationMinutes} min` : null].filter(Boolean).join(" • ");
+  };
+  const getClubTone = (tone = "neutral") => {
+    if (tone === "danger") {
+      return { border: "rgba(224, 78, 78, 0.26)", surface: "#1c1012", value: "#ffd7d7", label: "#ff9898" };
+    }
+    if (tone === "success") {
+      return { border: "rgba(90, 186, 122, 0.28)", surface: "#111a14", value: "#daf8e2", label: "#8fdda8" };
+    }
+    if (tone === "gold") {
+      return { border: "rgba(224, 174, 69, 0.28)", surface: "#19130e", value: "#ffe5b0", label: "#e4be75" };
+    }
+    if (tone === "info") {
+      return { border: "rgba(92, 148, 228, 0.26)", surface: "#10151d", value: "#d7e6ff", label: "#9dbcf3" };
+    }
+    return { border: "#2a2d32", surface: "#101214", value: "#f2f0eb", label: "#98a1aa" };
+  };
+  const ownerClubBuffs = drugs
+    .filter((drug) => Number(safeGame.club?.stash?.[drug.id] || 0) > 0)
+    .map((drug) => ({
+      ...drug,
+      amount: Number(safeGame.club?.stash?.[drug.id] || 0),
+      effectLabel: formatClubDrugEffect(drug),
+    }));
+  const guestClubBuffs = guestClubStashDrugs.map((drug) => ({
+    ...drug,
+    amount: Number(currentClubVenue?.stash?.[drug.id] || 0),
+    effectLabel: formatClubDrugEffect(drug),
+  }));
+  const renderClubTabRow = (tabs, activeTab, onChange) => (
+    <View style={[styles.planChipRow, { marginTop: 12 }]}>
+      {tabs.map((tab) => {
+        const active = activeTab === tab.id;
+        return (
+          <Pressable
+            key={tab.id}
+            onPress={() => onChange(tab.id)}
+            style={[
+              styles.planChip,
+              active && styles.planChipActive,
+              {
+                paddingHorizontal: 12,
+                minHeight: 38,
+                flexGrow: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{tab.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+  const renderClubMetricCard = ({ label, value, note, tone = "neutral", compact = false }) => {
+    const palette = getClubTone(tone);
+    return (
+      <View
+        key={`${label}-${value}`}
+        style={[
+          styles.mobileOverviewCard,
+          {
+            borderColor: palette.border,
+            backgroundColor: palette.surface,
+            minWidth: compact ? "31%" : "47%",
+          },
+        ]}
+      >
+        <Text style={[styles.mobileOverviewLabel, { color: palette.label }]}>{label}</Text>
+        <Text style={[compact ? styles.mobileOverviewValueSmall : styles.mobileOverviewValue, { color: palette.value }]}>
+          {value}
+        </Text>
+        <Text style={styles.listCardMeta}>{note}</Text>
+      </View>
+    );
+  };
+  const ownerClubTabs = [
+    { id: "status", label: "Status" },
+    { id: "manage", label: "Zarzadzaj" },
+    { id: "safe", label: "Sejf" },
+    { id: "stash", label: "Stash" },
+  ];
+  const guestClubTabs = [
+    { id: "actions", label: "Akcje" },
+    { id: "opportunities", label: "Okazje" },
+    { id: "local", label: "Lokal" },
+    { id: "stash", label: "Towar" },
+  ];
+  React.useEffect(() => {
+    if (currentClubVenue?.id) {
+      setClubListSelectionId(currentClubVenue.id);
+      return;
+    }
+    if (!safeGame.clubListings.some((listing) => listing.id === clubListSelectionId)) {
+      setClubListSelectionId(safeGame.clubListings[0]?.id || null);
+    }
+  }, [currentClubVenue?.id, clubListingIdsKey]);
+  React.useEffect(() => {
+    if (insideOwnClub) {
+      setClubOwnerTab("status");
+      return;
+    }
+    if (currentClubVenue) {
+      setClubGuestTab("actions");
+    }
+  }, [currentClubVenue?.id, insideOwnClub]);
   React.useEffect(() => {
     setClubEntryFeeDraft(String(Math.max(0, Number(currentClubVenue?.entryFee ?? safeGame.club?.entryFee ?? 0))));
   }, [currentClubVenue?.id, currentClubVenue?.entryFee, safeGame.club?.entryFee]);
 
-  const renderCollectionsPanel = (title = "Skrytki i odbiory", subtitle = "Kasa nie wpada sama do kieszeni. Odbierasz ja recznie, a naliczanie zatrzymuje sie na dobowym capie.") => (
+  const handleCollectAllIncome = async () => {
+    if (businessCollectableCash > 0) {
+      await Promise.resolve(actions.collectBusinessIncome?.());
+    }
+    if (escortCollectableCash > 0) {
+      await Promise.resolve(actions.collectEscortIncome?.());
+    }
+  };
+
+  const renderCollectionsPanel = (title = "Odbior", subtitle = "Sejfy i szybki zjazd hajsu bez dlugiego scrolla.") => (
     <SectionCard title={title} subtitle={subtitle}>
+      <Pressable
+        onPress={handleCollectAllIncome}
+        disabled={totalCollectableCash <= 0}
+        style={[
+          styles.inlineButton,
+          {
+            minHeight: 50,
+            marginBottom: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: totalCollectableCash > 0 ? "#e0ae45" : "#1a1c20",
+            borderColor: totalCollectableCash > 0 ? "#f4d28d" : "#30343a",
+            opacity: totalCollectableCash > 0 ? 1 : 0.52,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.inlineButtonText,
+            { color: totalCollectableCash > 0 ? "#1f1507" : "#a3a7ad", fontSize: 13, fontWeight: "900" },
+          ]}
+        >
+          {totalCollectableCash > 0 ? `Odbierz wszystko ${formatMoney(totalCollectableCash)}` : "Odbierz wszystko"}
+        </Text>
+      </Pressable>
+
       <View style={styles.listCard}>
         <View style={styles.listCardHeader}>
           <View style={styles.entityHead}>
             <EntityBadge visual={businessVisuals.tower} />
             <View style={styles.flexOne}>
               <Text style={styles.listCardTitle}>Biznesy i lokale</Text>
-              <Text style={styles.listCardMeta}>Na zapleczu pracuje imperium. Tu odbierasz czysty cash z obiektow.</Text>
+              <Text style={styles.listCardMeta}>{businessCollectionSubtitle}</Text>
             </View>
           </View>
           <Text style={styles.listCardReward}>{formatMoney(totalBusinessIncome)}/min</Text>
         </View>
-        <StatLine label="Do odbioru" value={`${formatAccruedMoney(businessCash)} / ${formatMoney(businessCollectionCap)}`} />
-        <StatLine label="Cap 24h za" value={formatLongDuration(businessCapEta)} />
-        <StatLine label="Ostatni odbior" value={formatCollectionStamp(safeGame.collections?.businessCollectedAt)} />
-        <ActionTile
-          title="Odbierz biznesy"
-          subtitle={businessCollectionSubtitle}
-          visual={systemVisuals.cash}
-          onPress={actions.collectBusinessIncome}
-          disabled={businessCollectableCash <= 0}
-        />
+        <Text style={styles.listCardMeta}>
+          Sejf: {formatAccruedMoney(businessCash)} / {formatMoney(businessCollectionCap)} | Cap za {formatLongDuration(businessCapEta)}
+        </Text>
+        <Text style={styles.listCardMeta}>Ostatni odbior: {formatCollectionStamp(safeGame.collections?.businessCollectedAt)}</Text>
+        <View style={styles.listActionsRow}>
+          <Pressable onPress={actions.collectBusinessIncome} style={[styles.inlineButton, businessCollectableCash <= 0 && styles.tileDisabled]}>
+            <Text style={styles.inlineButtonText}>Odbierz biznesy</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.listCard}>
@@ -277,382 +550,486 @@ export function EmpireScreen({
             <EntityBadge visual={escortVisuals.velvet} />
             <View style={styles.flexOne}>
               <Text style={styles.listCardTitle}>Ulica i panienki</Text>
-              <Text style={styles.listCardMeta}>Kazda dzielnica ma inny mnoznik, inne ryzyko glin i inny poziom przemocy.</Text>
+              <Text style={styles.listCardMeta}>{escortCollectionSubtitle}</Text>
             </View>
           </View>
           <Text style={styles.listCardReward}>{formatMoney(totalEscortIncome)}/min</Text>
         </View>
-        <StatLine label="Do odbioru" value={`${formatAccruedMoney(escortCash)} / ${formatMoney(escortCollectionCap)}`} />
-        <StatLine label="Cap 24h za" value={formatLongDuration(escortCapEta)} />
-        <StatLine label="Ostatni odbior" value={formatCollectionStamp(safeGame.collections?.escortCollectedAt)} />
-        <ActionTile
-          title="Odbierz ulice"
-          subtitle={escortCollectionSubtitle}
-          visual={systemVisuals.street}
-          onPress={actions.collectEscortIncome}
-          disabled={escortCollectableCash <= 0}
-        />
+        <Text style={styles.listCardMeta}>
+          Sejf: {formatAccruedMoney(escortCash)} / {formatMoney(escortCollectionCap)} | Cap za {formatLongDuration(escortCapEta)}
+        </Text>
+        <Text style={styles.listCardMeta}>Ostatni odbior: {formatCollectionStamp(safeGame.collections?.escortCollectedAt)}</Text>
+        <View style={styles.listActionsRow}>
+          <Pressable onPress={actions.collectEscortIncome} style={[styles.inlineButton, escortCollectableCash <= 0 && styles.tileDisabled]}>
+            <Text style={styles.inlineButtonText}>Odbierz ulice</Text>
+          </Pressable>
+        </View>
       </View>
     </SectionCard>
   );
 
   if (section === "businesses") {
+    const businessTabs = [
+      { id: "owned", label: "Twoje" },
+      { id: "buy", label: "Kup" },
+      { id: "collections", label: "Odbior" },
+    ];
+
     return (
       <>
-        <SceneArtwork
-          eyebrow="Imperium"
-          title="Gruba kasa zaczyna sie od zaplecza"
-          lines={["Zarabianie na ulicy ma byc szybkie, ale prawdziwe pieniadze robi zaplecze: lokale, kontakty i fabryki.", "Wejscie w te systemy jest drogie, bo inaczej cale miasto rozpadnie sie ekonomicznie po paru godzinach."]}
-          accent={["#4a2d18", "#17110c", "#050505"]}
-          source={sceneBackgrounds.empire}
-        />
-        <HeroPanel
-          eyebrow="Imperium"
-          title={ownedBusinesses.length ? "Zaplecze zaczyna juz oddychac" : "Postaw pierwszy biznes"}
-          summary={
-            ownedBusinesses.length
-              ? "Najpierw widzisz co juz zarabia, co jeszcze mozesz postawic i kiedy odblokujesz kolejny skok. To ma prowadzic decyzje, nie zasypywac tabelkami."
-              : "Pierwszy biznes od razu daje Ci wejscie w regularny cashflow. Potem rozbudowujesz tempo i grubosc koperty."
-          }
-          tone="gold"
-          pills={[
-            {
-              label: "Masz biznesow",
-              value: String(ownedBusinesses.reduce((sum, business) => sum + business.count, 0)),
-              note: `${formatMoney(totalBusinessIncome)} / min z aktualnego zaplecza.`,
-              tone: "success",
-              icon: "cash-multiple",
-            },
-            {
-              label: "Do kupienia teraz",
-              value: String(availableBusinesses.length),
-              note: nextBusinessUnlock ? `Nastepny unlock: ${nextBusinessUnlock.respect} RES.` : "Pelna lista odblokowana.",
-              tone: "info",
-              icon: "storefront-outline",
-            },
-            {
-              label: "Skrytka biznesow",
-              value: formatAccruedMoney(businessCash),
-              note: businessCollectionSubtitle,
-              tone: businessCollectableCash > 0 ? "gold" : "neutral",
-              icon: "bank-outline",
-            },
-          ]}
-          primaryAction={{
-            label: businessCollectableCash > 0 ? "Odbierz biznesy" : "Skrytka pusta",
-            meta: businessCollectableCash > 0 ? businessCollectionSubtitle : "Wroc, gdy dobijesz do pelnych dolarow.",
-            onPress: actions.collectBusinessIncome,
-            disabled: businessCollectableCash <= 0,
-          }}
-          secondaryAction={{
-            label: escortCollectableCash > 0 ? "Odbierz ulice" : "Ulica jeszcze liczy",
-            meta: escortCollectionSubtitle,
-            onPress: actions.collectEscortIncome,
-            disabled: escortCollectableCash <= 0,
-          }}
-        />
-
-        <SectionCard title="Twoje biznesy" subtitle="Tu od razu widzisz, co juz stoi i ile tego masz.">
-          {ownedBusinesses.length ? (
-            ownedBusinesses.map((business) => (
-              <View key={`owned-${business.id}`} style={styles.listCard}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={businessVisuals[business.id]} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{business.name}</Text>
-                      <Text style={styles.listCardMeta}>Masz: {business.count} | {business.kind}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.listCardReward}>{getBusinessMinuteIncome(business, business.count)}/min</Text>
-                </View>
-                <Text style={styles.listCardMeta}>Jedna sztuka robi {getBusinessMinuteIncome(business)}/min.</Text>
-                <Text style={styles.listCardMeta}>Upgrade: tempo {getUpgradeState(business.id).speedLevel} | cash {getUpgradeState(business.id).cashLevel}</Text>
-                {business.note ? <Text style={styles.listCardMeta}>{business.note}</Text> : null}
-                {(() => {
-                  const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, business.count);
-                  if (!preview) return null;
-                  return (
-                    <>
-                      <Text style={styles.listCardMeta}>Nastepny upgrade: szybciej -> {formatMoney(preview.nextSpeedIncome)}/min | grubsza koperta -> {formatMoney(preview.nextCashIncome)}/min</Text>
-                      <View style={styles.marketButtons}>
-                        <Pressable onPress={() => actions.upgradeBusiness(business, "speed")} style={styles.marketButton}>
-                          <Text style={styles.marketButtonText}>Szybszy obrot {formatMoney(preview.speedCost)}</Text>
-                        </Pressable>
-                        <Pressable onPress={() => actions.upgradeBusiness(business, "cash")} style={styles.marketButton}>
-                          <Text style={styles.marketButtonText}>Grubsza koperta {formatMoney(preview.cashCost)}</Text>
-                        </Pressable>
-                      </View>
-                    </>
-                  );
-                })()}
-              </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>Na razie nic nie stoi. Kup pierwszy lokal z sekcji ponizej i od razu zobaczysz go tutaj.</Text>
-          )}
-        </SectionCard>
-
-        <SectionCard title="Kup teraz" subtitle="To juz jest odblokowane i gotowe do wejscia.">
-          {availableBusinesses.length ? (
-            availableBusinesses.map((business) => (
-              <View key={`available-${business.id}`} style={styles.listCard}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={businessVisuals[business.id]} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{business.name}</Text>
-                      <Text style={styles.listCardMeta}>{business.kind} | Koszt {formatMoney(business.cost)}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.listCardReward}>{getBusinessMinuteIncome(business)}/min</Text>
-                </View>
-                {business.note ? <Text style={styles.listCardMeta}>{business.note}</Text> : null}
-                <Pressable onPress={() => actions.buyBusiness(business)} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>Kup biznes</Text>
+        <SectionCard title="Biznesy" subtitle="Kupno, upgrade i odbiory bez drugiego dashboardu.">
+          <View style={styles.mobileOverviewGrid}>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Lokale</Text>
+              <Text style={styles.mobileOverviewValue}>{totalOwnedBusinessCount}</Text>
+              <Text style={styles.listCardMeta}>Tyle sztuk juz pracuje dla Ciebie.</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Dochód / min</Text>
+              <Text style={styles.mobileOverviewValue}>{formatMoney(totalBusinessIncome)}</Text>
+              <Text style={styles.listCardMeta}>Czysty ruch z biznesow.</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Do odbioru</Text>
+              <Text style={styles.mobileOverviewValue}>{formatMoney(totalCollectableCash)}</Text>
+              <Text style={styles.listCardMeta}>Biznesy i ulica w jednym zjezdzie.</Text>
+            </View>
+          </View>
+          <View style={[styles.planChipRow, { marginTop: 12 }]}>
+            {businessTabs.map((tabEntry) => {
+              const active = businessPane === tabEntry.id;
+              return (
+                <Pressable
+                  key={tabEntry.id}
+                  onPress={() => setBusinessPane(tabEntry.id)}
+                  style={[styles.planChip, active && styles.planChipActive]}
+                >
+                  <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{tabEntry.label}</Text>
                 </Pressable>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>
-              {nextBusinessUnlock
-                ? `Nic do kupienia w tej chwili. Nastepny biznes: ${nextBusinessUnlock.name} od ${nextBusinessUnlock.respect} RES.`
-                : "Na tym progu szacunku masz juz wykupione wszystko."}
-            </Text>
-          )}
+              );
+            })}
+          </View>
         </SectionCard>
 
-        <SectionCard title="Odblokujesz pozniej" subtitle="To jeszcze czeka na szacun i grubszy bankroll.">
-          {lockedBusinesses.length ? (
-            lockedBusinesses.map((business) => (
-              <View key={`locked-${business.id}`} style={[styles.listCard, styles.listCardLocked]}>
+        {businessPane === "owned" ? (
+          <>
+            <SectionCard title="Zaplecze" subtitle="Stan lokali, skrytka i najblizszy sensowny ruch.">
+              <View style={styles.listCard}>
                 <View style={styles.listCardHeader}>
                   <View style={styles.entityHead}>
-                    <EntityBadge visual={businessVisuals[business.id]} />
+                    <EntityBadge visual={businessVisuals.tower} />
                     <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{business.name}</Text>
-                      <Text style={styles.listCardMeta}>Wymagany szacunek: {business.respect} | Koszt {formatMoney(business.cost)}</Text>
+                      <Text style={styles.listCardTitle}>Twoje zaplecze</Text>
+                      <Text style={styles.listCardMeta}>
+                        {totalOwnedBusinessCount ? `${totalOwnedBusinessCount} lokali robi ${formatMoney(totalBusinessIncome)}/min.` : "Najpierw stawiasz pierwszy lokal, potem dokrecasz tempo."}
+                      </Text>
                     </View>
                   </View>
-                  <Tag text={`Szacunek ${business.respect}`} warning />
+                  <Text style={styles.listCardReward}>{formatMoney(totalBusinessIncome)}/min</Text>
                 </View>
-                <Text style={styles.listCardMeta}>{getBusinessMinuteIncome(business)}/min po odblokowaniu.</Text>
-                {business.note ? <Text style={styles.listCardMeta}>{business.note}</Text> : null}
+                <View style={styles.mobileOverviewGrid}>
+                  <View style={styles.mobileOverviewCard}>
+                    <Text style={styles.mobileOverviewLabel}>Skrytka</Text>
+                    <Text style={styles.mobileOverviewValueSmall}>{formatAccruedMoney(businessCash)}</Text>
+                    <Text style={styles.listCardMeta}>Cap za {formatLongDuration(businessCapEta)}</Text>
+                  </View>
+                  <View style={styles.mobileOverviewCard}>
+                    <Text style={styles.mobileOverviewLabel}>Do kupienia</Text>
+                    <Text style={styles.mobileOverviewValue}>{availableBusinesses.length}</Text>
+                    <Text style={styles.listCardMeta}>
+                      {nextBusinessUnlock ? `Nastepny unlock ${nextBusinessUnlock.respect} RES` : "Pelna lista odblokowana"}
+                    </Text>
+                  </View>
+                  <View style={styles.mobileOverviewCard}>
+                    <Text style={styles.mobileOverviewLabel}>Kluczowy upgrade</Text>
+                    <Text style={styles.mobileOverviewValueSmall}>
+                      {bestBusinessUpgrade ? formatMoney(bestBusinessUpgrade.cost) : "Brak"}
+                    </Text>
+                    <Text style={styles.listCardMeta}>
+                      {bestBusinessUpgrade ? `${bestBusinessUpgrade.business.name} | ${bestBusinessUpgrade.label}` : "Kup pierwszy biznes, zeby ruszyc upgrade."}
+                    </Text>
+                  </View>
+                </View>
+                {bestBusinessUpgrade ? (
+                  <View style={styles.listActionsRow}>
+                    <Pressable
+                      onPress={() => actions.upgradeBusiness(bestBusinessUpgrade.business, bestBusinessUpgrade.path)}
+                      style={styles.inlineButton}
+                    >
+                      <Text style={styles.inlineButtonText}>
+                        {bestBusinessUpgrade.label} {formatMoney(bestBusinessUpgrade.cost)}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>Na ten moment odblokowales juz cala aktualna liste biznesow.</Text>
-          )}
-        </SectionCard>
+            </SectionCard>
 
-        {renderCollectionsPanel("Odbior kasy", "Biznesy i ulica nie przelewaja hajsu same do kieszeni. Musisz odbierac, a skrytki maja twardy dobowy limit.")}
-
-        <SectionCard title="Panienki" subtitle="Mozesz je kupic albo wyhaczyc w klubie. Potem wystawiasz na ulice, sciagasz albo sprzedajesz dalej.">
-          <SceneArtwork
-            eyebrow="Street queens"
-            title="Ulica, klub i szybka fura"
-            lines={["Kazda panienka ma inny zarobek, prog wejscia i trudnosc zdobycia.", "Mocniejszy lokal i klubowe boosty podnosza szanse na topowy kontakt, ale dalej to nie jest darmowa maszynka do kasy."]}
-            accent={["#4d1830", "#180d12", "#050505"]}
-            source={sceneBackgrounds.escort}
-          />
-          {escorts.map((escort) => {
-            const owned = helpers.getOwnedEscort(safeGame, escort.id);
-            const total = owned?.count ?? 0;
-            const working = helpers.getEscortWorkingCount(owned);
-            const reserve = Math.max(0, total - working);
-            const locked = safeGame.player.respect < escort.respect;
-
-            return (
-              <View key={escort.id} style={styles.listCard}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={escortVisuals[escort.id]} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{escort.name}</Text>
-                      <Text style={styles.listCardMeta}>Wymaga {escort.respect} szacunu | W rezerwie: {reserve} | Na ulicy: {working}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.listCardReward}>{formatMoney(escort.cashPerMinute)}/min</Text>
-                </View>
-                <Text style={styles.listCardMeta}>{escort.note}</Text>
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>Kupno: {formatMoney(escort.cost)} | Sprzedaz: {formatMoney(escort.sellPrice)}</Text>
-                  <Pressable onPress={() => actions.buyEscort(escort)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>{locked ? `Szacunek ${escort.respect}` : "Kup kontakt"}</Text>
-                  </Pressable>
-                </View>
-                {streetDistricts.map((district) => {
-                  const assigned = helpers.getEscortDistrictCount(safeGame, escort.id, district.id);
-                  const districtLocked = safeGame.player.respect < district.respect;
+            <SectionCard title="Twoje lokale" subtitle="Ikona, dochod, status i szybki upgrade.">
+              {ownedBusinesses.length ? (
+                ownedBusinesses.map((business) => {
+                  const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, business.count);
+                  const upgradeState = getUpgradeState(business.id);
                   return (
-                    <View key={`${escort.id}-${district.id}`} style={styles.districtCard}>
+                    <View key={`owned-${business.id}`} style={styles.listCard}>
                       <View style={styles.listCardHeader}>
-                        <View style={styles.flexOne}>
-                          <Text style={styles.listCardTitle}>{district.name}</Text>
+                        <View style={styles.entityHead}>
+                          <EntityBadge visual={businessVisuals[business.id]} />
+                          <View style={styles.flexOne}>
+                            <Text style={styles.listCardTitle}>{business.name}</Text>
+                            <Text style={styles.listCardMeta}>Masz: {business.count} | {business.kind}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.listCardReward}>{getBusinessMinuteIncome(business, business.count)}/min</Text>
+                      </View>
+                      <Text style={styles.listCardMeta}>
+                        Jedna sztuka: {getBusinessMinuteIncome(business)} / min | Upgrade tempo {upgradeState.speedLevel} | cash {upgradeState.cashLevel}
+                      </Text>
+                      {preview ? (
+                        <>
                           <Text style={styles.listCardMeta}>
-                            Mnoznik x{district.incomeMultiplier.toFixed(2)} | Na trasie: {assigned} | Policja {Math.round(district.policeRisk * 100)}% | Pobicia {Math.round(district.beatRisk * 100)}% | Ucieczki {Math.round(district.escapeRisk * 100)}%
+                            Nastepny boost: tempo {formatMoney(preview.nextSpeedIncome)}/min albo cash {formatMoney(preview.nextCashIncome)}/min
+                          </Text>
+                          <View style={styles.marketButtons}>
+                            <Pressable onPress={() => actions.upgradeBusiness(business, "speed")} style={styles.marketButton}>
+                              <Text style={styles.marketButtonText}>Tempo {formatMoney(preview.speedCost)}</Text>
+                            </Pressable>
+                            <Pressable onPress={() => actions.upgradeBusiness(business, "cash")} style={styles.marketButton}>
+                              <Text style={styles.marketButtonText}>Cash {formatMoney(preview.cashCost)}</Text>
+                            </Pressable>
+                          </View>
+                        </>
+                      ) : null}
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.emptyText}>Na razie nic nie stoi. Wskocz w `Kup` i postaw pierwszy lokal.</Text>
+              )}
+            </SectionCard>
+          </>
+        ) : null}
+
+        {businessPane === "buy" ? (
+          <SectionCard title="Kup" subtitle="Szybki katalog lokali z ikonami, ceną i dochodem.">
+            {availableBusinesses.length ? (
+              availableBusinesses.map((business) => (
+                <View key={`available-${business.id}`} style={styles.listCard}>
+                  <View style={styles.inlineRow}>
+                    <View style={styles.entityHead}>
+                      <EntityBadge visual={businessVisuals[business.id]} />
+                      <View style={styles.flexOne}>
+                        <Text style={styles.listCardTitle}>{business.name}</Text>
+                        <Text style={styles.listCardMeta}>
+                          {business.kind} | {getBusinessMinuteIncome(business)}/min | {formatMoney(business.cost)}
+                        </Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={() => actions.buyBusiness(business)} style={styles.inlineButton}>
+                      <Text style={styles.inlineButtonText}>Kup biznes</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>
+                {nextBusinessUnlock
+                  ? `Nic nie lezy teraz na stole. Nastepny lokal: ${nextBusinessUnlock.name} od ${nextBusinessUnlock.respect} RES.`
+                  : "Masz juz wykupiona cala aktualna liste biznesow."}
+              </Text>
+            )}
+
+            {lockedBusinesses.length ? (
+              <>
+                <Text style={[styles.sectionSubtitle, { marginTop: 12, marginBottom: 8 }]}>Na radarze</Text>
+                {lockedBusinesses.map((business) => (
+                  <View key={`locked-${business.id}`} style={[styles.listCard, styles.listCardLocked]}>
+                    <View style={styles.listCardHeader}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={businessVisuals[business.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{business.name}</Text>
+                          <Text style={styles.listCardMeta}>
+                            {getBusinessMinuteIncome(business)}/min | Koszt {formatMoney(business.cost)}
                           </Text>
                         </View>
-                        <Tag text={district.respect > 0 ? `${district.respect} RES` : "OPEN"} warning={districtLocked} />
                       </View>
-                      <Text style={styles.listCardMeta}>{district.note}</Text>
-                      <View style={styles.marketButtons}>
-                        <Pressable onPress={() => actions.assignEscortToStreet(escort, district.id)} style={[styles.marketButton, (locked || reserve <= 0 || districtLocked) && styles.tileDisabled]}>
-                          <Text style={styles.marketButtonText}>Wystaw</Text>
-                        </Pressable>
-                        <Pressable onPress={() => actions.pullEscortFromStreet(escort, district.id)} style={[styles.marketButton, assigned <= 0 && styles.tileDisabled]}>
-                          <Text style={styles.marketButtonText}>Sciagnij</Text>
-                        </Pressable>
-                        <Pressable onPress={() => actions.sellEscort(escort)} style={[styles.marketButton, reserve <= 0 && styles.tileDisabled]}>
-                          <Text style={styles.marketButtonText}>Sprzedaj</Text>
-                        </Pressable>
-                      </View>
+                      <Tag text={`RES ${business.respect}`} warning />
                     </View>
-                  );
-                })}
-              </View>
-            );
-          })}
-        </SectionCard>
+                  </View>
+                ))}
+              </>
+            ) : null}
+          </SectionCard>
+        ) : null}
+
+        {businessPane === "collections" ? (
+          <>
+            {renderCollectionsPanel("Odbior", "Sejfy, skrytki i szybki zjazd hajsu.")}
+
+            <SectionCard title="Ulica i panienki" subtitle="Kupujesz kontakt, wystawiasz na trase i odbierasz ruch z miasta.">
+              {escorts.map((escort) => {
+                const owned = helpers.getOwnedEscort(safeGame, escort.id);
+                const total = owned?.count ?? 0;
+                const working = helpers.getEscortWorkingCount(owned);
+                const reserve = Math.max(0, total - working);
+                const locked = safeGame.player.respect < escort.respect;
+
+                return (
+                  <View key={escort.id} style={styles.listCard}>
+                    <View style={styles.listCardHeader}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={escortVisuals[escort.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{escort.name}</Text>
+                          <Text style={styles.listCardMeta}>Rezerwa {reserve} | Ulica {working} | Wymaga {escort.respect} RES</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.listCardReward}>{formatMoney(escort.cashPerMinute)}/min</Text>
+                    </View>
+                    <View style={styles.inlineRow}>
+                      <Text style={styles.costLabel}>Kupno {formatMoney(escort.cost)} | Sprzedaz {formatMoney(escort.sellPrice)}</Text>
+                      <Pressable onPress={() => actions.buyEscort(escort)} style={[styles.inlineButton, locked && styles.tileDisabled]}>
+                        <Text style={styles.inlineButtonText}>{locked ? `RES ${escort.respect}` : "Kup kontakt"}</Text>
+                      </Pressable>
+                    </View>
+                    {streetDistricts.map((district) => {
+                      const assigned = helpers.getEscortDistrictCount(safeGame, escort.id, district.id);
+                      const districtLocked = safeGame.player.respect < district.respect;
+                      return (
+                        <View key={`${escort.id}-${district.id}`} style={styles.districtCard}>
+                          <View style={styles.listCardHeader}>
+                            <View style={styles.flexOne}>
+                              <Text style={styles.listCardTitle}>{district.name}</Text>
+                              <Text style={styles.listCardMeta}>
+                                x{district.incomeMultiplier.toFixed(2)} | Na trasie {assigned} | Policja {Math.round(district.policeRisk * 100)}%
+                              </Text>
+                            </View>
+                            <Tag text={district.respect > 0 ? `${district.respect} RES` : "OPEN"} warning={districtLocked} />
+                          </View>
+                          <View style={styles.marketButtons}>
+                            <Pressable
+                              onPress={() => actions.assignEscortToStreet(escort, district.id)}
+                              style={[styles.marketButton, (locked || reserve <= 0 || districtLocked) && styles.tileDisabled]}
+                            >
+                              <Text style={styles.marketButtonText}>Wystaw</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => actions.pullEscortFromStreet(escort, district.id)}
+                              style={[styles.marketButton, assigned <= 0 && styles.tileDisabled]}
+                            >
+                              <Text style={styles.marketButtonText}>Sciagnij</Text>
+                            </Pressable>
+                            <Pressable onPress={() => actions.sellEscort(escort)} style={[styles.marketButton, reserve <= 0 && styles.tileDisabled]}>
+                              <Text style={styles.marketButtonText}>Sprzedaj</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </SectionCard>
+          </>
+        ) : null}
       </>
     );
   }
 
   if (section === "factories") {
+    const factoryTabs = [
+      { id: "owned", label: "Twoje" },
+      { id: "buy", label: "Kup" },
+    ];
+
     return (
       <>
-        <SceneArtwork
-          eyebrow="Fabryki"
-          title="Produkcja, hurtownie i mocny towar"
-          lines={["Kazdy mocniejszy towar daje lepsze staty, ale koszt wejscia i ryzyko przedawkowania rosna razem z nim.", "To ma wygladac jak brudne laboratorium miasta, a nie tabelka z excela."]}
-          accent={["#3d2918", "#16100c", "#050505"]}
-          source={sceneBackgrounds.empire}
-        />
-        <HeroPanel
-          eyebrow="Fabryki"
-          title={ownedFactoryCount ? "Produkcja jest juz odpalona" : "Najpierw wejdz w pierwsza fabryke"}
-          summary="Fabryki sa drogie celowo. Najpierw wiesz co juz stoi, potem jaki prog otwiera kolejny skok i czy bardziej oplaca Ci sie szybki dealer cashout czy wrzutka pod klub."
-          tone="danger"
-          pills={[
-            {
-              label: "Szacunek",
-              value: `${safeGame.player.respect}`,
-              note: nextFactoryUnlock ? `Kolejny prog przy ${nextFactoryUnlock.respect} RES.` : "Masz wszystkie progi fabryk.",
-              tone: "gold",
-              icon: "star-four-points",
-            },
-            {
-              label: "Masz fabryk",
-              value: `${ownedFactoryCount}`,
-              note: `${factories.length} pozycji w aktualnej drabince.`,
-              tone: "info",
-              icon: "factory",
-            },
-            {
-              label: "Towar na stanie",
-              value: `${drugs.reduce((sum, drug) => sum + Number(safeGame.drugInventory?.[drug.id] || 0), 0)}`,
-              note: "Laczna liczba sztuk gotowych do obrotu.",
-              tone: "success",
-              icon: "flask-outline",
-            },
-          ]}
-        />
-        <SectionCard title="Progi fabryk" subtitle="Najpierw widzisz co odblokowuje kolejny skok szacunku.">
-          {factoryMilestones.map((milestone) => {
-            const unlocked = safeGame.player.respect >= milestone.respect;
-            return (
-              <View key={milestone.respect} style={[styles.listCard, !unlocked && styles.listCardLocked]}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{milestone.title}</Text>
-                    <Text style={styles.listCardMeta}>
-                      Szacunek {milestone.respect} | {milestone.unlocks.map((factory) => factory.name).join(", ")}
-                    </Text>
-                  </View>
-                  <Tag text={unlocked ? "Odblokowane" : `Szacunek ${milestone.respect}`} warning={!unlocked} />
-                </View>
-              </View>
-            );
-          })}
-        </SectionCard>
-        <SectionCard title="Fabryki" subtitle="Fabryki sa grubo wycenione. Zarabianie jest realne, ale wejscie w produkcje kosztuje powazny hajs.">
-          {factories.map((factory) => {
-            const owned = helpers.hasFactory(safeGame, factory.id);
-            const factoryRisk = Math.max(...factory.unlocks.map((drugId) => helpers.getDrugPoliceProfile(drugs.find((entry) => entry.id === drugId)).risk));
-            const factoryDistrict = districtSummaryById[getFactoryDistrictId(factory.id)] || focusDistrictSummary;
-            return (
-              <View key={factory.id} style={[styles.listCard, safeGame.player.respect < factory.respect && styles.listCardLocked]}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={factoryVisuals[factory.id]} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{factory.name}</Text>
-                      <Text style={styles.listCardMeta}>Wymagany szacunek: {factory.respect} | {factory.text}</Text>
-                    </View>
-                  </View>
-                  {owned ? <Tag text="Masz" /> : <Tag text={safeGame.player.respect < factory.respect ? `Szacunek ${factory.respect}` : formatMoney(factory.cost)} warning />}
-                </View>
-                <Text style={styles.listCardMeta}>
-                  Odblokowuje: {factory.unlocks.map((drugId) => drugs.find((entry) => entry.id === drugId)?.name).join(", ")} | Presja glin: {Math.round(factoryRisk * 100)}%
-                </Text>
-                <Text style={styles.listCardMeta}>
-                  Dzielnica: {factoryDistrict?.name || "-"} | {factoryDistrict?.pressureLabel || "Spokojnie"} | Produkcja lapie heat {factoryDistrict?.pressureState ? `x${Number(factoryDistrict.pressureState.heistHeatMultiplier || 1).toFixed(2)}` : "x1.00"}
-                </Text>
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>{owned ? "Zaklad stoi i pracuje." : safeGame.player.respect < factory.respect ? `Wymagany szacunek: ${factory.respect}` : `Koszt: ${formatMoney(factory.cost)}`}</Text>
-                  <Pressable onPress={() => actions.buyFactory(factory)} style={[styles.inlineButton, (owned || safeGame.player.respect < factory.respect) && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>{owned ? "Kupione" : safeGame.player.respect < factory.respect ? "Zablokowane" : "Przejmij"}</Text>
-                  </Pressable>
-                </View>
-              </View>
-            );
-          })}
+        <SectionCard title="Fabryki" subtitle="Front to decyzja. Klikasz dopiero po receptury i produkcje.">
+          <View style={styles.mobileOverviewGrid}>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Twoje fabryki</Text>
+              <Text style={styles.mobileOverviewValue}>{ownedFactoryCount}</Text>
+              <Text style={styles.listCardMeta}>Aktywne miejsca produkcji.</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Towar na stanie</Text>
+              <Text style={styles.mobileOverviewValue}>
+                {drugs.reduce((sum, drug) => sum + Number(safeGame.drugInventory?.[drug.id] || 0), 0)}
+              </Text>
+              <Text style={styles.listCardMeta}>Gotowe sztuki w inventory.</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Nastepny prog</Text>
+              <Text style={styles.mobileOverviewValueSmall}>
+                {nextFactoryUnlock ? `${nextFactoryUnlock.respect} RES` : "Pelna lista"}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {nextFactoryUnlock ? nextFactoryUnlock.unlocks.map((factory) => factory.name).join(", ") : "Masz odblokowane wszystkie fabryki."}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.planChipRow, { marginTop: 12 }]}>
+            {factoryTabs.map((tabEntry) => {
+              const active = factoryPane === tabEntry.id;
+              return (
+                <Pressable
+                  key={tabEntry.id}
+                  onPress={() => setFactoryPane(tabEntry.id)}
+                  style={[styles.planChip, active && styles.planChipActive]}
+                >
+                  <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{tabEntry.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </SectionCard>
 
-        <SectionCard title="Produkcja" subtitle="Kazdy mocniejszy towar daje lepsze staty, ale niesie wieksze ryzyko zgonu po spozyciu.">
-          {drugs.map((drug) => {
-            const policeProfile = helpers.getDrugPoliceProfile(drug);
-            const productionRespectRequirement = helpers.getDrugProductionRespectRequirement?.(drug) ?? Number(drug.unlockRespect || 0);
-            const batchEconomy = getDrugBatchEconomy(drug, suppliers, helpers.getDealerPayoutForDrug);
-            const factoryDistrict = districtSummaryById[getFactoryDistrictId(drug.factoryId)] || focusDistrictSummary;
-            return (
-              <View key={drug.id} style={styles.listCard}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={drugVisuals[drug.id]} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{drug.name}</Text>
-                      <Text style={styles.listCardMeta}>
-                        Partia: {drug.batchSize} | Smiertelnosc {Math.round(drug.overdoseRisk * 100)}% | Na stanie: {safeGame.drugInventory[drug.id] || 0}
-                      </Text>
+        {factoryPane === "owned" ? (
+          <SectionCard title="Twoje" subtitle="Masz tylko swoje zaklady. Reszta szczegolow dopiero po kliknieciu.">
+            {ownedFactories.length ? (
+              ownedFactories.map((factory) => {
+                const factoryDrugs = getFactoryDrugs(factory.id);
+                const status = getFactoryCardState(factory);
+                const district = districtSummaryById[getFactoryDistrictId(factory.id)] || focusDistrictSummary;
+                const expanded = managedFactoryId === factory.id;
+
+                return (
+                  <View key={`owned-factory-${factory.id}`} style={styles.listCard}>
+                    <View style={styles.listCardHeader}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={factoryVisuals[factory.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{factory.name}</Text>
+                          <Text style={styles.listCardMeta}>
+                            Prog {factory.respect} RES | {status.summary}
+                          </Text>
+                        </View>
+                      </View>
+                      <Tag text={status.label} success={status.tone === "success"} warning={status.tone === "warning"} />
                     </View>
+                    <Text style={styles.listCardMeta}>
+                      {district?.name || "-"} | {district?.pressureLabel || "Spokojnie"} | Receptury {factoryDrugs.length}
+                    </Text>
+                    <View style={styles.listActionsRow}>
+                      <Pressable
+                        onPress={() => setManagedFactoryId(expanded ? null : factory.id)}
+                        style={[styles.inlineButton, { minHeight: 44 }]}
+                      >
+                        <Text style={styles.inlineButtonText}>{expanded ? "Zwin" : "Zarzadzaj"}</Text>
+                      </Pressable>
+                    </View>
+
+                    {expanded ? (
+                      <View style={{ marginTop: 10, gap: 10 }}>
+                        {factoryDrugs.map((drug) => {
+                          const recipeState = getDrugRecipeState(drug);
+                          const policeProfile = helpers.getDrugPoliceProfile(drug);
+                          const batchEconomy = getDrugBatchEconomy(drug, suppliers, helpers.getDealerPayoutForDrug);
+                          return (
+                            <View key={`recipe-${factory.id}-${drug.id}`} style={styles.districtCard}>
+                              <View style={styles.listCardHeader}>
+                                <View style={styles.entityHead}>
+                                  <EntityBadge visual={drugVisuals[drug.id]} />
+                                  <View style={styles.flexOne}>
+                                    <Text style={styles.listCardTitle}>{drug.name}</Text>
+                                    <Text style={styles.listCardMeta}>
+                                      Batch {drug.batchSize} | Na stanie {recipeState.stock} | Max teraz {recipeState.maxBatches}
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Tag text={recipeState.maxBatches > 0 ? "Gotowe" : "Braki"} success={recipeState.maxBatches > 0} warning={recipeState.maxBatches <= 0} />
+                              </View>
+                              <Text style={styles.listCardMeta}>
+                                {recipeState.recipe
+                                  .map((entry) => `${entry.name} x${entry.needed} ${entry.ready ? "✔" : "✖"}`)
+                                  .join(" | ")}
+                              </Text>
+                              <Text style={styles.listCardMeta}>
+                                Ryzyko {Math.round(policeProfile.risk * 100)}% | Batch kosztuje {formatMoney(batchEconomy.batchCost)}
+                              </Text>
+                              <View style={styles.marketButtons}>
+                                <Pressable
+                                  onPress={() => actions.produceDrug(drug)}
+                                  style={[styles.marketButton, recipeState.maxBatches <= 0 && styles.tileDisabled]}
+                                >
+                                  <Text style={styles.marketButtonText}>Produkuj</Text>
+                                </Pressable>
+                                <Pressable
+                                  onPress={() => actions.produceDrug(drug, { quantity: recipeState.maxBatches })}
+                                  style={[styles.marketButton, recipeState.maxBatches <= 1 && styles.tileDisabled]}
+                                >
+                                  <Text style={styles.marketButtonText}>Produkuj max</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    ) : null}
                   </View>
-                  <Tag text={`+${Object.entries(drug.effect).map(([key, value]) => `${key} ${value}`).join(", ")}`} />
-                </View>
-                <Text style={styles.listCardMeta}>
-                  Wymagane: {Object.entries(drug.supplies).map(([supplyId, amount]) => `${suppliers.find((entry) => entry.id === supplyId)?.name || supplyId} x${amount}`).join(" | ")}
-                </Text>
-                <Text style={styles.listCardMeta}>
-                  Batch kosztuje {formatMoney(batchEconomy.batchCost)} | Dealer odda {formatMoney(batchEconomy.dealerCashout)} | Marza {formatMoney(batchEconomy.dealerMargin)}
-                </Text>
-                <Text style={styles.listCardMeta}>
-                  Ryzyko policji: {Math.round(policeProfile.risk * 100)}% | {policeProfile.label} | {factoryDistrict?.name || "-"}: {factoryDistrict?.pressureLabel || "Spokojnie"}
-                </Text>
-                <Text style={styles.listCardMeta}>
-                  Klubowy potencjal: okolo {formatMoney(batchEconomy.estimatedClubGross)} z batcha. {batchEconomy.recommendation}
-                </Text>
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>
-                    Wymagana fabryka: {factories.find((entry) => entry.id === drug.factoryId)?.name} | Start produkcji od {productionRespectRequirement} RES
-                  </Text>
-                  <Pressable onPress={() => actions.produceDrug(drug)} style={[styles.inlineButton, !helpers.hasFactory(safeGame, drug.factoryId) && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>Produkuj</Text>
-                  </Pressable>
-                </View>
-              </View>
-            );
-          })}
-        </SectionCard>
+                );
+              })
+            ) : (
+              <Text style={styles.emptyText}>Nie masz jeszcze zadnej fabryki. Wskocz w `Kup` i przejmij pierwsza.</Text>
+            )}
+          </SectionCard>
+        ) : null}
+
+        {factoryPane === "buy" ? (
+          <SectionCard title="Kup" subtitle="Szybki katalog fabryk z ikonami, cena i wejscie dopiero po kliknieciu.">
+            {buyableFactories.length ? (
+              buyableFactories.map((factory) => {
+                const expanded = buyFactoryDetailsId === factory.id;
+                const factoryDrugs = getFactoryDrugs(factory.id);
+                const district = districtSummaryById[getFactoryDistrictId(factory.id)] || focusDistrictSummary;
+                return (
+                  <View key={`buy-factory-${factory.id}`} style={styles.listCard}>
+                    <View style={styles.listCardHeader}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={factoryVisuals[factory.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{factory.name}</Text>
+                          <Text style={styles.listCardMeta}>
+                            {factoryDrugs.map((drug) => drug.name).join(", ")} | {formatMoney(factory.cost)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Pressable onPress={() => actions.buyFactory(factory)} style={styles.inlineButton}>
+                        <Text style={styles.inlineButtonText}>Kup</Text>
+                      </Pressable>
+                    </View>
+                    <View style={styles.listActionsRow}>
+                      <Pressable
+                        onPress={() => setBuyFactoryDetailsId(expanded ? null : factory.id)}
+                        style={[styles.inlineButton, { minHeight: 40, backgroundColor: "#14161a", borderColor: "#2b2d31" }]}
+                      >
+                        <Text style={styles.inlineButtonText}>{expanded ? "Mniej" : "Szczegoly"}</Text>
+                      </Pressable>
+                    </View>
+                    {expanded ? (
+                      <View style={{ marginTop: 10, gap: 8 }}>
+                        <Text style={styles.listCardMeta}>{factory.text}</Text>
+                        <Text style={styles.listCardMeta}>
+                          Dzielnica: {district?.name || "-"} | {district?.pressureLabel || "Spokojnie"}
+                        </Text>
+                        <Text style={styles.listCardMeta}>
+                          Receptury: {factoryDrugs.map((drug) => `${drug.name} x${drug.batchSize}`).join(" | ")}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.emptyText}>
+                {nextFactoryUnlock
+                  ? `Na ten moment nic nie kupisz. Nastepny prog: ${nextFactoryUnlock.respect} RES.`
+                  : "Masz juz przejete wszystkie fabryki z aktualnej listy."}
+              </Text>
+            )}
+          </SectionCard>
+        ) : null}
       </>
     );
   }
@@ -660,61 +1037,125 @@ export function EmpireScreen({
   if (section === "suppliers") {
     return (
       <>
-        <SceneArtwork
-          eyebrow="Hurtownie"
-          title="Skladniki dla calego lancucha"
-          lines={["Bez szkla, chemii, tytoniu i pakowania nawet najlepsza fabryka stoi i nie robi nic.", "Tu kupujesz brud codziennosci, z ktorego potem rodza sie duze pieniadze."]}
-          accent={["#372519", "#150f0c", "#050505"]}
-          source={sceneBackgrounds.market}
-        />
-        <HeroPanel
-          eyebrow="Hurtownie"
-          title="Bez skladu nie ma produkcji"
-          summary="To jest czyste zaplecze. Najpierw widzisz czy masz towar do batcha, potem dokupujesz braki bez rozbijania flow po dziesieciu kartach."
-          tone="info"
-          pills={[
-            {
-              label: "Rodzaje dostaw",
-              value: `${suppliers.length}`,
-              note: "Skladniki dla calych lancuchow produkcji.",
-              tone: "info",
-              icon: "package-variant-closed",
-            },
-            {
-              label: "Laczny stan",
-              value: `${suppliers.reduce((sum, supply) => sum + Number(safeGame.supplies?.[supply.id] || 0), 0)}`,
-              note: "Sztuki na magazynie przed nastepnym batchem.",
-              tone: "gold",
-              icon: "warehouse",
-            },
-          ]}
-        />
-        <SectionCard title="Hurtownie" subtitle="Tu kupujesz skladniki do produkcji. Bez limitu slotow i bez blokady ilosci.">
-          <View style={styles.listCard}>
-            <View style={styles.entityHead}>
-              <EntityBadge visual={systemVisuals.supplier} />
-              <View style={styles.flexOne}>
-                <Text style={styles.listCardTitle}>Zaplecze hurtowe</Text>
-                <Text style={styles.listCardMeta}>Kazdy skladnik kupujesz bez limitu hurtowni. Jedyny limit to Twoja kasa.</Text>
-              </View>
+        <SectionCard title="Hurtownie" subtitle="Grid do szybkich zakupow, szczegoly dopiero po kliknieciu.">
+          <View style={styles.mobileOverviewGrid}>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Rodzaje</Text>
+              <Text style={styles.mobileOverviewValue}>{suppliers.length}</Text>
+              <Text style={styles.listCardMeta}>Skladniki dla wszystkich lancuchow.</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Magazyn</Text>
+              <Text style={styles.mobileOverviewValue}>
+                {suppliers.reduce((sum, supply) => sum + Number(safeGame.supplies?.[supply.id] || 0), 0)}
+              </Text>
+              <Text style={styles.listCardMeta}>Laczny stan przed kolejnym batchem.</Text>
             </View>
           </View>
-          {suppliers.map((supply) => (
-            <View key={supply.id} style={styles.listCard}>
-              <View style={styles.inlineRow}>
+        </SectionCard>
+
+        {selectedSupply ? (
+          <SectionCard title="Szczegoly" subtitle="Szybki zakup i stan magazynu bez rozciagania calego ekranu.">
+            <View style={styles.listCard}>
+              <View style={styles.listCardHeader}>
                 <View style={styles.entityHead}>
-                  <EntityBadge visual={supplierVisuals[supply.id] || systemVisuals.supplier} />
+                  <EntityBadge visual={supplierVisuals[selectedSupply.id] || systemVisuals.supplier} />
                   <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{supply.name}</Text>
-                    <Text style={styles.listCardMeta}>{supply.unit} | Na stanie: {safeGame.supplies[supply.id] || 0} | Bez limitu</Text>
+                    <Text style={styles.listCardTitle}>{selectedSupply.name}</Text>
+                    <Text style={styles.listCardMeta}>
+                      W magazynie: {selectedSupplyStock} | Jednostka: {selectedSupply.unit}
+                    </Text>
                   </View>
                 </View>
-                <Pressable onPress={() => actions.buySupply(supply)} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>Kup {formatMoney(supply.price)}</Text>
+                <Text style={styles.listCardReward}>{formatMoney(selectedSupply.price)}</Text>
+              </View>
+
+              <View style={[styles.planChipRow, { marginTop: 4 }]}>
+                {[1, 5, 10].map((qty) => (
+                  <Pressable
+                    key={`${selectedSupply.id}-${qty}`}
+                    onPress={() => actions.buySupply(selectedSupply, { quantity: qty })}
+                    style={styles.planChip}
+                  >
+                    <Text style={styles.planChipText}>{`+${qty}`}</Text>
+                  </Pressable>
+                ))}
+                <Pressable
+                  onPress={() => actions.buySupply(selectedSupply, { quantity: selectedSupplyMaxAffordable })}
+                  disabled={selectedSupplyMaxAffordable <= 0}
+                  style={[styles.planChip, selectedSupplyMaxAffordable <= 0 && styles.tileDisabled]}
+                >
+                  <Text style={styles.planChipText}>MAX</Text>
+                </Pressable>
+              </View>
+
+              <Text style={[styles.listCardMeta, { marginTop: 8 }]}>Idzie prosto do batchy w fabrykach. Bez kombinacji i bez drugiego sklepu.</Text>
+
+              <View style={[styles.marketButtons, { marginTop: 10 }]}>
+                <Pressable
+                  onPress={() => actions.buySupply(selectedSupply)}
+                  style={[styles.marketButton, { minHeight: 42, justifyContent: "center" }]}
+                >
+                  <Text style={styles.marketButtonText}>Kup 1</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => actions.buySupply(selectedSupply, { quantity: selectedSupplyMaxAffordable })}
+                  disabled={selectedSupplyMaxAffordable <= 0}
+                  style={[
+                    styles.marketButton,
+                    { minHeight: 42, justifyContent: "center" },
+                    selectedSupplyMaxAffordable <= 0 && styles.tileDisabled,
+                  ]}
+                >
+                  <Text style={styles.marketButtonText}>
+                    {selectedSupplyMaxAffordable > 0 ? `Kup max x${selectedSupplyMaxAffordable}` : "Kup max"}
+                  </Text>
                 </Pressable>
               </View>
             </View>
-          ))}
+          </SectionCard>
+        ) : null}
+
+        <SectionCard title="Dostawy" subtitle="Front to nazwa, cena i zakup. Reszta siedzi wyzej po wyborze.">
+          <View style={styles.grid}>
+            {suppliers.map((supply) => {
+              const isSelected = selectedSupply?.id === supply.id;
+              return (
+                <Pressable
+                  key={supply.id}
+                  onPress={() => setSelectedSupplyId(supply.id)}
+                  style={[
+                    styles.listCard,
+                    {
+                      width: "31.5%",
+                      minWidth: 96,
+                      paddingVertical: 12,
+                      paddingHorizontal: 10,
+                      borderColor: isSelected ? "#d8b26c" : "#26282b",
+                      backgroundColor: isSelected ? "#16120d" : "#111317",
+                    },
+                  ]}
+                >
+                  <View style={{ alignItems: "center", gap: 8 }}>
+                    <EntityBadge visual={supplierVisuals[supply.id] || systemVisuals.supplier} />
+                    <Text
+                      style={[styles.listCardTitle, { textAlign: "center", fontSize: 12, lineHeight: 15 }]}
+                      numberOfLines={2}
+                    >
+                      {supply.name}
+                    </Text>
+                    <Text style={[styles.listCardReward, { fontSize: 12 }]}>{formatMoney(supply.price)}</Text>
+                    <Pressable
+                      onPress={() => actions.buySupply(supply)}
+                      style={[styles.inlineButton, { minHeight: 34, alignSelf: "stretch", justifyContent: "center" }]}
+                    >
+                      <Text style={[styles.inlineButtonText, { fontSize: 11 }]}>Kup</Text>
+                    </Pressable>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
         </SectionCard>
       </>
     );
@@ -722,595 +1163,761 @@ export function EmpireScreen({
 
   return (
     <>
-      <SceneArtwork
-        eyebrow="Klub"
-        title="Lokal, ruch i nocne okazje"
-        lines={["Klub to ruch, kontakty i nocne okazje.", "Wlasciciel trzyma drzwi, stash i raport, a odwiedzajacy maja trzy proste ruchy."]}
-        accent={["#432417", "#170f0c", "#050505"]}
-        source={sceneBackgrounds.clubWide}
-      />
-      <HeroPanel
-        eyebrow="Klub"
-        title={
-          currentClubVenue
-            ? insideOwnClub
-              ? `${currentClubVenue.name} pracuje w tle`
-              : `Wchodzisz do ${currentClubVenue.name}`
-            : "Najpierw wybierz lokal"
-        }
-        summary={
-          currentClubVenue
-            ? insideOwnClub
-              ? "Klub ma byc zywy, nie recznie klikany. Ty trzymasz bramke, stash, raport i ochrone, a lokal rozlicza ruch oraz wejscia w tle."
-              : guestHasVenueAccess
-                ? "Masz aktywne wejscie, wiec grasz pod kontakty, klimat lokalu i stash gospodarza. To nie jest drugi ekran dilera."
-                : "Najpierw wejdz do lokalu. Potem dostajesz trzy proste ruchy: wejdz w obieg, szukaj kontaktu albo przyczaj sie."
-            : "Klub daje kontakty, utility i protektorat gangu. Wchodzisz tylko w jeden czytelny flow: lokal, drzwi, raport i stash."
-        }
-        tone={insideOwnClub ? "gold" : currentClubVenue ? "danger" : "neutral"}
-        pills={[
-          {
-            label: insideOwnClub ? "Sejf" : "Wejscie",
-            value: currentClubVenue ? (insideOwnClub ? formatMoney(currentSafeCash) : guestHasVenueAccess ? "Aktywne" : formatMoney(currentEntryFee)) : "-",
-            note: insideOwnClub ? "Do odbioru po raporcie lokalu." : guestHasVenueAccess ? "Masz dostep do sali i stashu." : "Placisz raz za okno wejscia.",
-            tone: insideOwnClub ? "success" : "gold",
-            icon: insideOwnClub ? "cash-multiple" : "door-open",
-          },
-          {
-            label: "Ruch",
-            value: currentClubVenue ? `${Math.round(displayedTraffic)}` : "-",
-            note: currentClubVenue ? trafficLabel : "Najpierw wybierz lokal.",
-            tone: "info",
-            icon: "account-group-outline",
-          },
-          {
-            label: "Presja",
-            value: currentClubVenue ? `${Math.round(displayedPressure)}` : "-",
-            note: currentClubVenue ? pressureLabel : "Bez lokalu nie ma presji.",
-            tone: displayedPressure >= 46 ? "danger" : "neutral",
-            icon: "alert-outline",
-          },
-        ]}
-        primaryAction={
-          currentClubVenue
-            ? {
-                label: insideOwnClub
-                  ? currentSafeCash > 0
-                    ? `Odbierz ${formatMoney(currentSafeCash)}`
-                    : "Sejf pusty"
-                  : guestHasVenueAccess
-                    ? "Wyjdz z lokalu"
-                    : currentEntryFee > 0
-                      ? `Wejdz za ${formatMoney(currentEntryFee)}`
-                      : "Wejdz do lokalu",
-                meta: insideOwnClub
-                  ? clubReportSummary
-                    ? `Ostatni payout: ${formatMoney(clubReportSummary.payout || 0)}.`
-                    : "Raport domknie sie automatycznie."
-                  : guestHasVenueAccess
-                    ? "Masz juz wejscie i dostep do akcji goscia."
-                    : "Najpierw aktywuj wejscie, potem grasz pod kontakty.",
-                onPress: insideOwnClub
-                  ? actions.collectClubSafe
-                  : guestHasVenueAccess
-                    ? actions.leaveClubAsGuest
-                    : () => actions.enterClubAsGuest(currentClubVenue),
-                disabled: insideOwnClub ? currentSafeCash <= 0 : false,
-              }
-            : null
-        }
-      />
       {!currentClubVenue ? (
-        <SectionCard title="Rynek klubow" subtitle="Wpadasz po kontakty albo przejmujesz lokal, jesli masz na to szacun i hajs.">
-          {safeGame.clubListings.map((listing) => {
-            const isOwnedByPlayer = safeGame.club.owned && safeGame.club.sourceId === listing.id;
-            const listingProfile = helpers.getClubVenueProfile(safeGame, listing);
-            const listingPlan = helpers.getClubNightPlan?.(listing.nightPlanId) || clubNightPlans?.[0];
-            const listingPressure = Number(listing.policePressure || (listing.policeBase || 0) * 3);
-            const listingPressureLabel =
-              listingPressure >= 72
-                ? "Goraco"
-                : listingPressure >= 46
-                  ? "Pod obserwacja"
-                  : listingPressure >= 24
-                    ? "Czuja ruch"
-                    : "Spokojnie";
-
-            return (
-              <View key={listing.id} style={styles.listCard}>
+        <>
+          <SectionCard title="Kluby" subtitle="Szybki rynek lokali. Wybierasz adres, sprawdzasz ruch i wchodzisz od razu w akcje.">
+            {selectedClubListing ? (
+              <View style={[styles.listCard, { marginBottom: 12, borderColor: "rgba(224, 174, 69, 0.22)", backgroundColor: "#111214" }]}>
                 <View style={styles.listCardHeader}>
                   <View style={styles.entityHead}>
-                    <EntityBadge visual={businessVisuals.club} />
+                    <EntityBadge visual={selectedClubListing.iconVisual || businessVisuals.club} />
                     <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{listing.name}</Text>
+                      <Text style={styles.listCardTitle}>{selectedClubListing.name}</Text>
                       <Text style={styles.listCardMeta}>
-                        Wlasciciel: {listing.ownerLabel} | Szacun {listing.respect} | Popularnosc {listing.popularity}% | Nastroj {listing.mood}%
+                        {selectedClubListing.ownerLabel || "Miasto"} • {selectedClubListing.districtId || "Adres ukryty"}
                       </Text>
                     </View>
                   </View>
-                  <Tag text={isOwnedByPlayer ? "Twoj" : formatMoney(listing.takeoverCost)} warning={!isOwnedByPlayer} />
+                  <Tag
+                    text={
+                      safeGame.club.owned && safeGame.club.sourceId === selectedClubListing.id
+                        ? "Twoj"
+                        : selectedClubListing.respect >= 32
+                          ? "VIP"
+                          : selectedClubListing.ownerLabel === "Miasto"
+                            ? "Miasto"
+                            : "Boss"
+                    }
+                    warning={!(safeGame.club.owned && safeGame.club.sourceId === selectedClubListing.id)}
+                  />
                 </View>
-                <Text style={styles.listCardMeta}>{listing.note}</Text>
+                <View style={styles.mobileOverviewGrid}>
+                  {renderClubMetricCard({
+                    label: "Wejscie",
+                    value: formatMoney(Number(selectedClubListing.entryFee || 0)),
+                    note: "Jedno okno dostepu do sali",
+                    tone: "gold",
+                  })}
+                  {renderClubMetricCard({
+                    label: "Ruch",
+                    value: `${selectedClubTraffic}`,
+                    note: selectedClubTrafficLabel,
+                    tone: selectedClubTraffic >= 12 ? "success" : "neutral",
+                  })}
+                  {renderClubMetricCard({
+                    label: "Presja",
+                    value: `${Math.round(selectedClubPressure)}`,
+                    note: selectedClubPressureLabel,
+                    tone: selectedClubPressure >= 46 ? "danger" : "info",
+                  })}
+                  {renderClubMetricCard({
+                    label: "Kontakt",
+                    value: `+${selectedClubProfile?.networkBoostValue || 0}%`,
+                    note: `${selectedClubProfile?.huntProgressValue || 0} progressu`,
+                    tone: "info",
+                  })}
+                </View>
                 <Text style={styles.listCardMeta}>
-                  {listing.districtId ? `Dzielnica: ${listing.districtId} | ` : ""}Plan nocy: {listingPlan?.name || "Guest List"} | Ruch {Math.round(listing.traffic || 0)} | Presja: {listingPressureLabel}
-                </Text>
-                <Text style={styles.listCardMeta}>
-                  Bramka: {formatMoney(listing.entryFee || 0)} | Wejdz w obieg: +{listingProfile.networkBoostValue}% do kolejnego kontaktu | Szukaj kontaktu: +{listingProfile.huntProgressValue}
+                  {selectedClubPlan?.name || "Guest List"} • {selectedClubProfile?.label || selectedClubListing.note || "Adres z potencjalem pod nocna robote."}
                 </Text>
                 <View style={styles.marketButtons}>
-                  <Pressable onPress={() => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
-                    <Text style={styles.marketButtonText}>{isOwnedByPlayer ? "Wejdz do swojego" : "Wejdz"}</Text>
+                  <Pressable onPress={() => actions.enterClubAsGuest(selectedClubListing)} style={styles.marketButton}>
+                    <Text style={styles.marketButtonText}>
+                      {safeGame.club.owned && safeGame.club.sourceId === selectedClubListing.id ? "Wejdz do swojego" : "Wejdz"}
+                    </Text>
                   </Pressable>
-                  <Pressable onPress={() => actions.openClub(listing)} style={[styles.marketButton, (safeGame.club.owned || safeGame.player.respect < listing.respect || isOwnedByPlayer) && styles.tileDisabled]}>
-                    <Text style={styles.marketButtonText}>{isOwnedByPlayer ? "Kupione" : "Przejmij"}</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>
-                    {isOwnedByPlayer
-                      ? "Lokal jest Twoj. Wejdz do srodka, zeby zobaczyc raport, sejf i drzwi."
-                      : `Przejecie: ${formatMoney(listing.takeoverCost)}`}
-                  </Text>
-                </View>
-              </View>
-            );
-          })}
-          <View style={styles.grid}>
-            <ActionTile
-              title="Postaw nowy klub"
-              subtitle={`Boss gangu moze zalozyc nowy lokal za ${formatMoney(clubFoundingCashCost)}.`}
-              visual={systemVisuals.club}
-              onPress={actions.foundClub}
-              disabled={safeGame.club.owned || !safeGame.gang.joined || safeGame.gang.role !== "Boss"}
-            />
-          </View>
-        </SectionCard>
-      ) : null}
-
-      <SectionCard
-        title={currentClubVenue ? `Stan lokalu: ${currentClubVenue.name}` : "Stan klubu"}
-        subtitle={currentClubVenue ? "Widzisz rytm lokalu, presje, drzwi i to, kto trzyma ten adres." : "Wejdz do lokalu, zeby zobaczyc rytm sali i akcje dla goscia."}
-      >
-        <View style={styles.heroBanner}>
-          <View style={styles.listCardHeader}>
-            <View style={styles.entityHead}>
-              <EntityBadge visual={businessVisuals.club} />
-              <View style={styles.flexOne}>
-                <Text style={styles.heroBannerTitle}>{currentClubVenue ? currentClubVenue.name : "Poza klubem"}</Text>
-                <Text style={styles.heroBannerText}>
-                  {currentClubVenue
-                    ? `${insideOwnClub ? "Twoj lokal" : `Wlasciciel: ${currentClubVenue.ownerLabel}`}. ${currentEntryFee > 0 ? `Bramka ${formatMoney(currentEntryFee)}.` : "Lista otwarta."} Plan: ${activeClubPlan?.name || "Guest List"}.`
-                    : "Wybierz lokal z listy wyzej, zeby wejsc do srodka."}
-                </Text>
-              </View>
-            </View>
-            {currentClubVenue ? <Tag text={insideOwnClub ? "OWNER" : "GOSC"} warning={!insideOwnClub} /> : null}
-          </View>
-          {currentClubVenue ? (
-            <>
-              <View style={styles.mobileOverviewGrid}>
-                <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>Popularnosc</Text>
-                  <Text style={styles.mobileOverviewValue}>{Math.round(currentClubVenue.popularity || 0)}%</Text>
-                  <Text style={styles.listCardMeta}>Mood {Math.round(currentClubVenue.mood || 0)}%</Text>
-                </View>
-                <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>Ruch</Text>
-                  <Text style={styles.mobileOverviewValue}>{Math.round(displayedTraffic)}</Text>
-                  <Text style={styles.listCardMeta}>{trafficLabel}</Text>
-                </View>
-                <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>Presja</Text>
-                  <Text style={styles.mobileOverviewValue}>{Math.round(displayedPressure)}</Text>
-                  <Text style={styles.listCardMeta}>{pressureLabel}</Text>
-                </View>
-                <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>{insideOwnClub ? "Sejf" : "Wejscie"}</Text>
-                  <Text style={styles.mobileOverviewValueSmall}>
-                    {insideOwnClub ? formatMoney(currentSafeCash) : guestHasVenueAccess ? "Aktywne" : formatMoney(currentEntryFee)}
-                  </Text>
-                  <Text style={styles.listCardMeta}>
-                    {insideOwnClub
-                      ? "Do odbioru z lokalu"
-                      : guestHasVenueAccess
-                        ? guestAccessRemaining > 0
-                          ? `Opaska jeszcze ${formatCooldown(guestAccessRemaining)}`
-                          : "Masz opaske na lokal"
-                        : currentEntryFee > 0
-                          ? "Placisz raz za wejscie"
-                          : "Wejscie za free"}
-                  </Text>
-                </View>
-                <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>Dzielnica</Text>
-                  <Text style={styles.mobileOverviewValueSmall}>{currentClubVenue.districtId || focusDistrictSummary?.shortName || "-"}</Text>
-                  <Text style={styles.listCardMeta}>{currentClubVenue.districtId === focusDistrictSummary?.id ? "Fokus gangu" : "Teren lokalu"}</Text>
-                </View>
-                <View style={styles.mobileOverviewCard}>
-                  <Text style={styles.mobileOverviewLabel}>Obrona</Text>
-                  <Text style={styles.mobileOverviewValue}>{Math.round((insideOwnClub ? safeGame.club.defenseReadiness : currentClubVenue.defenseReadiness) || 0)}</Text>
-                  <Text style={styles.listCardMeta}>Zagrozenie {threatLabel}</Text>
-                </View>
-              </View>
-              <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text>
-              <Text style={styles.listCardMeta}>
-                {insideOwnClub
-                  ? `Plan lokalu: ${activeClubPlan?.summary}`
-                  : guestHasVenueAccess
-                    ? "Masz wejscie, wiec dzialasz normalnie na sali i przy kontaktach."
-                    : currentEntryFee > 0
-                      ? `Bez wejscia nie ruszysz sali. Bramka bierze ${formatMoney(currentEntryFee)} za okno wejscia.`
-                      : "Lokal wpuszcza bez oplaty i gra glownie ruchem oraz kontaktami."}
-              </Text>
-              <View style={styles.listActionsRow}>
-                {!insideOwnClub && !guestHasVenueAccess ? (
                   <Pressable
-                    onPress={() => actions.enterClubAsGuest(currentClubVenue)}
+                    onPress={() => actions.openClub(selectedClubListing)}
                     style={[
-                      styles.inlineButton,
-                      currentEntryFee > 0 && Number(safeGame.player.cash || 0) < currentEntryFee && styles.tileDisabled,
+                      styles.marketButton,
+                      (safeGame.club.owned ||
+                        safeGame.player.respect < Number(selectedClubListing.respect || 0) ||
+                        (safeGame.club.owned && safeGame.club.sourceId === selectedClubListing.id)) &&
+                        styles.tileDisabled,
                     ]}
                   >
-                    <Text style={styles.inlineButtonText}>
-                      {currentEntryFee > 0 ? `Wejdz za ${formatMoney(currentEntryFee)}` : "Wejdz do lokalu"}
+                    <Text style={styles.marketButtonText}>
+                      {safeGame.club.owned && safeGame.club.sourceId === selectedClubListing.id ? "Kupione" : "Przejmij"}
                     </Text>
                   </Pressable>
-                ) : null}
-                {currentClubVenue ? (
-                  <Pressable onPress={actions.leaveClubAsGuest} style={styles.inlineButton}>
-                    <Text style={styles.inlineButtonText}>{insideOwnClub ? "Wyjdz z lokalu" : "Wyjdz"}</Text>
-                  </Pressable>
-                ) : null}
+                </View>
               </View>
-              {activeClubDistrictSummary ? (
-                <View style={styles.listCard}>
-                  <Text style={styles.listCardTitle}>{activeClubDistrictSummary.name}</Text>
-                  <Text style={styles.listCardMeta}>
-                    {activeClubDistrictSummary.controlLabel} | {activeClubDistrictSummary.pressureLabel} | {activeClubDistrictSummary.bonusLabel}
-                  </Text>
-                  {activeClubDistrictLines.map((line) => (
-                    <Text key={`${activeClubDistrictSummary.id}-${line}`} style={styles.listCardMeta}>
-                      {line}
-                    </Text>
-                  ))}
-                  {activeClubDistrictAlert ? (
-                    <Text style={styles.listCardMeta}>{activeClubDistrictAlert}</Text>
-                  ) : null}
-                </View>
-              ) : null}
-              {insideOwnClub ? (
-                <>
-                  <View style={styles.planChipRow}>
-                    {clubNightPlans.map((plan) => {
-                      const active = safeGame.club.nightPlanId === plan.id;
-                      return (
-                        <Pressable
-                          key={plan.id}
-                          onPress={() => actions.setClubNightPlan(plan.id)}
-                          style={[styles.planChip, active && styles.planChipActive]}
-                        >
-                          <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{plan.name}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                  <View style={styles.listCard}>
-                    <View style={styles.entityHead}>
-                      <EntityBadge visual={systemVisuals.bank} />
+            ) : null}
+            <View style={[styles.grid, { gap: 10 }]}>
+              {safeGame.clubListings.map((listing) => {
+                const isSelected = selectedClubListing?.id === listing.id;
+                const isOwnedByPlayer = safeGame.club.owned && safeGame.club.sourceId === listing.id;
+                const listingProfile = helpers.getClubVenueProfile?.(safeGame, listing);
+                const listingPressure = Number(listing.policePressure || (listing.policeBase || 0) * 3);
+                const listingPressureLabel =
+                  listingPressure >= 72
+                    ? "Goraco"
+                    : listingPressure >= 46
+                      ? "Pod obserwacja"
+                      : listingPressure >= 24
+                        ? "Czuja ruch"
+                        : "Spokojnie";
+                return (
+                  <Pressable
+                    key={listing.id}
+                    onPress={() => setClubListSelectionId(listing.id)}
+                    style={[
+                      styles.listCard,
+                      {
+                        width: "47.5%",
+                        padding: 12,
+                        borderColor: isSelected ? "rgba(224, 174, 69, 0.4)" : "#262a31",
+                        backgroundColor: isSelected ? "#14110d" : "#0f1114",
+                      },
+                    ]}
+                  >
+                    <View style={[styles.entityHead, { marginBottom: 10 }]}>
+                      <EntityBadge visual={listing.iconVisual || businessVisuals.club} />
                       <View style={styles.flexOne}>
-                        <Text style={styles.listCardTitle}>Bramka lokalu</Text>
-                        <Text style={styles.listCardMeta}>
-                          Ustawiasz wejscie dla obcych. Za wysoko siada ruch i kontakty. Twoj gang protektor wchodzi bez oplaty.
+                        <Text style={styles.listCardTitle} numberOfLines={2}>
+                          {listing.name}
+                        </Text>
+                        <Text style={styles.listCardMeta} numberOfLines={1}>
+                          {isOwnedByPlayer ? "Twoj" : listing.ownerLabel || "Miasto"}
                         </Text>
                       </View>
                     </View>
-                    <TextInput
-                      value={clubEntryFeeDraft}
-                      onChangeText={(text) => setClubEntryFeeDraft(text.replace(/[^\d]/g, ""))}
-                      placeholder="Np. 80"
-                      placeholderTextColor="#6c6c6c"
-                      keyboardType="numeric"
-                      style={styles.chatInput}
-                    />
-                    <View style={styles.listActionsRow}>
-                      <Pressable onPress={() => actions.setClubEntryFee(clubEntryFeeDraft)} style={styles.inlineButton}>
-                        <Text style={styles.inlineButtonText}>Ustaw wejscie</Text>
+                    <View style={{ gap: 4, marginBottom: 10 }}>
+                      <Text style={styles.costLabel}>{formatMoney(Number(listing.entryFee || 0))}</Text>
+                      <Text style={styles.listCardMeta} numberOfLines={1}>
+                        Ruch {Math.round(Number(listing.traffic || 0))} • {listingPressureLabel}
+                      </Text>
+                      <Text style={styles.listCardMeta} numberOfLines={1}>
+                        {listing.districtId || "Adres miasta"} • +{listingProfile?.networkBoostValue || 0}% kontaktu
+                      </Text>
+                    </View>
+                    <View style={styles.marketButtons}>
+                      <Pressable onPress={() => actions.enterClubAsGuest(listing)} style={styles.marketButton}>
+                        <Text style={styles.marketButtonText}>Wejdz</Text>
                       </Pressable>
-                      <Pressable onPress={actions.fortifyClub} style={styles.inlineButton}>
-                        <Text style={styles.inlineButtonText}>Zabezpiecz lokal</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                  <View style={styles.listCard}>
-                    <View style={styles.listCardHeader}>
-                      <View style={styles.entityHead}>
-                        <EntityBadge visual={systemVisuals.club} />
-                        <View style={styles.flexOne}>
-                          <Text style={styles.listCardTitle}>Do rozliczenia</Text>
-                          <Text style={styles.listCardMeta}>
-                            Nowe wejscia i ruch na stashu najpierw wpadaja tutaj, a dopiero przy kolejnym raporcie leca do sejfu.
-                          </Text>
-                        </View>
-                      </View>
-                      <Tag
-                        text={
-                          pendingClubEntryRevenue > 0 || pendingClubGuestConsumeCount > 0 || pendingClubGuestCount > 0
-                            ? "W TOKU"
-                            : "PUSTO"
-                        }
-                        warning={pendingClubEntryRevenue <= 0 && pendingClubGuestConsumeCount <= 0 && pendingClubGuestCount <= 0}
-                      />
-                    </View>
-                    <Text style={styles.listCardMeta}>
-                      Bramka w kolejce: {formatMoney(pendingClubEntryRevenue)} | Goscie: {pendingClubGuestCount}
-                    </Text>
-                    <Text style={styles.listCardMeta}>
-                      Zejscia ze stashu: {pendingClubGuestConsumeCount} | Raport za: {clubNextReportRemaining > 0 ? formatCooldown(clubNextReportRemaining) : "teraz"}
-                    </Text>
-                  </View>
-                  <View style={styles.listCard}>
-                    <View style={styles.listCardHeader}>
-                      <View style={styles.entityHead}>
-                        <EntityBadge visual={systemVisuals.cash} />
-                        <View style={styles.flexOne}>
-                          <Text style={styles.listCardTitle}>Raport i sejf</Text>
-                          <Text style={styles.listCardMeta}>
-                            {clubReportSummary
-                              ? `Obrot: ${formatMoney(clubReportSummary.grossIncome || 0)} | Payout: ${formatMoney(clubReportSummary.payout || 0)}`
-                              : "Lokal jeszcze nie domknal okresu do czytelnego raportu."}
-                          </Text>
-                        </View>
-                      </View>
-                      <Tag text={formatMoney(currentSafeCash)} warning={currentSafeCash <= 0} />
-                    </View>
-                    <Text style={styles.listCardMeta}>
-                      {clubReportSummary
-                        ? `Gosci: ${clubReportSummary.guestCount || 0} | Wejscia: ${formatMoney(clubReportSummary.entryRevenue || 0)} | Zeszlo ze stashu: ${clubReportSummary.stashUsed || 0}`
-                        : "Raport pojawi sie automatycznie po kolejnym okresie pracy lokalu."}
-                    </Text>
-                    <Text style={styles.listCardMeta}>
-                      {clubReportSummary
-                        ? `Presja +${Number(clubReportSummary.clubPressureGain || 0).toFixed(1)} | Dzielnica +${Number(clubReportSummary.districtPressureGain || 0).toFixed(1)} | Wplyw +${Number(clubReportSummary.influenceGain || 0).toFixed(1)}`
-                        : "Na razie lokal dopiero zbiera ruch, wejscie i zuzycie stashu."}
-                    </Text>
-                    <View style={styles.listActionsRow}>
                       <Pressable
-                        onPress={actions.collectClubSafe}
-                        style={[styles.inlineButton, currentSafeCash <= 0 && styles.tileDisabled]}
+                        onPress={() => actions.openClub(listing)}
+                        style={[
+                          styles.marketButton,
+                          (safeGame.club.owned || safeGame.player.respect < Number(listing.respect || 0) || isOwnedByPlayer) &&
+                            styles.tileDisabled,
+                        ]}
                       >
-                        <Text style={styles.inlineButtonText}>
-                          {currentSafeCash > 0 ? `Odbierz ${formatMoney(currentSafeCash)}` : "Sejf pusty"}
-                        </Text>
+                        <Text style={styles.marketButtonText}>{isOwnedByPlayer ? "Kupione" : "Przejmij"}</Text>
                       </Pressable>
                     </View>
-                  </View>
-                  <View style={styles.listCard}>
-                    <View style={styles.entityHead}>
-                      <EntityBadge visual={businessVisuals.club} />
-                      <View style={styles.flexOne}>
-                        <Text style={styles.listCardTitle}>Dragi na stashu</Text>
-                        <Text style={styles.listCardMeta}>
-                          Stash: {clubStashUnitCount} szt. | Aktywne typy: {clubStashTypeCount}
-                        </Text>
-                        <Text style={styles.listCardMeta}>
-                          Wrzucasz towar na zaplecze, a lokal zuzywa go pasywnie w tle pod klimat, ruch i raport.
-                        </Text>
-                      </View>
-                    </View>
-                    <TextInput
-                      value={clubTradeDraft}
-                      onChangeText={(text) => setClubTradeDraft(text.replace(/[^\d]/g, ""))}
-                      placeholder="Np. 5"
-                      placeholderTextColor="#6c6c6c"
-                      keyboardType="numeric"
-                      style={styles.chatInput}
-                    />
-                  </View>
-                  {clubStashDrugs.length ? (
-                    clubStashDrugs.map((drug) => (
-                      <View key={drug.id} style={styles.listCard}>
-                        <View style={styles.inlineRow}>
-                          <View style={styles.entityHead}>
-                            <EntityBadge visual={drugVisuals[drug.id]} />
-                            <View style={styles.flexOne}>
-                              <Text style={styles.listCardTitle}>{drug.name}</Text>
-                              <Text style={styles.listCardMeta}>
-                                Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | W klubie: {safeGame.club.stash[drug.id] || 0}
-                              </Text>
-                            </View>
-                          </View>
-                          <Pressable
-                            onPress={() => actions.moveDrugToClub(drug, clubTradeDraft)}
-                            style={[styles.inlineButton, Number(safeGame.drugInventory[drug.id] || 0) < clubTradeQuantity && styles.tileDisabled]}
-                          >
-                            <Text style={styles.inlineButtonText}>{`Wrzuc x${clubTradeQuantity}`}</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.emptyText}>Nie masz teraz nic do dorzucenia na stash. Dowiez towar z fabryk albo ogarnij go poza ekranem klubu.</Text>
-                  )}
-                </>
-              ) : null}
-              {insideOwnClub && safeGame.club.recentIncident?.text ? (
-                <View style={styles.lockedPanel}>
-                  <Text style={styles.lockedPanelText}>{safeGame.club.recentIncident.text}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </SectionCard>
+
+          <SectionCard title="Nowy klub" subtitle="Gruby wydatek i jeden ruch. Bez tutorialu, tylko koszt i decyzja.">
+            <View style={styles.mobileOverviewGrid}>
+              {renderClubMetricCard({
+                label: "Koszt",
+                value: formatMoney(clubFoundingCashCost),
+                note: "Stawiasz lokal od zera",
+                tone: "gold",
+              })}
+              {renderClubMetricCard({
+                label: "Prog",
+                value: "RES 26",
+                note: "Start dla mocniejszej ekipy",
+                tone: safeGame.player.respect >= 26 ? "success" : "danger",
+              })}
+              {renderClubMetricCard({
+                label: "Rola",
+                value: canFoundClub ? "Boss" : safeGame.gang.role || "Brak",
+                note: "Klub zaklada tylko boss",
+                tone: canFoundClub ? "success" : "neutral",
+              })}
+              {renderClubMetricCard({
+                label: "Front",
+                value: foundingPreviewDistrict?.name || "Miasto",
+                note: foundingPreviewDistrict
+                  ? `${foundingPreviewDistrict.pressureLabel} • ${foundingPreviewDistrict.bonusLabel}`
+                  : "Adres przypnie system miasta",
+                tone: "info",
+              })}
+            </View>
+            <Pressable
+              onPress={actions.foundClub}
+              style={[
+                styles.inlineButton,
+                {
+                  minHeight: 50,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  marginTop: 12,
+                  backgroundColor: canFoundClub ? "#e0ae45" : "#15171b",
+                  borderColor: canFoundClub ? "#f1cf88" : "#2d3138",
+                  opacity: canFoundClub ? 1 : 0.55,
+                },
+              ]}
+              disabled={!canFoundClub}
+            >
+              <Text
+                style={[
+                  styles.inlineButtonText,
+                  { color: canFoundClub ? "#1f1507" : "#9098a3", fontWeight: "900", fontSize: 13 },
+                ]}
+              >
+                Zaloz klub
+              </Text>
+            </Pressable>
+          </SectionCard>
+        </>
+      ) : insideOwnClub ? (
+        <SectionCard title={currentClubVenue.name} subtitle="Twoj lokal. Ruch, drzwi, sejf i stash zamkniete w jednym, krotszym flow.">
+          <View style={[styles.listCard, { marginBottom: 12 }]}>
+            <View style={styles.listCardHeader}>
+              <View style={styles.entityHead}>
+                <EntityBadge visual={currentClubVenue.iconVisual || businessVisuals.club} />
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>{currentClubVenue.name}</Text>
+                  <Text style={styles.listCardMeta}>
+                    Twoj lokal • {activeClubPlan?.name || "Guest List"} • {currentClubVenue.districtId || "Adres miasta"}
+                  </Text>
                 </View>
-              ) : null}
+              </View>
+              <Tag text="Twój" warning={false} />
+            </View>
+            <View style={styles.mobileOverviewGrid}>
+              {renderClubMetricCard({
+                label: "Ruch",
+                value: `${Math.round(displayedTraffic)}`,
+                note: trafficLabel,
+                tone: displayedTraffic >= 12 ? "success" : "neutral",
+              })}
+              {renderClubMetricCard({
+                label: "Presja",
+                value: `${Math.round(displayedPressure)}`,
+                note: pressureLabel,
+                tone: displayedPressure >= 46 ? "danger" : "info",
+              })}
+              {renderClubMetricCard({
+                label: "Popularnosc",
+                value: `${Math.round(currentClubVenue.popularity || 0)}%`,
+                note: `Mood ${Math.round(currentClubVenue.mood || 0)}%`,
+                tone: "gold",
+              })}
+              {renderClubMetricCard({
+                label: "Sejf",
+                value: formatMoney(currentSafeCash),
+                note: currentSafeCash > 0 ? "Gotowe do odbioru" : "Na razie pusto",
+                tone: currentSafeCash > 0 ? "success" : "neutral",
+              })}
+              {renderClubMetricCard({
+                label: "Wejscie",
+                value: formatMoney(currentEntryFee),
+                note: currentClubProfile?.entryProfile?.label || "Bramka lokalu",
+                tone: "gold",
+              })}
+              {renderClubMetricCard({
+                label: "Ochrona",
+                value: `${Math.round(Number(safeGame.club?.defenseReadiness || 0))}`,
+                note: `Threat ${threatLabel}`,
+                tone: Number(safeGame.club?.defenseReadiness || 0) >= 70 ? "success" : "info",
+              })}
+            </View>
+            <Text style={styles.listCardMeta}>{currentClubProfile.label}</Text>
+            <View style={styles.listActionsRow}>
+              <Pressable onPress={actions.leaveClubAsGuest} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Wyjdz z lokalu</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {renderClubTabRow(ownerClubTabs, clubOwnerTab, setClubOwnerTab)}
+
+          {clubOwnerTab === "status" ? (
+            <>
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Status lokalu</Text>
+                <Text style={styles.listCardMeta}>
+                  Stash support: +{Math.round(Number(currentClubProfile?.stashSupport || 0) * 100)}% • {activeClubPlan?.summary}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  {protectorGangName
+                    ? `${protectorGangName} trzyma drzwi. Obrona +${Math.round(Number(protectorEffects?.clubSecurity || 0))}, threat lzej o ${Math.round(Number(protectorEffects?.clubThreatMitigation || 0) * 100)}%.`
+                    : "Brak protektora. Lokal sam bierze cala presje na klate."}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  {activeClubDistrictAlert
+                    ? activeClubDistrictAlert
+                    : activeClubDistrictLines.slice(0, 2).join(" • ")}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.listCard,
+                  {
+                    borderColor: ownerClubBuffs.length ? "rgba(90, 186, 122, 0.28)" : "rgba(224, 78, 78, 0.22)",
+                    backgroundColor: ownerClubBuffs.length ? "#111815" : "#1b1011",
+                  },
+                ]}
+              >
+                <Text style={styles.listCardTitle}>Aktywne efekty</Text>
+                {ownerClubBuffs.length ? (
+                  ownerClubBuffs.map((drug) => (
+                    <Text key={`owner-buff-${drug.id}`} style={styles.listCardMeta}>
+                      {drug.name} • {drug.effectLabel}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.listCardMeta}>Brak towaru - brak buffow i slabszy ruch lokalu.</Text>
+                )}
+              </View>
             </>
           ) : null}
-        </View>
-      </SectionCard>
 
-      {currentClubVenue && !insideOwnClub ? (
-        <SectionCard
-          title="Akcje goscia"
-          subtitle={
-            clubActionCooldownRemaining > 0
-              ? `Kolejny ruch za ${formatCooldown(clubActionCooldownRemaining)}.`
-              : guestHasVenueAccess
-                ? "Trzy szybkie ruchy. Kazdy daje jasny efekt i konkret pod kolejny krok."
-                : currentEntryFee > 0
-                  ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}.`
-                  : "Lokal wpuszcza bez oplaty."
-          }
-        >
-          <View style={styles.grid}>
-            {clubVisitorActions.map((action) => {
-              const disabled =
-                clubActionCooldownRemaining > 0 ||
-                !guestHasVenueAccess ||
-                (action.id === "hunt" && !activeLeadEscort);
-              const subtitle =
-                action.id === "scout"
-                  ? `Koszt 0$. Daje +${currentClubProfile.networkBoostValue}% do kolejnego szukania kontaktu i lekko rozkreca lokal.`
-                  : action.id === "hunt"
-                    ? activeLeadEscort
-                      ? `Koszt ${formatMoney(action.costCash)}. ${activeLeadEscort.name}: +${currentClubProfile.huntProgressValue} progressu.`
-                      : "Na tym progu nie ma jeszcze kontaktu do namierzenia."
-                    : `Koszt 0$. Heat -${currentClubProfile.layLowHeat} | HP +${currentClubProfile.layLowHp}. Wracasz do pionu.`;
-
-              return (
-                <ActionTile
-                  key={action.id}
-                  title={action.name}
-                  subtitle={subtitle}
-                  visual={
-                    action.id === "scout"
-                      ? systemVisuals.club
-                      : action.id === "hunt"
-                        ? systemVisuals.street
-                        : systemVisuals.heat
-                  }
-                  onPress={() => actions.runClubVisitorAction(action.id)}
-                  disabled={disabled}
-                />
-              );
-            })}
-          </View>
-        </SectionCard>
-      ) : null}
-
-      {!insideOwnClub ? (
-        <SectionCard
-          title={!currentClubVenue ? "Po co tu wchodzic" : "Okazje i wynik"}
-          subtitle={
-            currentClubVenue
-              ? "Tu widzisz postep kontaktu i ostatni wynik z sali."
-              : "Klub daje kontakty, ruch i nocne okazje."
-          }
-        >
-          {!currentClubVenue ? (
-          <View style={styles.lockedPanel}>
-            <Text style={styles.lockedPanelText}>
-              Po wejsciu do lokalu widzisz od razu bramke, rytm sali i trzy proste ruchy: wejscie w obieg, szukanie kontaktu albo chwile oddechu.
-            </Text>
-          </View>
-          ) : (
-          <>
-            <View style={styles.listCard}>
-              <View style={styles.listCardHeader}>
-                <View style={styles.entityHead}>
-                  <EntityBadge visual={activeLeadEscort ? escortVisuals[activeLeadEscort.id] || escortVisuals.velvet : systemVisuals.street} />
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{activeLeadEscort ? `Lead na ${activeLeadEscort.name}` : "Kontakt jeszcze sie nie odpalil"}</Text>
-                    <Text style={styles.listCardMeta}>
-                      {activeLeadEscort
-                        ? `${leadProgress}/${leadRequired} | Kolejny ruch daje +${currentClubProfile.huntProgressValue}`
-                        : "Podnies respekt albo wejdz do mocniejszego lokalu po lepszy kontakt."}
-                    </Text>
-                  </View>
+          {clubOwnerTab === "manage" ? (
+            <>
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Plan nocy</Text>
+                <Text style={styles.listCardMeta}>Jedna decyzja. Potem lokal sam rozlicza ruch i raport.</Text>
+                <View style={[styles.planChipRow, { marginTop: 10 }]}>
+                  {clubNightPlans.map((plan) => {
+                    const active = safeGame.club.nightPlanId === plan.id;
+                    return (
+                      <Pressable
+                        key={plan.id}
+                        onPress={() => actions.setClubNightPlan(plan.id)}
+                        style={[styles.planChip, active && styles.planChipActive]}
+                      >
+                        <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{plan.name}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-                <Tag text={activeLeadEscort ? `${Math.round(leadMeterProgress * 100)}%` : "--"} warning={!activeLeadEscort} />
               </View>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${Math.max(4, leadMeterProgress * 100)}%` }]} />
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Bramka i ochrona</Text>
+                <Text style={styles.listCardMeta}>
+                  Za wysoka cena zabija ruch i kontakty. Protektor gangu wchodzi bez oplaty.
+                </Text>
+                <TextInput
+                  value={clubEntryFeeDraft}
+                  onChangeText={(text) => setClubEntryFeeDraft(text.replace(/[^\d]/g, ""))}
+                  placeholder="Np. 80"
+                  placeholderTextColor="#6c6c6c"
+                  keyboardType="numeric"
+                  style={styles.chatInput}
+                />
+                <View style={styles.marketButtons}>
+                  <Pressable onPress={() => actions.setClubEntryFee(clubEntryFeeDraft)} style={styles.marketButton}>
+                    <Text style={styles.marketButtonText}>Ustaw wejscie</Text>
+                  </Pressable>
+                  <Pressable onPress={actions.fortifyClub} style={styles.marketButton}>
+                    <Text style={styles.marketButtonText}>Zabezpiecz</Text>
+                  </Pressable>
+                </View>
               </View>
-              <Text style={styles.listCardMeta}>
-                {lastOutcome
-                  ? lastOutcome.logMessage
-                  : guestHasVenueAccess
-                    ? "Pierwszy ruch od razu pokaze konkretny wynik: boost do kontaktu, progress albo zejscie heat."
-                    : currentEntryFee > 0
-                      ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}. Potem masz pelny dostep do akcji i stashu lokalu.`
-                      : "Lokal wpuszcza bez oplaty. Wchodzisz i od razu grasz pod kontakty."}
-              </Text>
+            </>
+          ) : null}
+
+          {clubOwnerTab === "safe" ? (
+            <>
+              <View style={styles.mobileOverviewGrid}>
+                {renderClubMetricCard({
+                  label: "Sejf",
+                  value: formatMoney(currentSafeCash),
+                  note: currentSafeCash > 0 ? "Do odbioru" : "Pusto",
+                  tone: currentSafeCash > 0 ? "success" : "neutral",
+                })}
+                {renderClubMetricCard({
+                  label: "Wejsciowki",
+                  value: formatMoney(pendingClubEntryRevenue),
+                  note: `${pendingClubGuestCount} gosci`,
+                  tone: pendingClubEntryRevenue > 0 ? "gold" : "neutral",
+                })}
+                {renderClubMetricCard({
+                  label: "Stash",
+                  value: `${pendingClubGuestConsumeCount}`,
+                  note: "Zejsc w kolejce",
+                  tone: pendingClubGuestConsumeCount > 0 ? "info" : "neutral",
+                })}
+                {renderClubMetricCard({
+                  label: "Raport",
+                  value: clubNextReportRemaining > 0 ? formatCooldown(clubNextReportRemaining) : "Teraz",
+                  note: "Kolejne rozliczenie",
+                  tone: clubNextReportRemaining > 0 ? "info" : "success",
+                })}
+              </View>
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Ostatni raport</Text>
+                <Text style={styles.listCardMeta}>
+                  {clubReportSummary
+                    ? `Obrot ${formatMoney(clubReportSummary.grossIncome || 0)} • Payout ${formatMoney(clubReportSummary.payout || 0)}`
+                    : "Lokal jeszcze zbiera pierwszy czytelny raport."}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  {clubReportSummary
+                    ? `Gosci ${clubReportSummary.guestCount || 0} • Wejscia ${formatMoney(clubReportSummary.entryRevenue || 0)} • Zeszlo ${clubReportSummary.stashUsed || 0}`
+                    : "Po kolejnym okresie zobaczysz wejscia, zuzycie stashu i payout."}
+                </Text>
+                <Text style={styles.listCardMeta}>
+                  {clubReportSummary
+                    ? `Presja +${Number(clubReportSummary.clubPressureGain || 0).toFixed(1)} • Dzielnica +${Number(clubReportSummary.districtPressureGain || 0).toFixed(1)} • Wplyw +${Number(clubReportSummary.influenceGain || 0).toFixed(1)}`
+                    : "Na razie lokal dopiero dobija ruch, wejscia i zejscia ze stashu."}
+                </Text>
+                <Pressable
+                  onPress={actions.collectClubSafe}
+                  style={[
+                    styles.inlineButton,
+                    {
+                      marginTop: 12,
+                      minHeight: 48,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: currentSafeCash > 0 ? "#e0ae45" : "#15171b",
+                      borderColor: currentSafeCash > 0 ? "#f1cf88" : "#2d3138",
+                      opacity: currentSafeCash > 0 ? 1 : 0.55,
+                    },
+                  ]}
+                  disabled={currentSafeCash <= 0}
+                >
+                  <Text
+                    style={[
+                      styles.inlineButtonText,
+                      { color: currentSafeCash > 0 ? "#1f1507" : "#9098a3", fontWeight: "900" },
+                    ]}
+                  >
+                    {currentSafeCash > 0 ? `Odbierz wszystko ${formatMoney(currentSafeCash)}` : "Sejf pusty"}
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
+
+          {clubOwnerTab === "stash" ? (
+            <>
+              <View style={styles.listCard}>
+                <Text style={styles.listCardTitle}>Stash lokalu</Text>
+                <Text style={styles.listCardMeta}>
+                  {clubStashUnitCount} szt. • {clubStashTypeCount} typy • Support +{Math.round(Number(currentClubProfile?.stashSupport || 0) * 100)}%
+                </Text>
+                <TextInput
+                  value={clubTradeDraft}
+                  onChangeText={(text) => setClubTradeDraft(text.replace(/[^\d]/g, ""))}
+                  placeholder="Np. 5"
+                  placeholderTextColor="#6c6c6c"
+                  keyboardType="numeric"
+                  style={styles.chatInput}
+                />
+              </View>
+              {ownerClubBuffs.length ? (
+                <View style={[styles.listCard, { borderColor: "rgba(90, 186, 122, 0.28)", backgroundColor: "#111815" }]}>
+                  <Text style={styles.listCardTitle}>Aktywne efekty lokalu</Text>
+                  {ownerClubBuffs.map((drug) => (
+                    <Text key={`owner-stash-buff-${drug.id}`} style={styles.listCardMeta}>
+                      {drug.name} • {drug.effectLabel}
+                    </Text>
+                  ))}
+                </View>
+              ) : (
+                <View style={[styles.listCard, { borderColor: "rgba(224, 78, 78, 0.22)", backgroundColor: "#1b1011" }]}>
+                  <Text style={styles.listCardTitle}>Brak towaru</Text>
+                  <Text style={styles.listCardMeta}>Brak buffow i slabszy ruch dopoki nie wrzucisz czegos na stash.</Text>
+                </View>
+              )}
+              {clubStashDrugs.length ? (
+                clubStashDrugs.map((drug) => (
+                  <View key={drug.id} style={styles.listCard}>
+                    <View style={styles.inlineRow}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={drugVisuals[drug.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{drug.name}</Text>
+                          <Text style={styles.listCardMeta}>
+                            Przy Tobie {safeGame.drugInventory[drug.id] || 0} • W klubie {safeGame.club.stash[drug.id] || 0}
+                          </Text>
+                          <Text style={styles.listCardMeta}>{formatClubDrugEffect(drug)}</Text>
+                        </View>
+                      </View>
+                      <Pressable
+                        onPress={() => actions.moveDrugToClub(drug, clubTradeDraft)}
+                        style={[
+                          styles.inlineButton,
+                          Number(safeGame.drugInventory[drug.id] || 0) < clubTradeQuantity && styles.tileDisabled,
+                        ]}
+                      >
+                        <Text style={styles.inlineButtonText}>{`Dodaj x${clubTradeQuantity}`}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>Nie masz teraz nic do dorzucenia. Dowiez towar z fabryk i wrzuc go na zaplecze.</Text>
+              )}
+            </>
+          ) : null}
+
+          {safeGame.club.recentIncident?.text ? (
+            <View style={styles.lockedPanel}>
+              <Text style={styles.lockedPanelText}>{safeGame.club.recentIncident.text}</Text>
             </View>
-          </>
-          )}
+          ) : null}
         </SectionCard>
-      ) : null}
-
-      {currentClubVenue ? (
-        <SectionCard title="Ochrona i protektor" subtitle="Widzisz, kto trzyma drzwi i jak lokal oddycha pod presja.">
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>{protectorGangName ? protectorGangName : "Brak protektora"}</Text>
-            <Text style={styles.listCardMeta}>
-              {protectorGangName
-                ? `Gang trzyma ten adres. Obrona +${Math.round(Number(protectorEffects?.clubSecurity || 0))}, threat lzej o ${Math.round(Number(protectorEffects?.clubThreatMitigation || 0) * 100)}%.`
-                : "Na MVP tylko jeden gang moze chronic jeden klub. Bez protektora lokal bierze cala presje na siebie."}
-            </Text>
-            <Text style={styles.listCardMeta}>
-              Presja: {pressureLabel} | Zagrozenie: {threatLabel}
-            </Text>
-            <Text style={styles.listCardMeta}>
-              {activeClubDistrictAlert
-                ? activeClubDistrictAlert
-                : pressureLabel === "Goraco"
-                  ? "Goraca dzielnica tnie ruch, pogarsza kontakty i podbija ryzyko incydentu."
-                  : "Spokojniejsza dzielnica trzyma lokal stabilniej i daje wiecej oddechu."}
-            </Text>
+      ) : (
+        <SectionCard title={currentClubVenue.name} subtitle="Wchodzisz, robisz ruch i od razu widzisz czy lokal zyje z towaru czy tylko z samej sali.">
+          <View style={[styles.listCard, { marginBottom: 12 }]}>
+            <View style={styles.listCardHeader}>
+              <View style={styles.entityHead}>
+                <EntityBadge visual={currentClubVenue.iconVisual || businessVisuals.club} />
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>{currentClubVenue.name}</Text>
+                  <Text style={styles.listCardMeta}>
+                    {currentClubVenue.ownerLabel || "Miasto"} • {currentClubVenue.districtId || "Adres miasta"}
+                  </Text>
+                </View>
+              </View>
+              <Tag text={guestHasVenueAccess ? "W srodku" : "Gosc"} warning={!guestHasVenueAccess} />
+            </View>
+            <View style={styles.mobileOverviewGrid}>
+              {renderClubMetricCard({
+                label: "Wejscie",
+                value: guestHasVenueAccess ? "Aktywne" : formatMoney(currentEntryFee),
+                note: guestHasVenueAccess
+                  ? guestAccessRemaining > 0
+                    ? `Opaska ${formatCooldown(guestAccessRemaining)}`
+                    : "Masz dostep"
+                  : currentEntryFee > 0
+                    ? "Placisz raz za okno"
+                    : "Lista otwarta",
+                tone: guestHasVenueAccess ? "success" : "gold",
+              })}
+              {renderClubMetricCard({
+                label: "Ruch",
+                value: `${Math.round(displayedTraffic)}`,
+                note: trafficLabel,
+                tone: displayedTraffic >= 12 ? "success" : "neutral",
+              })}
+              {renderClubMetricCard({
+                label: "Presja",
+                value: `${Math.round(displayedPressure)}`,
+                note: pressureLabel,
+                tone: displayedPressure >= 46 ? "danger" : "info",
+              })}
+              {renderClubMetricCard({
+                label: "Kontakt",
+                value: activeLeadEscort ? `${Math.round(leadMeterProgress * 100)}%` : "--",
+                note: activeLeadEscort ? activeLeadEscort.name : "Brak leada",
+                tone: activeLeadEscort ? "info" : "neutral",
+              })}
+            </View>
+            <View style={styles.listActionsRow}>
+              {!guestHasVenueAccess ? (
+                <Pressable
+                  onPress={() => actions.enterClubAsGuest(currentClubVenue)}
+                  style={[
+                    styles.inlineButton,
+                    currentEntryFee > 0 && Number(safeGame.player.cash || 0) < currentEntryFee && styles.tileDisabled,
+                  ]}
+                >
+                  <Text style={styles.inlineButtonText}>
+                    {currentEntryFee > 0 ? `Wejdz za ${formatMoney(currentEntryFee)}` : "Wejdz do lokalu"}
+                  </Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={actions.leaveClubAsGuest} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Wyjdz</Text>
+              </Pressable>
+            </View>
           </View>
-        </SectionCard>
-      ) : null}
 
-      {currentClubVenue && !insideOwnClub ? (
-        <SectionCard title="Towar w lokalu" subtitle="Jako gosc mozesz zarzucic to, co wlasciciel wrzucil na stash. Bez kupna i sprzedazy na miejscu.">
-          {!guestHasVenueAccess ? (
-            <Text style={styles.listCardMeta}>
-              {currentEntryFee > 0
-                ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}. Opaska daje Ci dostep do stashu i akcji w lokalu.`
-                : "Wejdz do lokalu i zlap aktywne wejscie, zeby korzystac z tego co lezy na stashu."}
-            </Text>
+          <View style={{ gap: 8 }}>
+            <Text style={[styles.listCardTitle, { marginBottom: 2 }]}>Akcje goscia</Text>
+            <View style={[styles.grid, { gap: 10 }]}>
+              {clubVisitorActions.map((action) => {
+                const disabled =
+                  clubActionCooldownRemaining > 0 || !guestHasVenueAccess || (action.id === "hunt" && !activeLeadEscort);
+                const subtitle =
+                  action.id === "scout"
+                    ? `+${currentClubProfile.networkBoostValue}% do kolejnego kontaktu`
+                    : action.id === "hunt"
+                      ? activeLeadEscort
+                        ? `${formatMoney(action.costCash)} • +${currentClubProfile.huntProgressValue} progressu`
+                        : "Brak celu na tym progu"
+                      : `Heat -${currentClubProfile.layLowHeat} • HP +${currentClubProfile.layLowHp}`;
+                return (
+                  <Pressable
+                    key={action.id}
+                    onPress={() => actions.runClubVisitorAction(action.id)}
+                    style={[
+                      styles.listCard,
+                      {
+                        width: "47.5%",
+                        padding: 12,
+                        borderColor: disabled ? "#25292f" : "rgba(224, 174, 69, 0.2)",
+                        backgroundColor: disabled ? "#101214" : "#14110d",
+                        opacity: disabled ? 0.55 : 1,
+                      },
+                    ]}
+                    disabled={disabled}
+                  >
+                    <Text style={styles.listCardTitle}>{action.name}</Text>
+                    <Text style={styles.listCardMeta}>{subtitle}</Text>
+                    <Text style={styles.costLabel}>
+                      {!guestHasVenueAccess
+                        ? currentEntryFee > 0
+                          ? `Najpierw ${formatMoney(currentEntryFee)}`
+                          : "Najpierw wejdz"
+                        : clubActionCooldownRemaining > 0
+                          ? `Za ${formatCooldown(clubActionCooldownRemaining)}`
+                          : "Graj teraz"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          {renderClubTabRow(guestClubTabs, clubGuestTab, setClubGuestTab)}
+
+          {clubGuestTab === "actions" ? (
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Stan sali</Text>
+              <Text style={styles.listCardMeta}>
+                {guestHasVenueAccess
+                  ? clubActionCooldownRemaining > 0
+                    ? `Kolejny ruch za ${formatCooldown(clubActionCooldownRemaining)}.`
+                    : "Masz pelny dostep do sali i trzech ruchow."
+                  : currentEntryFee > 0
+                    ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}.`
+                    : "Lokal wpuszcza bez oplaty."}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                Wejdz w obieg podbija kolejny kontakt, Szukaj kontaktu dobija progress, a Przyczaj sie zbija heat i podnosi HP.
+              </Text>
+              {lastOutcome ? <Text style={styles.listCardMeta}>{lastOutcome.logMessage}</Text> : null}
+            </View>
           ) : null}
-          {guestHasVenueAccess && clubConsumeCooldownRemaining > 0 ? (
-            <Text style={styles.listCardMeta}>{`Lokal musi chwile odpoczac. Kolejny strzal za ${formatCooldown(clubConsumeCooldownRemaining)}.`}</Text>
-          ) : null}
-          {guestClubStashDrugs.length ? (
-            guestClubStashDrugs.map((drug) => (
-              <View key={drug.id} style={styles.listCard}>
-                <View style={styles.inlineRow}>
+
+          {clubGuestTab === "opportunities" ? (
+            <>
+              <View style={styles.listCard}>
+                <View style={styles.listCardHeader}>
                   <View style={styles.entityHead}>
-                    <EntityBadge visual={drugVisuals[drug.id]} />
+                    <EntityBadge visual={activeLeadEscort ? escortVisuals[activeLeadEscort.id] || escortVisuals.velvet : systemVisuals.street} />
                     <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{drug.name}</Text>
+                      <Text style={styles.listCardTitle}>{activeLeadEscort ? `Lead na ${activeLeadEscort.name}` : "Kontakt jeszcze sie nie odpalil"}</Text>
                       <Text style={styles.listCardMeta}>
-                        Na stashu: {Number(currentClubVenue?.stash?.[drug.id] || 0)} | Efekt: {Math.round(Number(drug.durationSeconds || 0) / 60)} min
+                        {activeLeadEscort
+                          ? `${leadProgress}/${leadRequired} • Kolejny ruch daje +${currentClubProfile.huntProgressValue}`
+                          : "Podnies respekt albo wejdz do mocniejszego lokalu po lepszy kontakt."}
                       </Text>
                     </View>
                   </View>
-                  <Pressable
-                    onPress={() => actions.consumeDrugFromClub(drug)}
-                    style={[styles.inlineButton, (!guestHasVenueAccess || clubConsumeCooldownRemaining > 0) && styles.tileDisabled]}
-                  >
-                    <Text style={styles.inlineButtonText}>
-                      {!guestHasVenueAccess
-                        ? "Najpierw wejscie"
-                        : clubConsumeCooldownRemaining > 0
-                          ? `Za ${formatCooldown(clubConsumeCooldownRemaining)}`
-                          : "Zarzuc"}
-                    </Text>
-                  </Pressable>
+                  <Tag text={activeLeadEscort ? `${Math.round(leadMeterProgress * 100)}%` : "--"} warning={!activeLeadEscort} />
                 </View>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${Math.max(4, leadMeterProgress * 100)}%` }]} />
+                </View>
+                <Text style={styles.listCardMeta}>
+                  {lastOutcome
+                    ? lastOutcome.logMessage
+                    : guestHasVenueAccess
+                      ? "Pierwszy ruch od razu pokazuje konkretny wynik: boost do kontaktu, progress albo zejscie heat."
+                      : "Wejdz do lokalu, zeby odpalic caly loop sali."}
+                </Text>
               </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>Na stashu nic teraz nie lezy. Wpadasz tu wtedy glownie po kontakty i akcje na sali.</Text>
-          )}
-        </SectionCard>
-      ) : null}
+              <View
+                style={[
+                  styles.listCard,
+                  {
+                    borderColor: guestClubBuffs.length ? "rgba(90, 186, 122, 0.28)" : "rgba(224, 78, 78, 0.22)",
+                    backgroundColor: guestClubBuffs.length ? "#111815" : "#1b1011",
+                  },
+                ]}
+              >
+                <Text style={styles.listCardTitle}>Aktywne efekty</Text>
+                {guestClubBuffs.length ? (
+                  guestClubBuffs.map((drug) => (
+                    <Text key={`guest-buff-${drug.id}`} style={styles.listCardMeta}>
+                      {drug.name} • {drug.effectLabel}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.listCardMeta}>Brak towaru - brak buffow i slabszy ruch lokalu.</Text>
+                )}
+              </View>
+            </>
+          ) : null}
 
+          {clubGuestTab === "local" ? (
+            <View style={styles.listCard}>
+              <Text style={styles.listCardTitle}>Lokal</Text>
+              <Text style={styles.listCardMeta}>
+                {currentClubVenue.districtId || "Adres miasta"} • {activeClubPlan?.name || "Guest List"} • {currentClubProfile.label}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {protectorGangName
+                  ? `${protectorGangName} trzyma ten adres. Obrona +${Math.round(Number(protectorEffects?.clubSecurity || 0))}, threat lzej o ${Math.round(Number(protectorEffects?.clubThreatMitigation || 0) * 100)}%.`
+                  : "Brak protektora. Lokal bierze cala presje na siebie."}
+              </Text>
+              <Text style={styles.listCardMeta}>
+                {activeClubDistrictAlert
+                  ? activeClubDistrictAlert
+                  : activeClubDistrictLines.slice(0, 2).join(" • ")}
+              </Text>
+            </View>
+          ) : null}
+
+          {clubGuestTab === "stash" ? (
+            <>
+              {!guestHasVenueAccess ? (
+                <View style={styles.listCard}>
+                  <Text style={styles.listCardTitle}>Towar w lokalu</Text>
+                  <Text style={styles.listCardMeta}>
+                    {currentEntryFee > 0
+                      ? `Najpierw wejscie za ${formatMoney(currentEntryFee)}. Opaska daje Ci dostep do stashu i akcji w lokalu.`
+                      : "Wejdz do lokalu i zlap aktywne wejscie, zeby korzystac ze stashu."}
+                  </Text>
+                </View>
+              ) : null}
+              {guestHasVenueAccess && clubConsumeCooldownRemaining > 0 ? (
+                <Text style={styles.listCardMeta}>{`Lokal musi chwile odpoczac. Kolejny strzal za ${formatCooldown(clubConsumeCooldownRemaining)}.`}</Text>
+              ) : null}
+              {guestClubStashDrugs.length ? (
+                guestClubStashDrugs.map((drug) => (
+                  <View key={drug.id} style={styles.listCard}>
+                    <View style={styles.inlineRow}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={drugVisuals[drug.id]} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{drug.name}</Text>
+                          <Text style={styles.listCardMeta}>
+                            Na stashu {Number(currentClubVenue?.stash?.[drug.id] || 0)} • {formatClubDrugEffect(drug)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Pressable
+                        onPress={() => actions.consumeDrugFromClub(drug)}
+                        style={[
+                          styles.inlineButton,
+                          (!guestHasVenueAccess || clubConsumeCooldownRemaining > 0) && styles.tileDisabled,
+                        ]}
+                      >
+                        <Text style={styles.inlineButtonText}>
+                          {!guestHasVenueAccess
+                            ? "Najpierw wejscie"
+                            : clubConsumeCooldownRemaining > 0
+                              ? `Za ${formatCooldown(clubConsumeCooldownRemaining)}`
+                              : "Zarzuc"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>Na stashu nic teraz nie lezy. Wpadasz tu glownie po kontakty i ruch na sali.</Text>
+              )}
+            </>
+          ) : null}
+        </SectionCard>
+      )}
     </>
   );
 }

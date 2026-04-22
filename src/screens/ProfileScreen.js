@@ -296,7 +296,7 @@ export function ProfileScreen({
           <StatLine label="Heat kary" value={`-${Math.round(game.player.heat * 0.35)}% do czystej gry`} />
           <StatLine
             label="Najlepszy odblokowany napad"
-            value={`${bestHeist.name} (${Math.round(getSoloHeistOdds(game.player, effectivePlayer, game.gang, bestHeist).chance * 100)}%)`}
+            value={`${bestHeist.name} (${Math.round(getSoloHeistOdds(game.player, effectivePlayer, game.gang, bestHeist, game.activeBoosts).chance * 100)}%)`}
           />
         </SectionCard>
       </>

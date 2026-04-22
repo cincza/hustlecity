@@ -312,7 +312,14 @@ export function HeistTabs({ tabs, selected, onSelect }) {
           onPress={() => !tab.locked && onSelect(tab.id)}
           style={[styles.heistTab, selected === tab.id && styles.heistTabActive, tab.locked && styles.heistTabLocked]}
         >
-          <Text style={[styles.heistTabText, selected === tab.id && styles.heistTabTextActive]}>{tab.label}</Text>
+          <View style={styles.heistTabTopRow}>
+            <Text style={[styles.heistTabText, selected === tab.id && styles.heistTabTextActive]}>{tab.label}</Text>
+            {typeof tab.count === "number" ? (
+              <View style={[styles.heistTabCountPill, selected === tab.id && styles.heistTabCountPillActive]}>
+                <Text style={[styles.heistTabCountText, selected === tab.id && styles.heistTabCountTextActive]}>{tab.count}</Text>
+              </View>
+            ) : null}
+          </View>
           {tab.lockedLabel ? <Text style={styles.heistTabLockText}>{tab.lockedLabel}</Text> : null}
         </Pressable>
       ))}
@@ -327,29 +334,34 @@ export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel
       <View style={styles.heistCardHeader}>
         <View style={styles.heistCardTitleWrap}>
           <Text style={styles.heistCardTitle}>{title}</Text>
-          <Text style={styles.heistCardMeta}>Ryzyko {risk} | Energia {energy}</Text>
+          <Text style={styles.heistReward}>{reward}</Text>
         </View>
-        <Text style={styles.heistReward}>{reward}</Text>
+        <Pressable disabled={!handlePress} onPress={handlePress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
+          <Text style={[styles.heistActionText, disabled && styles.heistActionTextDisabled]}>{lockedLabel || "Wykonaj"}</Text>
+        </Pressable>
       </View>
       <View style={styles.heistInfoRow}>
         <View style={styles.heistInfoChip}>
-          <IconChip icon="chance" size={14} />
-          <Text style={styles.heistInfoText}>{chance}</Text>
+          <Text style={styles.heistInfoLabel}>Ryzyko</Text>
+          <Text style={styles.heistInfoText}>{risk}</Text>
         </View>
         <View style={styles.heistInfoChip}>
-          <IconChip icon="energy" size={14} />
+          <Text style={styles.heistInfoLabel}>Energia</Text>
           <Text style={styles.heistInfoText}>{energy}</Text>
         </View>
         {xp ? (
           <View style={styles.heistInfoChip}>
-            <IconChip icon="level" size={14} />
+            <Text style={styles.heistInfoLabel}>XP</Text>
             <Text style={styles.heistInfoText}>{xp}</Text>
           </View>
         ) : null}
+        {chance ? (
+          <View style={styles.heistInfoChip}>
+            <Text style={styles.heistInfoLabel}>Szansa</Text>
+            <Text style={styles.heistInfoText}>{chance}</Text>
+          </View>
+        ) : null}
       </View>
-      <Pressable disabled={!handlePress} onPress={handlePress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
-        <Text style={styles.heistActionText}>{lockedLabel || "Wykonaj"}</Text>
-      </Pressable>
     </LinearGradient>
   );
 }
@@ -497,26 +509,33 @@ const styles = StyleSheet.create({
   featureTileBadge: { width: 42, height: 42, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.24)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   featureTileTitle: { color: "#fff6ea", fontSize: 18, fontWeight: "900" },
   featureTileSubtitle: { color: "#d1c4b4", fontSize: 12, lineHeight: 17 },
-  heistTabsRow: { flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" },
-  heistTab: { flexGrow: 1, minWidth: 82, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 16, backgroundColor: "#101318", borderWidth: 1, borderColor: "#2c3139", alignItems: "center" },
+  heistTabsRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
+  heistTab: { flexGrow: 1, flexBasis: "24%", minWidth: 72, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 14, backgroundColor: "#101318", borderWidth: 1, borderColor: "#2c3139", alignItems: "stretch" },
   heistTabActive: { backgroundColor: "#18140f", borderColor: "#c7902e" },
   heistTabLocked: { opacity: 0.5 },
-  heistTabText: { color: "#c8d0db", fontSize: 12, fontWeight: "800" },
+  heistTabTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  heistTabText: { color: "#c8d0db", fontSize: 11, fontWeight: "800" },
   heistTabTextActive: { color: "#f0c24d" },
-  heistTabLockText: { color: "#9e9487", fontSize: 10, fontWeight: "700", marginTop: 4, textAlign: "center" },
-  heistCard: { borderRadius: 22, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#2b313b" },
+  heistTabCountPill: { minWidth: 22, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 999, backgroundColor: "#171b22", borderWidth: 1, borderColor: "#2f3540", alignItems: "center" },
+  heistTabCountPillActive: { backgroundColor: "rgba(240,194,77,0.14)", borderColor: "rgba(240,194,77,0.32)" },
+  heistTabCountText: { color: "#aeb6c1", fontSize: 10, fontWeight: "900" },
+  heistTabCountTextActive: { color: "#f0c24d" },
+  heistTabLockText: { color: "#9e9487", fontSize: 9, fontWeight: "700", marginTop: 3, textAlign: "left" },
+  heistCard: { borderRadius: 18, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: "#2b313b" },
   heistCardDisabled: { opacity: 0.5 },
-  heistCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12 },
+  heistCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 },
   heistCardTitleWrap: { flex: 1 },
-  heistCardTitle: { color: "#fff6ea", fontSize: 16, fontWeight: "800", marginBottom: 4 },
+  heistCardTitle: { color: "#fff6ea", fontSize: 15, fontWeight: "900", marginBottom: 4 },
   heistCardMeta: { color: "#ac9f8e", fontSize: 12 },
-  heistReward: { color: "#7bffb3", fontSize: 13, fontWeight: "900" },
-  heistInfoRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
-  heistInfoChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 999, backgroundColor: "#12151b", borderWidth: 1, borderColor: "#2f3540" },
-  heistInfoText: { color: "#f6efe6", fontSize: 12, fontWeight: "700" },
-  heistActionButton: { paddingVertical: 12, borderRadius: 14, alignItems: "center", backgroundColor: "#241a12", borderWidth: 1, borderColor: "#7a5a26" },
+  heistReward: { color: "#7bffb3", fontSize: 14, fontWeight: "900" },
+  heistInfoRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
+  heistInfoChip: { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 6, paddingHorizontal: 9, borderRadius: 999, backgroundColor: "#12151b", borderWidth: 1, borderColor: "#2f3540" },
+  heistInfoLabel: { color: "#9f9588", fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
+  heistInfoText: { color: "#f6efe6", fontSize: 11, fontWeight: "800" },
+  heistActionButton: { minWidth: 110, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#e0ae45", borderWidth: 1, borderColor: "#f5d27c" },
   heistActionButtonDisabled: { opacity: 0.5 },
-  heistActionText: { color: "#fff6ea", fontWeight: "900", fontSize: 13 },
+  heistActionText: { color: "#1f1507", fontWeight: "900", fontSize: 12, textAlign: "center" },
+  heistActionTextDisabled: { color: "#f8ebd1" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", alignItems: "center", justifyContent: "center", padding: 20 },
   resultModal: { width: "100%", maxWidth: 340, backgroundColor: "#121419", borderRadius: 24, padding: 20, borderWidth: 1, borderColor: "#3a3e47", gap: 14 },
   resultModalSuccess: { borderColor: "#3cbf75" },

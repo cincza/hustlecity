@@ -98,6 +98,13 @@ export const ECONOMY_RULES = {
     maxHistoryEntries: 10,
     maxTagBonusPerContract: 0.36,
   },
+  arena: {
+    tokenCap: 20,
+    rewardWindowMs: 60 * 60 * 1000,
+    fullRewardRunsPerWindow: 3,
+    reducedRewardMultiplier: 0.45,
+    reducedRespectMultiplier: 0.5,
+  },
   boosts: {
     globalStatBonusCap: 0.24,
     maxConcurrentBoostFamilies: 2,

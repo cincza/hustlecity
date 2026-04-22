@@ -250,8 +250,6 @@ export const DRUGS = [
   },
 ];
 
-export const FIGHT_CLUB_ENERGY_COST = 3;
-export const FIGHT_CLUB_WIN_XP = 8;
 export const CLUB_ESCORT_SEARCH_COST = 450;
 export const PLAYER_BOUNTY_COST = 2500;
 export const PLAYER_BOUNTY_INCREMENT = 1500;

@@ -1,4 +1,5 @@
 import { clamp, CONTRACT_RULES } from "./economy.js";
+import { getArenaActionModifiers } from "./arena.js";
 
 export const CONTRACT_TAGS = ["stealth", "breach", "combat", "escape", "cargo"];
 
@@ -746,6 +747,7 @@ export function getContractOutcomePreview({
   profile = {},
   contractState,
   districtSummary = null,
+  activeBoosts = [],
 } = {}) {
   const safeContract = getContractById(contract?.id || contract);
   if (!safeContract) {
@@ -758,6 +760,7 @@ export function getContractOutcomePreview({
   const lockdownPenalty = pressureStateId === "lockdown" ? 0.08 : pressureStateId === "crackdown" ? 0.04 : 0;
   const statPower = getWeightedStatPower(profile, safeContract);
   const loadoutMetrics = getContractLoadoutMetrics(contractState, safeContract);
+  const arenaModifiers = getArenaActionModifiers(activeBoosts, "contract");
   const missingSlotPenalty = (1 - loadoutMetrics.slotCoverage) * 0.26;
   const rawChance =
     Number(safeContract.baseSuccess || 0) +
@@ -772,7 +775,8 @@ export function getContractOutcomePreview({
     0.88 +
       Math.max(0, statPower.ratio - 0.95) * 0.18 +
       loadoutMetrics.matchScore * 0.55 +
-      loadoutMetrics.retention * 0.4,
+      loadoutMetrics.retention * 0.4 +
+      Number(arenaModifiers.contractPayoutBonus || 0),
     0.82,
     CONTRACT_RULES.maxRewardMultiplier || 1.38
   );
@@ -785,6 +789,7 @@ export function getContractOutcomePreview({
         (1 + districtPenalty * 0.8)
     )
   );
+  const adjustedHeatGain = Math.max(0, heatGain - Math.floor(Number(arenaModifiers.heatReduction || 0)));
   const leakChance = clamp(
     Number(safeContract.baseJailRisk || 0) +
       districtPenalty * 0.4 +
@@ -811,12 +816,17 @@ export function getContractOutcomePreview({
     matchScore: Number(loadoutMetrics.matchScore.toFixed(3)),
     successChance: Number(successChance.toFixed(4)),
     rewardMultiplier: Number(rewardMultiplier.toFixed(4)),
-    heatGain,
+    heatGain: adjustedHeatGain,
     leakChance: Number(leakChance.toFixed(4)),
     jailChanceOnFail: Number(jailChanceOnFail.toFixed(4)),
     failDamageMultiplier: Number(failDamageMultiplier.toFixed(4)),
     districtPenalty: Number((districtPenalty + lockdownPenalty).toFixed(4)),
     loadout: loadoutMetrics,
+    arenaModifiers: {
+      contractPayoutBonus: Number(Number(arenaModifiers.contractPayoutBonus || 0).toFixed(4)),
+      heatReduction: Math.max(0, Math.floor(Number(arenaModifiers.heatReduction || 0))),
+      xpMultiplier: Number(Number(arenaModifiers.xpMultiplier || 0).toFixed(4)),
+    },
   };
 }
 

@@ -81,7 +81,6 @@ import {
   openGangHeistLobbyOnline,
   placeBountyOnline,
   playHighRiskOnline,
-  playFightClubRoundOnline,
   performClubActionOnline,
   playSlotOnline,
   previewGangPvpOnline,
@@ -105,6 +104,7 @@ import {
   updateGangSettingsOnline,
   startOperationOnline,
   startBlackjackOnline,
+  startFightClubRunOnline,
   standBlackjackOnline,
   sendPrisonChatMessageOnline,
   trainAtGymOnline,
@@ -113,6 +113,8 @@ import {
   updateAvatarOnline,
   visitClubOnline,
   withdrawOnline,
+  resolveFightClubRunOnline,
+  buyFightClubBoostOnline,
 } from "./api";
 import {
   ECONOMY_RULES,
@@ -137,6 +139,8 @@ import { CityScreen } from "./src/screens/CityScreen";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ProfileMenuScreen } from "./src/screens/ProfileMenuScreen";
 import { HeistsScreen } from "./src/screens/HeistsScreen";
+import { FightClubScreen } from "./src/screens/FightClubScreen";
+import { PrisonSection } from "./src/components/PrisonSection";
 import { HeroPanel } from "./src/components/GameScreenPrimitives";
 import { GameHeader, QuickActionModal, ResultModal } from "./src/components/GameShellUI";
 import { createRealtimeClient } from "./src/game/realtime/client";
@@ -180,6 +184,10 @@ import {
   getOwnedContractItems,
   normalizeContractState,
 } from "./shared/contracts.js";
+import {
+  getArenaActionModifiers,
+  normalizeArenaState,
+} from "./shared/arena.js";
 import { applyXpProgression } from "./shared/progression.js";
 import {
   canRunGangHeistRole,
@@ -240,7 +248,6 @@ import {
   DEALER_START_STOCK,
   DRUGS,
   ESCORTS,
-  FIGHT_CLUB_ENERGY_COST,
   PLAYER_BOUNTY_COST,
   PLAYER_BOUNTY_INCREMENT,
   createClubGuestState,
@@ -445,20 +452,21 @@ const SYSTEM_VISUALS = {
   gang: { code: "GNG", colors: ["#313e6f", "#090d1a"], image: UI_ICON_ART.gang },
 };
 const SUPPLIER_VISUALS = {
-  tobacco: { ...SYSTEM_VISUALS.supplier, code: "TYT" },
-  grain: { ...SYSTEM_VISUALS.supplier, code: "ZRN" },
-  herbs: { ...SYSTEM_VISUALS.supplier, code: "ZIO" },
-  chemicals: { ...SYSTEM_VISUALS.supplier, code: "CHM" },
-  packaging: { ...SYSTEM_VISUALS.supplier, code: "PAK" },
-  glass: { ...SYSTEM_VISUALS.supplier, code: "GLS" },
-  solvent: { ...SYSTEM_VISUALS.supplier, code: "SOL" },
-  spores: { ...SYSTEM_VISUALS.supplier, code: "SPR" },
-  resin: { ...SYSTEM_VISUALS.supplier, code: "RSN" },
-  pills: { ...SYSTEM_VISUALS.supplier, code: "PIL" },
-  pharma: { ...SYSTEM_VISUALS.supplier, code: "MED" },
-  coca: { ...SYSTEM_VISUALS.supplier, code: "COC" },
-  poppy: { ...SYSTEM_VISUALS.supplier, code: "POP" },
-  acid: { ...SYSTEM_VISUALS.supplier, code: "ACD" },
+  tobacco: { ...SYSTEM_VISUALS.supplier, code: "TYT", image: require("./assets/supplier-icons/tobacco.png") },
+  grain: { ...SYSTEM_VISUALS.supplier, code: "ZRN", image: require("./assets/supplier-icons/grain.png") },
+  herbs: { ...SYSTEM_VISUALS.supplier, code: "ZIO", image: require("./assets/supplier-icons/herbs.png") },
+  chemicals: { ...SYSTEM_VISUALS.supplier, code: "CHM", image: require("./assets/supplier-icons/chemicals.png") },
+  packaging: { ...SYSTEM_VISUALS.supplier, code: "PAK", image: require("./assets/supplier-icons/packaging.png") },
+  glass: { ...SYSTEM_VISUALS.supplier, code: "GLS", image: require("./assets/supplier-icons/glass.png") },
+  solvent: { ...SYSTEM_VISUALS.supplier, code: "SOL", image: require("./assets/supplier-icons/solvent.png") },
+  spores: { ...SYSTEM_VISUALS.supplier, code: "SPR", image: require("./assets/supplier-icons/spores.png") },
+  resin: { ...SYSTEM_VISUALS.supplier, code: "RSN", image: require("./assets/supplier-icons/resin.png") },
+  pills: { ...SYSTEM_VISUALS.supplier, code: "PIL", image: require("./assets/supplier-icons/pills.png") },
+  pharma: { ...SYSTEM_VISUALS.supplier, code: "MED", image: require("./assets/supplier-icons/pharma.png") },
+  coca: { ...SYSTEM_VISUALS.supplier, code: "COC", image: require("./assets/supplier-icons/coca.png") },
+  poppy: { ...SYSTEM_VISUALS.supplier, code: "POP", image: require("./assets/supplier-icons/poppy.png") },
+  acid: { ...SYSTEM_VISUALS.supplier, code: "ACD", image: require("./assets/supplier-icons/acid.png") },
+  cactus: { ...SYSTEM_VISUALS.supplier, code: "CTX", image: require("./assets/supplier-icons/cactus.png") },
 };
 
 const DRUG_VISUALS = {
@@ -558,7 +566,7 @@ const TAB_DEFINITIONS = [
     sections: [
       { id: "solo", label: "Skoki", title: "Skoki" },
       { id: "contracts", label: "Kontrakty", title: "Kontrakty" },
-      { id: "fightclub", label: "Fight", title: "Fightclub" },
+      { id: "fightclub", label: "Arena", title: "Arena / Fightclub" },
       { id: "prison", label: "Cela", title: "Wiezienie" },
     ],
   },
@@ -567,7 +575,7 @@ const TAB_DEFINITIONS = [
     id: "market",
     label: "Rynek",
     sections: [
-      { id: "drugs", label: "Towar", title: "Narkotyki" },
+      { id: "drugs", label: "Diler", title: "Diler" },
       { id: "items", label: "Itemy", title: "Itemy" },
       { id: "cars", label: "Auta", title: "Auta" },
       { id: "boosts", label: "Boosty", title: "Boosty" },
@@ -759,6 +767,7 @@ const INITIAL = {
     orderRules: null,
   },
   contractBoard: getActiveContractBoard(Date.now()),
+  arena: normalizeArenaState(),
   tasksClaimed: [],
   regenRemainder: 0,
   hpRegenRemainder: 0,
@@ -1529,10 +1538,19 @@ function syncClubRuntimeState(club, now = Date.now()) {
   };
 }
 
-function getSoloHeistOdds(player, effectivePlayer, gang, heist) {
+function getSoloHeistOdds(player, effectivePlayer, gang, heist, activeBoosts = []) {
+  const arenaModifiers = getArenaActionModifiers(activeBoosts, "heist");
   const playerPower = effectivePlayer.attack * 1.25 + effectivePlayer.defense * 0.85 + effectivePlayer.dexterity * 1.5 + player.respect * 0.45;
   const heistDifficulty = heist.respect * 1.75 + heist.energy * 4 + heist.risk * 55;
-  const chance = clamp(0.42 + (playerPower - heistDifficulty) / 115 + gang.members * 0.0025 - player.heat * 0.0025, 0.05, 0.92);
+  const chance = clamp(
+    0.42 +
+      (playerPower - heistDifficulty) / 115 +
+      gang.members * 0.0025 +
+      Number(arenaModifiers.heistSuccessBonus || 0) -
+      player.heat * 0.0025,
+    0.05,
+    0.92
+  );
   const jailChance = clamp(heist.risk * 0.8 + player.heat * 0.005 - effectivePlayer.defense * 0.006 - effectivePlayer.dexterity * 0.004, 0.08, 0.68);
 
   return { chance, jailChance };
@@ -2211,6 +2229,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       contract,
       profile: effectivePlayer,
       contractState,
+      activeBoosts: game.activeBoosts,
       districtSummary: districtSummaries.find((entry) => entry.id === contract?.districtId) || null,
     });
   const getContractPreviewLinesForContract = (contract) => {
@@ -2436,6 +2455,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         marketPayload?.contractsBoard,
         serverUser?.contracts?.history || prev.contracts?.history || []
       ),
+      arena:
+        serverUser?.arena && typeof serverUser.arena === "object"
+          ? normalizeArenaState(serverUser.arena)
+          : prev.arena,
       online: {
         ...prev.online,
         gangs: nextGangDirectory || prev.online.gangs,
@@ -3610,56 +3633,76 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     return false;
   };
 
-  const fightClubRound = async () => {
-    if (!canDoStreetAction("Fightclub nie dziala zza krat.")) return;
-    if (!canDoCriticalAction("Fightclub")) return;
-    if (game.player.energy < FIGHT_CLUB_ENERGY_COST) return pushLog("Za malo energii na sparing.");
+  const startFightClubRun = async (modeId, styleId) => {
+    if (!canDoStreetAction("Arena nie dziala zza krat.")) return false;
+    if (!canDoCriticalAction("Arena")) return false;
+    if (!hasOnlineAuthority) {
+      pushLog("Arena dziala teraz przez backend. Odpal lokalne API albo wejdz online.");
+      return false;
+    }
 
-    if (sessionToken && apiStatus === "online") {
-      try {
-        const result = await playFightClubRoundOnline(sessionToken);
-        mergeServerUser(result.user);
+    try {
+      const result = await startFightClubRunOnline(sessionToken, modeId, styleId);
+      mergeServerUser(result.user);
+      pushLog(result?.result?.logMessage || "Wchodzisz na ring.");
+      if (result?.result?.rewardWindow?.rewardReduced) {
         showExplicitNotice({
-          tone: result?.result?.success ? "success" : "warning",
-          title: result?.result?.success ? "FIGHTCLUB WYGRANY" : "FIGHTCLUB PRZEGRANY",
-          message: result?.result?.logMessage || "Sparing rozliczony przez backend.",
-          deltas: null,
+          tone: "warning",
+          title: "ARENA NA PRZYCISZENIU",
+          message: "Pelna pula runow jest juz wybita. Dalej mozesz walczyc, ale tokeny i kasa schodza na nizszy mnoznik.",
         });
-      } catch (error) {
-        pushLog(error.message);
       }
-      return;
+      return result;
+    } catch (error) {
+      pushLog(error.message);
+      return false;
+    }
+  };
+
+  const resolveFightClubRun = async () => {
+    if (!canDoStreetAction("Arena nie dziala zza krat.")) return false;
+    if (!canDoCriticalAction("Arena")) return false;
+    if (!hasOnlineAuthority) {
+      pushLog("Arena dziala teraz przez backend. Odpal lokalne API albo wejdz online.");
+      return false;
     }
 
-    if (!requireOfflineDemoAuthority("Fightclub")) return;
+    try {
+      const result = await resolveFightClubRunOnline(sessionToken);
+      mergeServerUser(result.user);
+      const runFinished = Boolean(result?.result?.finished);
+      const wonFight = Boolean(result?.result?.success);
+      showExplicitNotice({
+        tone: wonFight ? "success" : "warning",
+        title: runFinished ? (wonFight ? "RUN DOMKNIETY" : "RUN SKONCZONY") : wonFight ? "RUN IDZIE DALEJ" : "RING CIE ZLOMIL",
+        message: result?.result?.logMessage || "Arena rozliczona przez backend.",
+      });
+      return result;
+    } catch (error) {
+      pushLog(error.message);
+      return false;
+    }
+  };
 
-    const score = effectivePlayer.attack * 0.4 + effectivePlayer.defense * 0.25 + effectivePlayer.dexterity * 0.35 + Math.random() * 10;
-    if (score >= 16) {
-      setGame((prev) => ({
-        ...prev,
-        player: applyProgressionToPlayer(
-          {
-            ...prev.player,
-            energy: prev.player.energy - FIGHT_CLUB_ENERGY_COST,
-            attack: prev.player.attack + 1,
-            dexterity: prev.player.dexterity + 1,
-          },
-          8
-        ).player,
-        log: ["Fightclub wygrany. +8 XP, +1 atak, +1 zrecznosc.", ...prev.log].slice(0, 16),
-      }));
-      return;
+  const buyFightClubBoost = async (boostId) => {
+    if (!hasOnlineAuthority) {
+      pushLog("Boosty Areny sa backend-authoritative. Odpal lokalne API albo wejdz online.");
+      return false;
     }
 
-    setGame((prev) => ({
-      ...prev,
-      player: {
-        ...prev.player,
-        energy: prev.player.energy - FIGHT_CLUB_ENERGY_COST,
-        hp: clamp(prev.player.hp - 10, 0, prev.player.maxHp),
-      },
-      log: ["Fightclub przegrany. Obite rylo, ale nauka zostaje.", ...prev.log].slice(0, 16),
-    }));
+    try {
+      const result = await buyFightClubBoostOnline(sessionToken, boostId);
+      mergeServerUser(result.user);
+      showExplicitNotice({
+        tone: "success",
+        title: "BOOST Z ARENY",
+        message: result?.result?.logMessage || "Boost wpada na aktywne.",
+      });
+      return result;
+    } catch (error) {
+      pushLog(error.message);
+      return false;
+    }
   };
 
   const applyJail = (seconds, reason) => {
@@ -3720,7 +3763,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       }
     }
 
-    const { chance, jailChance } = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist);
+    const { chance, jailChance } = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist, game.activeBoosts);
 
     if (Math.random() < chance) {
       const gain = randomBetween(heist.reward[0], heist.reward[1]);
@@ -3960,6 +4003,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       contract,
       profile: effectivePlayer,
       contractState,
+      activeBoosts: game.activeBoosts,
       districtSummary,
     });
     if (!preview) return pushLog("Nie udalo sie policzyc kontraktu.");
@@ -5203,106 +5247,154 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - wholesale unlock, supplier tiers and component quality requirements should mutate server inventory, not local fallback state
-  const buySupply = async (supply) => {
-    if (!canDoStreetAction()) return;
+  const buySupply = async (supply, options = {}) => {
+    const safeQuantity = Math.max(1, Math.floor(Number(options?.quantity || 1)));
+    if (!canDoStreetAction()) return { ok: false, blocked: true };
     if (sessionToken && apiStatus === "online") {
       try {
-        const result = await buyFactorySupplyOnline(sessionToken, supply.id, 1);
+        const result = await buyFactorySupplyOnline(sessionToken, supply.id, safeQuantity);
         mergeServerUser(result.user);
+        return { ok: true, quantity: safeQuantity, result: result?.result || null };
       } catch (error) {
         pushLog(error.message);
+        return { ok: false, error };
       }
-      return;
     }
-    if (!requireOfflineDemoAuthority("Kupowanie dostaw")) return;
-    if (game.player.cash < supply.price) return pushLog(`Brakuje gotowki na ${supply.name}.`);
+    if (!requireOfflineDemoAuthority("Kupowanie dostaw")) return { ok: false, blocked: true };
+    const totalCost = Number(supply.price || 0) * safeQuantity;
+    if (game.player.cash < totalCost) {
+      pushLog(`Brakuje gotowki na ${supply.name}.`);
+      return { ok: false };
+    }
 
     setGame((prev) => ({
       ...prev,
-      player: { ...prev.player, cash: prev.player.cash - supply.price },
-      supplies: { ...prev.supplies, [supply.id]: prev.supplies[supply.id] + 1 },
-      log: [`Kupiono ${supply.unit}: ${supply.name}.`, ...prev.log].slice(0, 16),
+      player: { ...prev.player, cash: prev.player.cash - totalCost },
+      supplies: { ...prev.supplies, [supply.id]: prev.supplies[supply.id] + safeQuantity },
+      log: [`Kupiono ${supply.unit}: ${supply.name} x${safeQuantity}.`, ...prev.log].slice(0, 16),
     }));
+    return { ok: true, quantity: safeQuantity };
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - production recipes, raid risk, maintenance, yield scaling and inventory output are critical economy authority
-  const produceDrug = async (drug) => {
-    if (!canDoStreetAction()) return;
+  const produceDrug = async (drug, options = {}) => {
+    const safeQuantity = Math.max(1, Math.floor(Number(options?.quantity || 1)));
+    if (!canDoStreetAction()) return { ok: false, blocked: true };
     if (sessionToken && apiStatus === "online") {
+      let completed = 0;
+      let lastResult = null;
       try {
-        const result = await produceDrugOnline(sessionToken, drug.id);
-        mergeServerUser(result.user);
-        if (result?.result?.jailSeconds) {
-          setActiveSection("heists", "prison");
+        for (let index = 0; index < safeQuantity; index += 1) {
+          const result = await produceDrugOnline(sessionToken, drug.id);
+          mergeServerUser(result.user);
+          lastResult = result?.result || null;
+          completed += 1;
+          if (result?.result?.jailSeconds) {
+            setActiveSection("heists", "prison");
+            break;
+          }
+          if (result?.result?.busted) {
+            break;
+          }
         }
+        return { ok: completed > 0, quantity: completed, result: lastResult };
       } catch (error) {
         pushLog(error.message);
+        return { ok: completed > 0, quantity: completed, error };
       }
-      return;
     }
-    if (!requireOfflineDemoAuthority("Produkcja w fabryce")) return;
-    if (!hasFactory(game, drug.factoryId)) return pushLog(`Najpierw musisz miec ${FACTORIES.find((entry) => entry.id === drug.factoryId)?.name}.`);
+    if (!requireOfflineDemoAuthority("Produkcja w fabryce")) return { ok: false, blocked: true };
+    if (!hasFactory(game, drug.factoryId)) {
+      pushLog(`Najpierw musisz miec ${FACTORIES.find((entry) => entry.id === drug.factoryId)?.name}.`);
+      return { ok: false };
+    }
     const productionRespectRequirement = getDrugProductionRespectRequirement(drug);
-    if (game.player.respect < productionRespectRequirement) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${productionRespectRequirement}.`);
+    if (game.player.respect < productionRespectRequirement) {
+      pushLog(`Masz za niski szacunek. Wymagany szacunek: ${productionRespectRequirement}.`);
+      return { ok: false };
+    }
 
     for (const [supplyId, amount] of Object.entries(drug.supplies)) {
       if (game.supplies[supplyId] < amount) {
         const supplyName = SUPPLIERS.find((entry) => entry.id === supplyId)?.name || supplyId;
-        return pushLog(`Brakuje skladnika: ${supplyName}.`);
+        pushLog(`Brakuje skladnika: ${supplyName}.`);
+        return { ok: false };
       }
     }
 
     const policeProfile = getDrugPoliceProfile(drug);
-    const bustChance = clamp(policeProfile.risk + game.player.heat * 0.0022 - effectivePlayer.dexterity * 0.003, 0.03, 0.52);
-    const busted = Math.random() < bustChance;
-    const jailSeconds = busted && drug.unlockRespect >= 30 && Math.random() < bustChance * 0.42 ? randomBetween(180, 420) : 0;
+    let completed = 0;
+    let jailed = 0;
+    let busted = false;
 
     setGame((prev) => {
-      const nextSupplies = { ...prev.supplies };
-      Object.entries(drug.supplies).forEach(([supplyId, amount]) => {
-        nextSupplies[supplyId] -= amount;
-      });
+      let nextState = {
+        ...prev,
+        supplies: { ...prev.supplies },
+        drugInventory: { ...prev.drugInventory },
+        producedDrugInventory: {
+          ...(prev.producedDrugInventory || createDrugCounterMap()),
+        },
+        player: { ...prev.player },
+        stats: { ...prev.stats },
+        log: [...prev.log],
+      };
 
-      if (busted) {
-        const fine = Math.floor(drug.streetPrice * (1.05 + policeProfile.risk));
-        return {
-          ...prev,
-          supplies: nextSupplies,
-          player: {
-            ...prev.player,
-            cash: Math.max(0, prev.player.cash - fine),
-            heat: clamp(prev.player.heat + policeProfile.heatGain + 5, 0, 100),
-            jailUntil: jailSeconds ? Date.now() + jailSeconds * 1000 : prev.player.jailUntil,
-          },
-          log: [
+      for (let index = 0; index < safeQuantity; index += 1) {
+        const hasSupplies = Object.entries(drug.supplies).every(
+          ([supplyId, amount]) => Number(nextState.supplies?.[supplyId] || 0) >= Number(amount || 0)
+        );
+        if (!hasSupplies) {
+          break;
+        }
+
+        const bustChance = clamp(
+          policeProfile.risk + Number(nextState.player.heat || 0) * 0.0022 - effectivePlayer.dexterity * 0.003,
+          0.03,
+          0.52
+        );
+        const bustedNow = Math.random() < bustChance;
+        const jailSeconds =
+          bustedNow && drug.unlockRespect >= 30 && Math.random() < bustChance * 0.42 ? randomBetween(180, 420) : 0;
+
+        Object.entries(drug.supplies).forEach(([supplyId, amount]) => {
+          nextState.supplies[supplyId] = Math.max(0, Number(nextState.supplies?.[supplyId] || 0) - Number(amount || 0));
+        });
+
+        if (bustedNow) {
+          const fine = Math.floor(drug.streetPrice * (1.05 + policeProfile.risk));
+          nextState.player.cash = Math.max(0, Number(nextState.player.cash || 0) - fine);
+          nextState.player.heat = clamp(Number(nextState.player.heat || 0) + policeProfile.heatGain + 5, 0, 100);
+          if (jailSeconds) {
+            nextState.player.jailUntil = Date.now() + jailSeconds * 1000;
+          }
+          nextState.log = [
             jailSeconds
               ? `Nalot na produkcji ${drug.name}. Strata ${formatMoney(fine)} i cela na ${Math.ceil(jailSeconds / 60)} min.`
               : `Policja weszla na produkcje ${drug.name}. Strata ${formatMoney(fine)} i spalone skladniki.`,
-            ...prev.log,
-          ].slice(0, 16),
-        };
+            ...nextState.log,
+          ].slice(0, 16);
+          busted = true;
+          jailed = jailSeconds;
+          break;
+        }
+
+        nextState.drugInventory[drug.id] = Number(nextState.drugInventory?.[drug.id] || 0) + drug.batchSize;
+        nextState.producedDrugInventory[drug.id] =
+          Number(nextState.producedDrugInventory?.[drug.id] || 0) + drug.batchSize;
+        nextState.player.heat = clamp(Number(nextState.player.heat || 0) + policeProfile.heatGain, 0, 100);
+        nextState.stats.drugBatches = Number(nextState.stats?.drugBatches || 0) + 1;
+        nextState.log = [`Wyprodukowano ${drug.batchSize} szt. ${drug.name}. Ryzyko: ${policeProfile.label}.`, ...nextState.log].slice(0, 16);
+        completed += 1;
       }
 
-      return {
-        ...prev,
-        supplies: nextSupplies,
-        drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] + drug.batchSize },
-        producedDrugInventory: {
-          ...(prev.producedDrugInventory || createDrugCounterMap()),
-          [drug.id]: Number(prev.producedDrugInventory?.[drug.id] || 0) + drug.batchSize,
-        },
-        player: {
-          ...prev.player,
-          heat: clamp(prev.player.heat + policeProfile.heatGain, 0, 100),
-        },
-        stats: { ...prev.stats, drugBatches: prev.stats.drugBatches + 1 },
-        log: [`Wyprodukowano ${drug.batchSize} szt. ${drug.name}. Ryzyko: ${policeProfile.label}.`, ...prev.log].slice(0, 16),
-      };
+      return nextState;
     });
 
-    if (jailSeconds) {
+    if (jailed) {
       setActiveSection("heists", "prison");
     }
+    return { ok: completed > 0, quantity: completed, busted, jailSeconds: jailed };
   };
 
   // TODO: TO_MIGRATE_TO_SERVER - timed boosts, cooldowns, global caps and overdose odds affect heist balance and cannot stay client-authoritative
@@ -7682,7 +7774,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       <SectionCard title="Napady" subtitle="Klikasz prog i wchodzisz w akcje.">
         {heistCatalog.map((heist) => {
           const locked = game.player.respect < heist.respect;
-          const odds = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist);
+          const odds = getSoloHeistOdds(game.player, effectivePlayer, game.gang, heist, game.activeBoosts);
           return (
             <View key={heist.id} style={[styles.listCard, locked && styles.listCardLocked]}>
               <View style={styles.listCardHeader}>
@@ -7936,42 +8028,18 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   );
 
   const renderPrison = () => (
-    <SectionCard title="Wiezienie" subtitle="Cela, kaucja i chat celi.">
-      <SceneArtwork
-        eyebrow="Cela"
-        title="Zimna odsiadka"
-        lines={["Krata, licznik i szybka kaucja."]}
-        accent={["#2b2f34", "#121417", "#040404"]}
-        source={SCENE_BACKGROUNDS.prison}
-      />
-      <StatLine label="Status" value={inJail(game.player) ? "Odsiadka trwa" : "Cela pusta"} />
-      <StatLine label="Pozostalo" value={inJail(game.player) ? formatDuration(jailRemaining) : "--:--"} />
-      <StatLine label="Kaucja teraz" value={inJail(game.player) ? formatMoney(400 + Math.ceil(jailRemaining / 1000) * 8) : formatMoney(0)} />
-      <View style={styles.grid}>
-        <ActionTile title="Wyjdz za kaucje" subtitle="Drogo, ale szybciej wracasz na ulice." onPress={bribeOutOfJail} disabled={!inJail(game.player)} />
-      </View>
-      {inJail(game.player) ? (
-        <View style={styles.prisonChatWrap}>
-          <Text style={styles.sectionSubtitle}>Chat wiezienny widza i pisza tylko osadzeni.</Text>
-          <View style={styles.chatComposer}>
-            <TextInput value={prisonMessage} onChangeText={setPrisonMessage} placeholder="Napisz z celi..." placeholderTextColor="#6c6c6c" style={styles.chatInput} />
-            <Pressable onPress={sendPrisonMessage} style={styles.inlineButton}>
-              <Text style={styles.inlineButtonText}>Wyslij</Text>
-            </Pressable>
-          </View>
-          {(Array.isArray(game.prisonChat) ? game.prisonChat : []).map((entry) => (
-            <View key={entry.id} style={styles.chatBubble}>
-              <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
-              <Text style={styles.chatText}>{entry.text}</Text>
-            </View>
-          ))}
-        </View>
-      ) : (
-        <View style={styles.lockedPanel}>
-          <Text style={styles.lockedPanelText}>Chat wiezienny jest ukryty, dopoki nie siedzisz.</Text>
-        </View>
-      )}
-    </SectionCard>
+    <PrisonSection
+      SectionCard={SectionCard}
+      formatMoney={formatMoney}
+      formatDuration={formatDuration}
+      player={game.player}
+      jailRemaining={jailRemaining}
+      prisonChat={game.prisonChat}
+      prisonMessage={prisonMessage}
+      setPrisonMessage={setPrisonMessage}
+      onSendMessage={sendPrisonMessage}
+      onBribeOut={bribeOutOfJail}
+    />
   );
 
   const renderGangOverview = () => (
@@ -9117,7 +9185,6 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         const available = heistCatalog.filter((entry) => entry.respect <= game.player.respect);
         executeHeist(available[available.length - 1] ?? heistCatalog[0]);
       },
-      fightClubRound,
       collectGangTribute,
       setGangFocus,
       collectBusinessIncome,
@@ -9342,6 +9409,20 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     sceneBackgrounds: SCENE_BACKGROUNDS,
   };
 
+  const fightClubScreenProps = {
+    arena: game.arena,
+    activeBoosts: game.activeBoosts,
+    player: game.player,
+    SectionCard,
+    formatMoney,
+    formatCooldown,
+    criticalCareStatus,
+    onOpenHospital: () => setActiveSection("city", "hospital"),
+    onStartRun: startFightClubRun,
+    onFightNext: resolveFightClubRun,
+    onBuyBoost: buyFightClubBoost,
+  };
+
   const renderQuickActionContent = () => {
     switch (quickActionModal) {
       case "bank":
@@ -9392,13 +9473,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       case "heists:contracts":
         return <HeistsScreen {...heistsScreenProps} section="contracts" />;
       case "heists:fightclub":
-        return (
-          <SectionCard title="Fightclub" subtitle="Szybki sparing pod staty i respekt.">
-            <View style={styles.grid}>
-              <ActionTile title="Walka 1v1" subtitle="Koszt 3 energii. Zysk: sila, zrecznosc, szacun." visual={SYSTEM_VISUALS.pvp} onPress={fightClubRound} danger />
-            </View>
-          </SectionCard>
-        );
+        return <FightClubScreen {...fightClubScreenProps} />;
       case "heists:prison":
         return renderPrison();
       case "empire:businesses":

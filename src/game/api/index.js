@@ -473,10 +473,26 @@ export async function sendPrisonChatMessageOnline(token, text) {
   });
 }
 
-export async function playFightClubRoundOnline(token) {
-  return request("/fightclub/round", {
+export async function startFightClubRunOnline(token, modeId, styleId) {
+  return request("/fightclub/run/start", {
     method: "POST",
     token,
+    body: { modeId, styleId },
+  });
+}
+
+export async function resolveFightClubRunOnline(token) {
+  return request("/fightclub/run/fight", {
+    method: "POST",
+    token,
+  });
+}
+
+export async function buyFightClubBoostOnline(token, boostId) {
+  return request("/fightclub/boosts/buy", {
+    method: "POST",
+    token,
+    body: { boostId },
   });
 }
 

@@ -1,4 +1,3 @@
-import { applyXpProgression } from "../../../shared/progression.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
   CLUB_SYSTEM_RULES,
@@ -8,8 +7,6 @@ import {
   createClubState,
   DRUGS,
   ESCORTS,
-  FIGHT_CLUB_ENERGY_COST,
-  FIGHT_CLUB_WIN_XP,
   PLAYER_BOUNTY_COST,
   PLAYER_BOUNTY_INCREMENT,
   clampSocialValue,
@@ -115,59 +112,6 @@ function ensureEscortOwnedEntry(player, escort) {
   };
   player.escortsOwned.push(created);
   return created;
-}
-
-export function fightClubRoundForPlayer(player, now = Date.now()) {
-  ensurePlayerSocialState(player);
-  if (Number(player?.profile?.jailUntil || 0) > now) {
-    fail("Fightclub nie dziala zza krat.");
-  }
-  assertPlayerNotInCriticalCare(player, "Fightclub", now);
-  if (Number(player?.profile?.energy || 0) < FIGHT_CLUB_ENERGY_COST) {
-    fail("Za malo energii na sparing.");
-  }
-
-  const score =
-    Number(player.profile.attack || 0) * 0.4 +
-    Number(player.profile.defense || 0) * 0.25 +
-    Number(player.profile.dexterity || 0) * 0.35 +
-    Math.random() * 10;
-
-  player.profile.energy = Math.max(0, Number(player.profile.energy || 0) - FIGHT_CLUB_ENERGY_COST);
-
-  if (score >= 16) {
-    player.profile.attack = Number(player.profile.attack || 0) + 1;
-    player.profile.dexterity = Number(player.profile.dexterity || 0) + 1;
-    const progression = applyXpProgression(
-      { respect: player.profile.respect, xp: player.profile.xp },
-      FIGHT_CLUB_WIN_XP
-    );
-    player.profile.respect = progression.respect;
-    player.profile.xp = progression.xp;
-    player.profile.level = progression.respect;
-
-    return {
-      success: true,
-      xpGain: FIGHT_CLUB_WIN_XP,
-      statGains: { attack: 1, dexterity: 1 },
-      damage: 0,
-      logMessage: "Fightclub wygrany. +8 XP, +1 atak, +1 zrecznosc.",
-    };
-  }
-
-  player.profile.hp = clampSocialValue(
-    Number(player.profile.hp || 0) - 10,
-    0,
-    Number(player.profile.maxHp || 0)
-  );
-
-  return {
-    success: false,
-    xpGain: 0,
-    statGains: { attack: 0, dexterity: 0 },
-    damage: 10,
-    logMessage: "Fightclub przegrany. Obite rylo, ale nauka zostaje.",
-  };
 }
 
 export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quantity = 1) {

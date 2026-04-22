@@ -286,6 +286,52 @@ async function releaseUsersFromCriticalCare(dataDir, logins, modeId = "private")
   await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
 }
 
+async function grantArenaSmokeResources(dataDir, logins, { tokens = 0, energy = null, hp = null } = {}) {
+  const usersDbPath = path.join(dataDir, "users.db");
+  const safeLogins = new Set(
+    (Array.isArray(logins) ? logins : [logins])
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (!safeLogins.size) {
+    throw new Error("Brak loginow do zasilenia Areny w smoke tescie.");
+  }
+
+  const now = Date.now();
+  const content = await readFile(usersDbPath, "utf8");
+  const nextLines = content
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const doc = JSON.parse(line);
+      const usernameLower = String(doc?.usernameLower || "").trim().toLowerCase();
+      if (!safeLogins.has(usernameLower)) {
+        return line;
+      }
+
+      doc.playerData = doc.playerData || {};
+      doc.playerData.profile = doc.playerData.profile || {};
+      doc.playerData.timers = doc.playerData.timers || {};
+      doc.playerData.arena = doc.playerData.arena && typeof doc.playerData.arena === "object" ? doc.playerData.arena : {};
+      doc.playerData.arena.tokens = Math.max(0, Math.floor(Number(tokens || 0)));
+      doc.playerData.arena.activeRun = null;
+      if (energy !== null) {
+        doc.playerData.profile.energy = Math.max(
+          Number(doc.playerData.profile.energy || 0),
+          Math.floor(Number(energy || 0))
+        );
+        doc.playerData.timers.energyUpdatedAt = now;
+      }
+      if (hp !== null) {
+        doc.playerData.profile.hp = Math.max(Number(doc.playerData.profile.hp || 0), Math.floor(Number(hp || 0)));
+        doc.playerData.timers.hpUpdatedAt = now;
+      }
+      return JSON.stringify(doc);
+    });
+
+  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+}
+
 function assertFactoryRecipeProfitability() {
   const factoryNames = Object.fromEntries(FACTORIES.map((factory) => [factory.id, factory.name]));
 
@@ -1161,17 +1207,63 @@ async function main() {
       /na tego gracza odpalisz kolejny atak za|cooldown/i
     );
 
-    const fightClubResult = await request("/fightclub/round", {
+    const startedArenaRun = await request("/fightclub/run/start", {
+      method: "POST",
+      token,
+      body: { modeId: "sparring", styleId: "technique" },
+    });
+    if (!startedArenaRun?.result?.run?.currentFight) {
+      throw new Error("Arena nie odpalila runa.");
+    }
+
+    let arenaFightResult = startedArenaRun;
+    let arenaReport = null;
+    for (let step = 0; step < 5; step += 1) {
+      arenaFightResult = await request("/fightclub/run/fight", {
+        method: "POST",
+        token,
+      });
+      if (!arenaFightResult?.result?.fightResult) {
+        throw new Error("Arena nie zwrocila wyniku walki.");
+      }
+      if (arenaFightResult?.result?.finished) {
+        arenaReport = arenaFightResult?.result?.report || null;
+        break;
+      }
+    }
+
+    if (!arenaReport?.modeId) {
+      throw new Error("Arena nie domknela runa raportem.");
+    }
+    if (arenaFightResult?.user?.arena?.activeRun) {
+      throw new Error("Arena zostawila aktywny run po zakonczeniu walk.");
+    }
+
+    await stopServer(server);
+    await grantArenaSmokeResources(dataDir, login, { tokens: 5, energy: 12, hp: 40 });
+    server = startServer(dataDir);
+    await waitForHealth();
+
+    const boughtArenaBoost = await request("/fightclub/boosts/buy", {
+      method: "POST",
+      token,
+      body: { boostId: "clean-exit" },
+    });
+    if (!Array.isArray(boughtArenaBoost?.user?.activeBoosts) || !boughtArenaBoost.user.activeBoosts.some((entry) => entry?.effect?.boostId === "clean-exit")) {
+      throw new Error("Zakup boosta Areny nie dodal aktywnego efektu.");
+    }
+
+    const heistWithArenaBoost = await request(`/heists/${starterHeist.id}/execute`, {
       method: "POST",
       token,
     });
-
-    if (!fightClubResult?.result?.logMessage) {
-      throw new Error("Fightclub nie zwrocil wyniku rundy.");
+    if (Array.isArray(heistWithArenaBoost?.user?.activeBoosts) && heistWithArenaBoost.user.activeBoosts.some((entry) => entry?.effect?.boostId === "clean-exit")) {
+      throw new Error("Boost Areny nie zuzyl sie po skoku.");
     }
 
-    const dealerTradeStartingSmokes = Number(fightClubResult?.user?.drugInventory?.smokes || 0);
-    const dealerStockBeforeTrade = Number(fightClubResult?.user?.dealerInventory?.smokes || 0);
+    const dealerTradeStartingSmokes = Number(heistWithArenaBoost?.user?.drugInventory?.smokes || 0);
+    const actorDealerSnapshotBefore = await request("/market", { token });
+    const dealerStockBeforeTrade = Number(actorDealerSnapshotBefore?.dealerInventory?.smokes || 0);
     const observerDealerSnapshotBefore = await request("/market", {
       token: rivalRegister.token,
     });
@@ -1827,10 +1919,11 @@ async function main() {
     }
 
     await expectRequestFailure(
-      "/fightclub/round",
+      "/fightclub/run/start",
       {
         method: "POST",
         token: relogin.token,
+        body: { modeId: "sparring", styleId: "aggression" },
       },
       /intensywnej|krytycznym|wraca/i
     );
@@ -1899,7 +1992,7 @@ async function main() {
       gym: "ok",
       avatar: "ok",
       playerAttack: attackResult.result.success ? "ok-success" : "ok-failed",
-      fightClub: fightClubResult.result.success ? "ok-success" : "ok-failed",
+      arena: arenaReport.endedByLoss ? "ok-failed" : "ok-success",
       dealer: "ok",
       friends: "ok",
       directMessages: "ok",
