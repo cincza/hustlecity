@@ -349,17 +349,17 @@ export function HeistsScreen({
   return (
     <>
       <SceneArtwork
-        eyebrow="Napady"
+        eyebrow="Skoki"
         title="Miasto po zmroku"
         lines={["Ulica, sklepy i szybkie roboty bez zbednego scrolla."]}
         source={sceneBackgrounds.heists}
       />
       <HeroPanel
-        eyebrow={criticalCareActive ? "Stan krytyczny" : "Napady"}
-        title={criticalCareActive ? "Napady sa chwilowo zgaszone" : "Szybkie roboty na teraz"}
+        eyebrow={criticalCareActive ? "Stan krytyczny" : "Skoki"}
+        title={criticalCareActive ? "Skoki sa chwilowo zablokowane" : "Szybkie roboty na teraz"}
         summary={
           criticalCareActive
-            ? `Jestes na ${criticalCareStatus?.mode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ciezkiej akcji"}. To nie cooldown - napady, kontrakty i fight wracaja dopiero po wyjsciu z terapii.`
+            ? `Jestes na ${criticalCareStatus?.mode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ciezkiej akcji"}. To nie cooldown - skoki, kontrakty i fight wracaja dopiero po wyjsciu z terapii.`
             : "Tu najszybciej bierzesz ryzyko, energie i payout. Najpierw wybierasz prog, potem widzisz tylko sensowne karty z tego tieru."
         }
         tone={criticalCareActive ? "danger" : "gold"}
@@ -390,7 +390,7 @@ export function HeistsScreen({
           typeof onOpenHospital === "function" && criticalCareActive
             ? {
                 label: "Idz do szpitala",
-                meta: "Leczenie i szybki powrot do roboty.",
+                meta: "Leczenie i szybki powrot do skokow.",
                 onPress: onOpenHospital,
               }
             : null
@@ -404,7 +404,7 @@ export function HeistsScreen({
         </Text>
       </SectionCard>
 
-      <SectionCard title="Lista napadow" subtitle="Karty sa krotkie, czytelne i gotowe do szybkiego wejscia.">
+      <SectionCard title="Lista skokow" subtitle="Karty sa krotkie, czytelne i gotowe do szybkiego wejscia.">
         {!activeHeists.length ? <Text style={styles.emptyText}>W tym tierze jeszcze nic nie ma.</Text> : null}
         {activeHeists.map((heist) => {
           const locked = game.player.respect < heist.respect;
@@ -424,7 +424,7 @@ export function HeistsScreen({
               lockedLabel={criticalCareActive ? criticalCareLockLabel : locked ? `Wymagany szacunek: ${heist.respect}` : "Wykonaj"}
               onPress={() => !locked && !criticalCareActive && onExecuteHeist(heist)}
               disabled={locked || criticalCareActive}
-              onDisabledPress={criticalCareActive ? () => triggerCriticalCareBlock("Napady") : undefined}
+              onDisabledPress={criticalCareActive ? () => triggerCriticalCareBlock("Skoki") : undefined}
             />
           );
         })}

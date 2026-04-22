@@ -3,6 +3,16 @@ import { Pressable, Text, TextInput, View } from "react-native";
 import { getDealerPayoutForDrug } from "../../shared/socialGameplay.js";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 
+const CONTRACT_CATEGORY_LABELS = {
+  weapon: "Bron",
+  armor: "Ochrona",
+  tool: "Narzedzia",
+  electronics: "Elektronika",
+  car: "Auta",
+};
+
+const DEALER_QUANTITY_PRESETS = [1, 5, 10, 25];
+
 export function MarketScreen({
   section,
   game,
@@ -58,6 +68,8 @@ export function MarketScreen({
 
   const parsedDealerTradeQuantity = Number.parseInt(String(dealerTradeDraft || "").replace(/[^\d]/g, ""), 10);
   const dealerTradeQuantity = Math.max(1, Number.isFinite(parsedDealerTradeQuantity) ? parsedDealerTradeQuantity : 1);
+  const getContractCategoryLabel = (categoryId) => CONTRACT_CATEGORY_LABELS[categoryId] || categoryId;
+  const getAssetTags = (asset) => Object.keys(asset?.tags || {}).filter(Boolean);
 
   const getTrendLabel = (snapshot) => {
     if (!snapshot) return "Brak danych";
@@ -98,24 +110,27 @@ export function MarketScreen({
           ]}
         />
         <SectionCard title="Kategorie" subtitle="Najpierw wybierasz slot, potem sprzet pod konkretne tagi kontraktu.">
-          <View style={styles.marketButtons}>
+          <View style={styles.planChipRow}>
             {contractCategories.map((categoryId) => (
               <Pressable
                 key={categoryId}
                 onPress={() => setSelectedContractCategory(categoryId)}
-                style={[styles.marketButton, selectedContractCategory === categoryId && styles.inlineButton]}
+                style={[styles.planChip, selectedContractCategory === categoryId && styles.planChipActive]}
               >
-                <Text style={styles.marketButtonText}>{categoryId === "weapon" ? "Bron" : categoryId === "armor" ? "Ochrona" : categoryId === "tool" ? "Narzedzia" : "Elektronika"}</Text>
+                <Text style={[styles.planChipText, selectedContractCategory === categoryId && styles.planChipTextActive]}>
+                  {getContractCategoryLabel(categoryId)}
+                </Text>
               </Pressable>
             ))}
           </View>
         </SectionCard>
-        <SectionCard title="Oferta" subtitle="Kazdy item robi glownie pod Kontrakty. Nie daje tanich globalnych buffow.">
+        <SectionCard title="Oferta" subtitle="Kazdy item ma jedno glowne zadanie: poprawic szanse w konkretnym typie kontraktu.">
           {!filteredItems.length ? <Text style={styles.emptyText}>Brak itemow w tej kategorii.</Text> : null}
           {filteredItems.map((item) => {
             const owned = Boolean(safeContractState?.ownedItems?.[item.id]);
             const equipped = safeContractState?.loadout?.[item.category] === item.id;
             const locked = safeGame.player.respect < item.respect;
+            const itemTags = getAssetTags(item);
             return (
               <View key={item.id} style={[styles.listCard, locked && styles.listCardLocked]}>
                 <View style={styles.listCardHeader}>
@@ -130,12 +145,21 @@ export function MarketScreen({
                   </View>
                   <Tag text={owned ? (equipped ? "ZALOZONE" : "MASZ") : `RES ${item.respect}`} warning={!owned} />
                 </View>
-                <Text style={styles.listCardMeta}>{getContractAssetEffectLine(item)}</Text>
-                <View style={styles.inlineRow}>
-                  <Text style={styles.costLabel}>
-                    Cena {formatMoney(item.price)} | Tagi {Object.keys(item.tags || {}).join(" | ")}
-                  </Text>
+                <View style={styles.oddsRow}>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Cena</Text>
+                    <Text style={styles.oddsValue}>{formatMoney(item.price)}</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Slot</Text>
+                    <Text style={styles.oddsValue}>{getContractCategoryLabel(item.category)}</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Tagi</Text>
+                    <Text style={styles.oddsValue}>{itemTags.length ? itemTags.join(" / ") : "-"}</Text>
+                  </View>
                 </View>
+                <Text style={styles.listCardMeta}>{getContractAssetEffectLine(item)}</Text>
                 <View style={styles.marketButtons}>
                   <Pressable
                     onPress={() => actions.buyContractItem(item)}
@@ -184,6 +208,7 @@ export function MarketScreen({
             const owned = Boolean(safeContractState?.ownedCars?.[car.id]);
             const equipped = safeContractState?.loadout?.car === car.id;
             const locked = safeGame.player.respect < car.respect;
+            const carTags = getAssetTags(car);
             return (
               <View key={car.id} style={[styles.listCard, locked && styles.listCardLocked]}>
                 <View style={styles.listCardHeader}>
@@ -196,8 +221,21 @@ export function MarketScreen({
                   </View>
                   <Tag text={owned ? (equipped ? "W LOADOUCIE" : "GARAZ") : `RES ${car.respect}`} warning={!owned} />
                 </View>
+                <View style={styles.oddsRow}>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Cena</Text>
+                    <Text style={styles.oddsValue}>{formatMoney(car.price)}</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Rola</Text>
+                    <Text style={styles.oddsValue}>Auto</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Tagi</Text>
+                    <Text style={styles.oddsValue}>{carTags.length ? carTags.join(" / ") : "-"}</Text>
+                  </View>
+                </View>
                 <Text style={styles.listCardMeta}>{getContractAssetEffectLine(car)}</Text>
-                <Text style={styles.listCardMeta}>Tagi: {Object.keys(car.tags || {}).join(" | ")}</Text>
                 <View style={styles.marketButtons}>
                   <Pressable
                     onPress={() => actions.buyContractCar(car)}
@@ -233,7 +271,7 @@ export function MarketScreen({
         <HeroPanel
           eyebrow="Towar"
           title="Rynek miasta"
-          summary="To jest czysty handel: podaz, trend i szybkie kupno albo sprzedaz. Bez dodatkowego chaosu i bez mieszania z klubem."
+          summary="To jest czysty handel: patrzysz na trend, stock i ceny, a potem decydujesz czy kupujesz czy cashoutujesz. Bez mieszania z klubem."
           tone="info"
           pills={[
             { label: "Produkty", value: `${products.length}`, note: "Towary zalezne od podazy ulicy i fallbacku NPC.", tone: "info", icon: "package-variant-closed" },
@@ -257,24 +295,34 @@ export function MarketScreen({
             const snapshot = safeMarketState?.[product.id];
 
             return (
-              <View key={product.id} style={[styles.marketRow, locked && styles.listCardLocked]}>
-                <View style={styles.entityHead}>
-                  <EntityBadge visual={productVisuals[product.id]} />
-                  <View style={styles.marketInfo}>
-                    <Text style={styles.marketTitle}>{product.name}</Text>
-                    <Text style={styles.marketMeta}>Wymaga {product.unlockRespect} szacunu | Na stanie: {safeGame.inventory[product.id] || 0}</Text>
-                    <Text style={styles.marketMeta}>
-                      Podaz: {snapshot?.streetStock ?? 0} ulica | {snapshot?.fallbackStock ?? 0} NPC | Zrodlo: {getSupplySourceLabel(snapshot)}
-                    </Text>
-                    <Text style={styles.marketMeta}>
-                      Trend: {getTrendLabel(snapshot)} | NPC {formatMoney(snapshot?.fallbackPrice ?? buyPrice)} | Sell {formatMoney(snapshot?.sellPrice ?? sellPrice)}
-                    </Text>
+              <View key={product.id} style={[styles.listCard, locked && styles.listCardLocked]}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.entityHead}>
+                    <EntityBadge visual={productVisuals[product.id]} />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>{product.name}</Text>
+                      <Text style={styles.listCardMeta}>Przy Tobie: {safeGame.inventory[product.id] || 0} | Wymaga {product.unlockRespect} RES</Text>
+                    </View>
+                  </View>
+                  <Tag text={getTrendLabel(snapshot)} warning={snapshot?.scarcity >= 0.28 || snapshot?.demandPressure >= 0.35} />
+                </View>
+                <View style={styles.oddsRow}>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Kupno</Text>
+                    <Text style={styles.oddsValue}>{formatMoney(buyPrice)}</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Sprzedaz</Text>
+                    <Text style={styles.oddsValue}>{formatMoney(sellPrice)}</Text>
+                  </View>
+                  <View style={styles.oddsBlock}>
+                    <Text style={styles.oddsLabel}>Ulica / NPC</Text>
+                    <Text style={styles.oddsValue}>{snapshot?.streetStock ?? 0} / {snapshot?.fallbackStock ?? 0}</Text>
                   </View>
                 </View>
-                <View style={styles.marketPrices}>
-                  <Text style={styles.marketPrice}>Kupno {formatMoney(buyPrice)}</Text>
-                  <Text style={styles.marketPrice}>Sprzedaz {formatMoney(sellPrice)}</Text>
-                </View>
+                <Text style={styles.listCardMeta}>
+                  Zrodlo: {getSupplySourceLabel(snapshot)} | Fallback NPC: {formatMoney(snapshot?.fallbackPrice ?? buyPrice)}
+                </Text>
                 <View style={styles.marketButtons}>
                   <Pressable onPress={() => actions.buyProduct(product)} style={[styles.marketButton, locked && styles.tileDisabled]}>
                     <Text style={styles.marketButtonText}>Kup</Text>
@@ -309,7 +357,7 @@ export function MarketScreen({
         <HeroPanel
           eyebrow="Diler"
           title="Szybki obrot towarem"
-          summary="Kupujesz, sprzedajesz albo zarzucasz. Jedna ilosc obsluguje kupno i sprzedaz, a cena skupu jest od razu widoczna na karcie."
+          summary="Kupujesz, sprzedajesz albo zarzucasz. Jedna ilosc obsluguje kupno i sprzedaz, a karty od razu pokazują stock, skup i ryzyko."
           tone="danger"
           pills={[
             { label: "Towary", value: `${drugs.length}`, note: "Rozne efekty i rozne ryzyko przedawkowania.", tone: "danger", icon: "flask-outline" },
@@ -343,6 +391,17 @@ export function MarketScreen({
               keyboardType="numeric"
               style={styles.chatInput}
             />
+            <View style={styles.planChipRow}>
+              {DEALER_QUANTITY_PRESETS.map((preset) => (
+                <Pressable
+                  key={`dealer-qty-${preset}`}
+                  onPress={() => setDealerTradeDraft(String(preset))}
+                  style={[styles.planChip, dealerTradeQuantity === preset && styles.planChipActive]}
+                >
+                  <Text style={[styles.planChipText, dealerTradeQuantity === preset && styles.planChipTextActive]}>x{preset}</Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
           {drugs.map((drug) => (
             <View key={drug.id} style={styles.listCard}>
@@ -357,17 +416,23 @@ export function MarketScreen({
                         <EntityBadge visual={drugVisuals[drug.id]} />
                         <View style={styles.flexOne}>
                           <Text style={styles.listCardTitle}>{drug.name}</Text>
-                          <Text style={styles.listCardMeta}>
-                            Przy Tobie: {safeGame.drugInventory[drug.id] || 0} | U dilera: {safeGame.dealerInventory?.[drug.id] || 0} | Ulica: {formatMoney(drug.streetPrice)} | Skup: {formatMoney(dealerPayout)}
-                          </Text>
+                          <Text style={styles.listCardMeta}>Towar uliczny z jasnym skupem i stockiem.</Text>
                         </View>
                       </View>
                       <Tag text={`OD ${Math.round(drug.overdoseRisk * 100)}%`} warning />
                     </View>
                     <View style={styles.oddsRow}>
                       <View style={styles.oddsBlock}>
+                        <Text style={styles.oddsLabel}>Przy Tobie</Text>
+                        <Text style={styles.oddsValue}>{safeGame.drugInventory[drug.id] || 0}</Text>
+                      </View>
+                      <View style={styles.oddsBlock}>
                         <Text style={styles.oddsLabel}>Stock dilera</Text>
                         <Text style={styles.oddsValue}>{safeGame.dealerInventory?.[drug.id] || 0}</Text>
+                      </View>
+                      <View style={styles.oddsBlock}>
+                        <Text style={styles.oddsLabel}>Kupno / skup</Text>
+                        <Text style={styles.oddsValue}>{formatMoney(drug.streetPrice)} / {formatMoney(dealerPayout)}</Text>
                       </View>
                       <View style={styles.oddsBlock}>
                         <Text style={styles.oddsLabel}>Respekt od</Text>
@@ -415,28 +480,37 @@ export function MarketScreen({
   }
 
   return (
-    <SectionCard title="Boosty" subtitle="Aktywne efekty na teraz.">
-      <View style={styles.listCard}>
-        <View style={styles.entityHead}>
-          <EntityBadge visual={systemVisuals.energy} />
-          <View style={styles.flexOne}>
-            <Text style={styles.listCardTitle}>Boosty i aktywne efekty</Text>
-            <Text style={styles.listCardMeta}>Co teraz pompuje staty i jak dlugo.</Text>
-          </View>
-        </View>
-      </View>
-      {!safeGame.activeBoosts.length ? <Text style={styles.emptyText}>Brak aktywnych efektow. Wszystko na sucho.</Text> : null}
-      {safeGame.activeBoosts.map((boost) => (
-        <View key={boost.id} style={styles.listCard}>
-          <View style={styles.inlineRow}>
-            <View style={styles.flexOne}>
-              <Text style={styles.listCardTitle}>{boost.name}</Text>
-              <Text style={styles.listCardMeta}>{Object.entries(boost.effect).map(([key, value]) => `${key} +${value}`).join(" | ")}</Text>
+    <>
+      <SceneArtwork
+        eyebrow="Boosty"
+        title="Aktywne efekty"
+        lines={["Tutaj widzisz tylko to, co realnie jeszcze dziala."]}
+        accent={["#24313a", "#0f1216", "#050505"]}
+        source={sceneBackgrounds.market}
+      />
+      <HeroPanel
+        eyebrow="Boosty"
+        title="Co teraz siedzi na postaci"
+        summary="Bez chaosu i bez historii. Tylko aktywne efekty, ich czas i to, co realnie pompuja."
+        tone="info"
+        pills={[
+          { label: "Aktywne", value: `${safeGame.activeBoosts.length}`, note: "Liczy sie tylko to, co jeszcze trwa.", tone: "info", icon: "lightning-bolt-outline" },
+        ]}
+      />
+      <SectionCard title="Boosty" subtitle="Aktywne efekty na teraz.">
+        {!safeGame.activeBoosts.length ? <Text style={styles.emptyText}>Brak aktywnych efektow. Wszystko na sucho.</Text> : null}
+        {safeGame.activeBoosts.map((boost) => (
+          <View key={boost.id} style={styles.listCard}>
+            <View style={styles.inlineRow}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>{boost.name}</Text>
+                <Text style={styles.listCardMeta}>{Object.entries(boost.effect).map(([key, value]) => `${key} +${value}`).join(" | ")}</Text>
+              </View>
+              <Tag text={formatDuration((boost.expiresAt || Date.now()) - Date.now())} />
             </View>
-            <Tag text={formatDuration((boost.expiresAt || Date.now()) - Date.now())} />
           </View>
-        </View>
-      ))}
-    </SectionCard>
+        ))}
+      </SectionCard>
+    </>
   );
 }

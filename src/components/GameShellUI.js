@@ -1,5 +1,5 @@
-import React from "react";
-import { Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -50,26 +50,77 @@ function AvatarFrame({ activeAvatar, compact }) {
   );
 }
 
-function StatBar({ icon, label, value, max, fillColor, accent, compact }) {
+function StatBar({ icon, label, value, max, fillColor, accent, compact, feedbackId, feedbackText }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
+  const feedbackOpacity = useRef(new Animated.Value(0)).current;
+  const feedbackLift = useRef(new Animated.Value(8)).current;
+
+  useEffect(() => {
+    if (!feedbackId) return undefined;
+
+    scale.setValue(1);
+    glowOpacity.setValue(0);
+    feedbackOpacity.setValue(0);
+    feedbackLift.setValue(8);
+
+    const animation = Animated.parallel([
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.03, duration: 110, useNativeDriver: true }),
+        Animated.spring(scale, { toValue: 1, friction: 5, tension: 110, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(glowOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+        Animated.timing(glowOpacity, { toValue: 0, duration: 320, useNativeDriver: true }),
+      ]),
+      Animated.sequence([
+        Animated.timing(feedbackOpacity, { toValue: 1, duration: 120, useNativeDriver: true }),
+        Animated.delay(120),
+        Animated.timing(feedbackOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]),
+      Animated.timing(feedbackLift, { toValue: -16, duration: 420, useNativeDriver: true }),
+    ]);
+
+    animation.start();
+    return () => animation.stop();
+  }, [feedbackId, feedbackLift, feedbackOpacity, glowOpacity, scale]);
+
   return (
-    <View style={[styles.headerStatCard, compact && styles.headerStatCardCompact]}>
-      <View style={styles.headerStatMeta}>
-        <View style={[styles.headerStatIconWrap, { borderColor: accent }]}>
-          <IconChip icon={icon} accent={accent} size={compact ? 18 : 20} />
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <View style={[styles.headerStatCard, compact && styles.headerStatCardCompact]}>
+        <Animated.View pointerEvents="none" style={[styles.headerStatGlow, { opacity: glowOpacity, backgroundColor: fillColor }]} />
+        {feedbackText ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.headerStatFeedback,
+              {
+                opacity: feedbackOpacity,
+                transform: [{ translateY: feedbackLift }],
+              },
+            ]}
+          >
+            <Text style={styles.headerStatFeedbackText}>{feedbackText}</Text>
+          </Animated.View>
+        ) : null}
+        <View style={styles.headerStatMeta}>
+          <View style={[styles.headerStatIconWrap, { borderColor: accent }]}>
+            <IconChip icon={icon} accent={accent} size={compact ? 18 : 20} />
+          </View>
+          <View style={styles.headerStatTextWrap}>
+            <Text style={[styles.headerBarLabel, compact && styles.headerBarLabelCompact]}>{label}</Text>
+            <Text style={[styles.headerBarValue, compact && styles.headerBarValueCompact]}>{value}/{max}</Text>
+          </View>
         </View>
-        <View style={styles.headerStatTextWrap}>
-          <Text style={[styles.headerBarLabel, compact && styles.headerBarLabelCompact]}>{label}</Text>
-          <Text style={[styles.headerBarValue, compact && styles.headerBarValueCompact]}>{value}/{max}</Text>
-        </View>
+        <ProgressBar value={value} max={max} fillColor={fillColor} />
       </View>
-      <ProgressBar value={value} max={max} fillColor={fillColor} />
-    </View>
+    </Animated.View>
   );
 }
 
-function InfoCard({ icon, label, value, children, compact }) {
+function InfoCard({ icon, label, value, children, compact, style, auxIcon, auxLabel, auxValue }) {
   return (
-    <LinearGradient colors={["rgba(26,27,31,0.94)", "rgba(13,14,18,0.98)"]} style={[styles.infoCard, compact && styles.infoCardCompact]}>
+    <LinearGradient colors={["rgba(26,27,31,0.94)", "rgba(13,14,18,0.98)"]} style={[styles.infoCard, compact && styles.infoCardCompact, style]}>
       <View style={styles.infoCardInner}>
         <LinearGradient colors={["#f2cb67", "#916217"]} style={styles.infoCardIconRing}>
           <View style={styles.infoCardIconInner}>
@@ -79,6 +130,13 @@ function InfoCard({ icon, label, value, children, compact }) {
         <View style={styles.infoCardContent}>
           <Text style={[styles.headerBottomLabel, compact && styles.headerBottomLabelCompact]}>{label}</Text>
           {value ? <Text style={[styles.infoCardValue, compact && styles.infoCardValueCompact]} numberOfLines={1}>{value}</Text> : null}
+          {auxValue ? (
+            <View style={styles.infoCardAuxRow}>
+              {auxIcon ? <IconChip icon={auxIcon} accent="#9c8452" size={compact ? 11 : 12} /> : null}
+              {auxLabel ? <Text style={[styles.infoCardAuxLabel, compact && styles.infoCardAuxLabelCompact]}>{auxLabel}</Text> : null}
+              <Text style={[styles.infoCardAuxValue, compact && styles.infoCardAuxValueCompact]} numberOfLines={1}>{auxValue}</Text>
+            </View>
+          ) : null}
           {children}
         </View>
       </View>
@@ -95,10 +153,12 @@ export function GameHeader({
   xpRequired,
   xpProgress,
   cash,
+  bank,
   hp,
   maxHp,
   energy,
   maxEnergy,
+  energyFeedback,
   activeAvatar,
   criticalCareStatus,
   formatCooldown,
@@ -168,12 +228,31 @@ export function GameHeader({
 
       <View style={styles.headerStatsColumn}>
         <StatBar icon="hp" label="HP" value={hp} max={maxHp} fillColor="#ff3659" accent="rgba(255,54,89,0.45)" compact={compact} />
-        <StatBar icon="energy" label="ENERGIA" value={energy} max={maxEnergy} fillColor="#ffbf1e" accent="rgba(255,191,30,0.45)" compact={compact} />
+        <StatBar
+          icon="energy"
+          label="ENERGIA"
+          value={energy}
+          max={maxEnergy}
+          fillColor="#ffbf1e"
+          accent="rgba(255,191,30,0.45)"
+          compact={compact}
+          feedbackId={energyFeedback?.id}
+          feedbackText={energyFeedback?.text}
+        />
       </View>
 
       <View style={styles.headerBottomRow}>
-        <InfoCard icon="cash" label="KASA" value={cash} compact={compact} />
-        <InfoCard icon="xp" label={`POSTEP DO SZACUNKU ${level + 1}`} compact={compact}>
+        <InfoCard
+          icon="cash"
+          label="GOTOWKA"
+          value={cash}
+          compact={compact}
+          style={styles.headerCashCard}
+          auxIcon="bank"
+          auxLabel="Bank"
+          auxValue={bank}
+        />
+        <InfoCard icon="xp" label={`POSTEP DO SZACUNKU ${level + 1}`} compact={compact} style={styles.headerXpCard}>
           <Text style={[styles.headerXpValue, compact && styles.headerXpValueCompact]}>{xp} / {xpRequired}</Text>
           <ProgressBar value={Math.round((xpProgress || 0) * 100)} max={100} fillColor="#f0c24d" />
         </InfoCard>
@@ -314,23 +393,23 @@ export function QuickActionModal({ visible, title, children, onClose }) {
 }
 
 const styles = StyleSheet.create({
-  headerWrap: { marginHorizontal: 10, marginTop: 8, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 14, gap: 10, overflow: "hidden" },
-  headerWrapCompact: { marginHorizontal: 8, marginTop: 6, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 12, gap: 8 },
+  headerWrap: { marginHorizontal: 10, marginTop: 8, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10, gap: 8, overflow: "hidden" },
+  headerWrapCompact: { marginHorizontal: 8, marginTop: 6, marginBottom: 7, paddingHorizontal: 10, paddingVertical: 9, gap: 7 },
   headerBackgroundImage: { resizeMode: "stretch", borderRadius: 24, opacity: 0.42 },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  headerIdentityBlock: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, minWidth: 0 },
-  avatarFrame: { width: 74, height: 74, borderRadius: 999, padding: 2 },
-  avatarFrameCompact: { width: 62, height: 62 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  headerIdentityBlock: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 },
+  avatarFrame: { width: 64, height: 64, borderRadius: 999, padding: 2 },
+  avatarFrameCompact: { width: 56, height: 56 },
   avatarFrameInner: { flex: 1, borderRadius: 999, padding: 3, backgroundColor: "#0a0a0b" },
   headerAvatar: { width: "100%", height: "100%", borderRadius: 999, alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   headerAvatarImage: { width: "100%", height: "100%" },
   headerAvatarSigil: { color: "#fff6ea", fontWeight: "900", fontSize: 18 },
   headerAvatarSigilCompact: { fontSize: 15 },
   headerIdentity: { flex: 1, justifyContent: "center", minWidth: 0, paddingRight: 4 },
-  headerName: { color: "#fff6ea", fontSize: 22, fontWeight: "900" },
-  headerNameCompact: { fontSize: 16 },
-  headerSubline: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 },
-  headerSublineCompact: { gap: 6, marginTop: 4 },
+  headerName: { color: "#fff6ea", fontSize: 19, fontWeight: "900" },
+  headerNameCompact: { fontSize: 15 },
+  headerSubline: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 },
+  headerSublineCompact: { gap: 5, marginTop: 3 },
   headerRank: { color: "#d9b257", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
   headerRankCompact: { fontSize: 9 },
   headerStatusText: { fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
@@ -339,18 +418,18 @@ const styles = StyleSheet.create({
   headerStatusDemo: { color: "#9aa0ab" },
   headerFeatureHint: { color: "#c9c0b4", fontSize: 12, lineHeight: 18, marginTop: 10, maxWidth: "92%" },
   headerFeatureHintCompact: { fontSize: 9, lineHeight: 13, marginTop: 8, maxWidth: "96%" },
-  headerStatusPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
-  headerStatusPillDot: { width: 8, height: 8, borderRadius: 999 },
+  headerStatusPill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
+  headerStatusPillDot: { width: 7, height: 7, borderRadius: 999 },
   headerStatusPillDotOnline: { backgroundColor: "#3ee96e" },
   headerStatusPillDotDemo: { backgroundColor: "#9aa0ab" },
-  headerRespectMedal: { width: 96, height: 96, borderRadius: 999, padding: 2, alignItems: "center", justifyContent: "center" },
-  headerRespectMedalCompact: { width: 82, height: 82 },
+  headerRespectMedal: { width: 78, height: 78, borderRadius: 999, padding: 2, alignItems: "center", justifyContent: "center" },
+  headerRespectMedalCompact: { width: 68, height: 68 },
   headerRespectMedalInner: { flex: 1, width: "100%", borderRadius: 999, backgroundColor: "#0d0d0f", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
-  headerRespectValue: { color: "#ffcf60", fontSize: 30, fontWeight: "900", marginTop: 2 },
-  headerRespectValueCompact: { fontSize: 24 },
-  headerRespectLabel: { color: "#d9b257", fontSize: 10, fontWeight: "900", marginTop: 2, textAlign: "center" },
-  headerRespectLabelCompact: { fontSize: 8 },
-  headerStatsColumn: { gap: 8 },
+  headerRespectValue: { color: "#ffcf60", fontSize: 25, fontWeight: "900", marginTop: 2 },
+  headerRespectValueCompact: { fontSize: 21 },
+  headerRespectLabel: { color: "#d9b257", fontSize: 9, fontWeight: "900", marginTop: 2, textAlign: "center" },
+  headerRespectLabelCompact: { fontSize: 7 },
+  headerStatsColumn: { gap: 6 },
   headerAlertStrip: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
   headerAlertStripCompact: { paddingHorizontal: 10, paddingVertical: 9, gap: 5 },
   headerAlertTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
@@ -360,30 +439,51 @@ const styles = StyleSheet.create({
   headerAlertTimerCompact: { fontSize: 10 },
   headerAlertText: { color: "#fff1e3", fontSize: 12, lineHeight: 17, fontWeight: "700" },
   headerAlertTextCompact: { fontSize: 10, lineHeight: 14 },
-  headerStatCard: { backgroundColor: "rgba(18,19,23,0.92)", borderRadius: 18, borderWidth: 1, borderColor: "rgba(237,181,74,0.18)", paddingHorizontal: 12, paddingVertical: 10 },
-  headerStatCardCompact: { paddingHorizontal: 10, paddingVertical: 9 },
-  headerStatMeta: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  headerStatIconWrap: { width: 36, height: 36, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "#111111", borderWidth: 1, borderColor: "rgba(237,181,74,0.22)" },
+  headerStatCard: { position: "relative", overflow: "hidden", backgroundColor: "rgba(18,19,23,0.92)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(237,181,74,0.18)", paddingHorizontal: 11, paddingVertical: 8 },
+  headerStatCardCompact: { paddingHorizontal: 9, paddingVertical: 7 },
+  headerStatGlow: { ...StyleSheet.absoluteFillObject, opacity: 0, borderRadius: 18 },
+  headerStatFeedback: {
+    position: "absolute",
+    right: 10,
+    top: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(68, 117, 84, 0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(176, 233, 193, 0.28)",
+    zIndex: 2,
+  },
+  headerStatFeedbackText: { color: "#effff4", fontSize: 10, fontWeight: "900" },
+  headerStatMeta: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
+  headerStatIconWrap: { width: 32, height: 32, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "#111111", borderWidth: 1, borderColor: "rgba(237,181,74,0.22)" },
   headerStatTextWrap: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flex: 1 },
   headerBarLabel: { color: "#d8d0c4", fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
   headerBarLabelCompact: { fontSize: 9 },
   headerBarValue: { color: "#fff6ea", fontSize: 14, fontWeight: "900" },
   headerBarValueCompact: { fontSize: 11 },
-  headerBottomRow: { flexDirection: "row", gap: 10 },
-  infoCard: { flex: 1, minHeight: 104, borderRadius: 18, borderWidth: 1, borderColor: "rgba(237,181,74,0.18)" },
-  infoCardCompact: { minHeight: 92 },
-  infoCardInner: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 14 },
-  infoCardIconRing: { width: 44, height: 44, borderRadius: 999, padding: 1.5 },
+  headerBottomRow: { flexDirection: "row", gap: 8 },
+  headerCashCard: { flex: 1.08 },
+  headerXpCard: { flex: 0.92 },
+  infoCard: { flex: 1, minHeight: 82, borderRadius: 16, borderWidth: 1, borderColor: "rgba(237,181,74,0.18)" },
+  infoCardCompact: { minHeight: 74 },
+  infoCardInner: { flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, paddingVertical: 10 },
+  infoCardIconRing: { width: 38, height: 38, borderRadius: 999, padding: 1.5 },
   infoCardIconInner: { flex: 1, borderRadius: 999, backgroundColor: "#0d0d0f", alignItems: "center", justifyContent: "center" },
-  infoCardXpGlyph: { color: "#f0c24d", fontSize: 20, fontWeight: "900" },
+  infoCardXpGlyph: { color: "#f0c24d", fontSize: 18, fontWeight: "900" },
   infoCardContent: { flex: 1, minWidth: 0 },
   headerBottomLabel: { color: "#d9b257", fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
   headerBottomLabelCompact: { fontSize: 8 },
-  infoCardValue: { color: "#f0c24d", fontSize: 20, fontWeight: "900", marginTop: 4 },
-  infoCardValueCompact: { fontSize: 14, marginTop: 4 },
-  headerXpValue: { color: "#fff6ea", fontSize: 15, fontWeight: "900", marginTop: 2, marginBottom: 8 },
-  headerXpValueCompact: { fontSize: 11, marginTop: 2, marginBottom: 6 },
-  statBarTrack: { height: 10, borderRadius: 999, backgroundColor: "rgba(15,15,15,0.92)", overflow: "hidden", borderWidth: 1, borderColor: "#262626" },
+  infoCardValue: { color: "#f0c24d", fontSize: 18, fontWeight: "900", marginTop: 2 },
+  infoCardValueCompact: { fontSize: 14, marginTop: 2 },
+  infoCardAuxRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+  infoCardAuxLabel: { color: "#98815d", fontSize: 10, fontWeight: "800" },
+  infoCardAuxLabelCompact: { fontSize: 9 },
+  infoCardAuxValue: { color: "#cbc0ac", fontSize: 11, fontWeight: "800", flexShrink: 1 },
+  infoCardAuxValueCompact: { fontSize: 10 },
+  headerXpValue: { color: "#fff6ea", fontSize: 13, fontWeight: "900", marginTop: 1, marginBottom: 6 },
+  headerXpValueCompact: { fontSize: 10, marginTop: 1, marginBottom: 5 },
+  statBarTrack: { height: 8, borderRadius: 999, backgroundColor: "rgba(15,15,15,0.92)", overflow: "hidden", borderWidth: 1, borderColor: "#262626" },
   statBarFill: { height: "100%", borderRadius: 999 },
   quickTile: { width: "31%", minWidth: 92, flexGrow: 1, minHeight: 116, borderRadius: 20, backgroundColor: "#11141a", borderWidth: 1, borderColor: "#2a2f39", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   quickTileIcon: { width: 54, height: 54, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#3a404c", overflow: "hidden" },

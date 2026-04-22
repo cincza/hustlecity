@@ -218,6 +218,7 @@ import {
   getCriticalCareStatus,
   GYM_EXERCISES,
   GYM_PASSES,
+  HOSPITAL_RULES,
   RESTAURANT_ITEMS,
 } from "./shared/playerActions.js";
 import {
@@ -543,12 +544,12 @@ const TAB_DEFINITIONS = [
     id: "city",
     label: "Miasto",
     sections: [
-      { id: "districts", label: "Dzielnice", title: "Dzielnice" },
-      { id: "tasks", label: "Misje", title: "Zadania" },
       { id: "bank", label: "Bank", title: "Bank" },
-      { id: "gym", label: "Silownia", title: "Silownia" },
-      { id: "restaurant", label: "Restauracja", title: "Restauracja" },
       { id: "hospital", label: "Szpital", title: "Szpital" },
+      { id: "restaurant", label: "Restauracja", title: "Restauracja" },
+      { id: "gym", label: "Silownia", title: "Silownia" },
+      { id: "tasks", label: "Misje", title: "Zadania" },
+      { id: "districts", label: "Dzielnice", title: "Dzielnice" },
     ],
   },
   {
@@ -603,6 +604,8 @@ const DEFAULT_SECTIONS = TAB_DEFINITIONS.reduce((acc, tab) => {
   acc[tab.id] = tab.sections[0].id;
   return acc;
 }, {});
+
+DEFAULT_SECTIONS.city = "bank";
 
 const createInitialCasinoState = () => ({
   slotBet: "200",
@@ -1908,6 +1911,7 @@ function AppRuntime() {
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
   const [bankRecentTransfers, setBankRecentTransfers] = useState([]);
   const [bankFeedback, setBankFeedback] = useState(null);
+  const [mealFeedback, setMealFeedback] = useState(null);
   const [dealerTradeDraft, setDealerTradeDraft] = useState("1");
   const [notice, setNotice] = useState(null);
   const [quickActionModal, setQuickActionModal] = useState(null);
@@ -3217,6 +3221,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setBankAmountDraft("1000");
     setBankRecentTransfers([]);
     setBankFeedback(null);
+    setMealFeedback(null);
     setNotice(null);
     setQuickActionModal(null);
     setGangProfileView("actions");
@@ -3404,25 +3409,32 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
   const doGymExercise = async (exercise, repetitions = 1) => {
     const safeRepetitions = clamp(Math.floor(Number(repetitions) || 1), 1, 20);
-    if (!canDoStreetAction("Z celi nie dojdziesz na silownie.")) return;
-    if (!canDoCriticalAction("Silownia")) return;
+    if (!canDoStreetAction("Z celi nie dojdziesz na silownie.")) return false;
+    if (!canDoCriticalAction("Silownia")) return false;
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await trainAtGymOnline(sessionToken, exercise.id, safeRepetitions);
         mergeServerUser(result.user);
         showExplicitNotice(buildGymExerciseNotice(exercise, result.result));
-        return;
+        return result.result || true;
       } catch (error) {
         pushLog(error.message);
-        return;
+        return false;
       }
     }
-    if (!hasGymPass(game.player)) return pushLog("Najpierw kup karnet na silownie.");
-    if (game.player.energy < exercise.costEnergy) return pushLog("Za malo energii na trening.");
+    if (!hasGymPass(game.player)) {
+      pushLog("Najpierw kup karnet na silownie.");
+      return false;
+    }
+    if (game.player.energy < exercise.costEnergy) {
+      pushLog("Za malo energii na trening.");
+      return false;
+    }
 
     const maxSeries = Math.floor(game.player.energy / Math.max(1, exercise.costEnergy));
     if (safeRepetitions > maxSeries) {
-      return pushLog(`Masz energii tylko na ${maxSeries} ${maxSeries === 1 ? "serie" : "serii"}.`);
+      pushLog(`Masz energii tylko na ${maxSeries} ${maxSeries === 1 ? "serie" : "serii"}.`);
+      return false;
     }
 
     const totalGains = {
@@ -3456,28 +3468,48 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         ].slice(0, 16),
       };
     });
-    showExplicitNotice(
-      buildGymExerciseNotice(exercise, {
-        repetitions: safeRepetitions,
-        energySpent,
-        totalGains,
-      })
-    );
+    const summary = {
+      repetitions: safeRepetitions,
+      energySpent,
+      totalGains,
+    };
+    showExplicitNotice(buildGymExerciseNotice(exercise, summary));
+    return summary;
   };
 
   const buyMeal = async (meal) => {
-    if (!canDoStreetAction("Wiezienie serwuje tylko standardowy kociolek.")) return;
+    if (!canDoStreetAction("Wiezienie serwuje tylko standardowy kociolek.")) return false;
+    const previousEnergy = Number(game.player.energy || 0);
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await buyMealOnline(sessionToken, meal.id);
+        const nextEnergy = Number(result?.user?.profile?.energy ?? previousEnergy);
+        const energyGain = Math.max(0, nextEnergy - previousEnergy);
         mergeServerUser(result.user);
-        return;
+        const summary = {
+          id: Date.now(),
+          mealId: meal.id,
+          mealName: meal.name,
+          price: meal.price,
+          energyGain,
+          energyAfter: nextEnergy,
+        };
+        setMealFeedback({
+          id: summary.id,
+          text: energyGain > 0 ? `+${energyGain} EN` : "",
+        });
+        return summary;
       } catch (error) {
         pushLog(error.message);
-        return;
+        return false;
       }
     }
-    if (game.player.cash < meal.price) return pushLog(`Brakuje kasy na ${meal.name}.`);
+    if (game.player.cash < meal.price) {
+      pushLog(`Brakuje kasy na ${meal.name}.`);
+      return false;
+    }
+    const nextEnergy = clamp(game.player.energy + meal.energy, 0, game.player.maxEnergy);
+    const energyGain = Math.max(0, nextEnergy - game.player.energy);
     setGame((prev) => ({
       ...prev,
       player: {
@@ -3491,27 +3523,54 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       },
       log: [`Zjedzone: ${meal.name}. Energia +${meal.energy}.`, ...prev.log].slice(0, 16),
     }));
+    const summary = {
+      id: Date.now(),
+      mealId: meal.id,
+      mealName: meal.name,
+      price: meal.price,
+      energyGain,
+      energyAfter: nextEnergy,
+    };
+    setMealFeedback({
+      id: summary.id,
+      text: energyGain > 0 ? `+${energyGain} EN` : "",
+    });
+    return summary;
   };
 
   const heal = async () => {
+    const previousHp = Number(game.player.hp || 0);
+    const previousHeat = Number(game.player.heat || 0);
     if (sessionToken && apiStatus === "online") {
       try {
         const result = await healOnline(sessionToken);
+        const nextHp = Number(result?.user?.profile?.hp ?? previousHp);
+        const nextHeat = Number(result?.user?.profile?.heat ?? previousHeat);
         mergeServerUser(result.user);
-        return;
+        return {
+          id: Date.now(),
+          hpGain: Math.max(0, nextHp - previousHp),
+          heatDrop: Math.max(0, previousHeat - nextHeat),
+          cost: Number(HOSPITAL_RULES.healCost || 0),
+        };
       } catch (error) {
         pushLog(error.message);
-        return;
+        return false;
       }
     }
-    if (game.player.cash < 220) return pushLog("Brakuje kasy na lekarza.");
+    if (game.player.cash < HOSPITAL_RULES.healCost) {
+      pushLog("Brakuje kasy na lekarza.");
+      return false;
+    }
+    const nextHp = clamp(game.player.hp + HOSPITAL_RULES.healHp, 0, game.player.maxHp);
+    const nextHeat = clamp(game.player.heat - HOSPITAL_RULES.healHeatReduction, 0, 100);
     setGame((prev) => ({
       ...prev,
       player: {
         ...prev.player,
-        cash: prev.player.cash - 220,
-        hp: clamp(prev.player.hp + 30, 0, prev.player.maxHp),
-        heat: clamp(prev.player.heat - 2, 0, 100),
+        cash: prev.player.cash - HOSPITAL_RULES.healCost,
+        hp: clamp(prev.player.hp + HOSPITAL_RULES.healHp, 0, prev.player.maxHp),
+        heat: clamp(prev.player.heat - HOSPITAL_RULES.healHeatReduction, 0, 100),
       },
       stats: {
         ...prev.stats,
@@ -3519,21 +3578,36 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       },
       log: ["Lekarz poskladal Cie do kupy. Wracasz do gry.", ...prev.log].slice(0, 16),
     }));
+    return {
+      id: Date.now(),
+      hpGain: Math.max(0, nextHp - previousHp),
+      heatDrop: Math.max(0, previousHeat - nextHeat),
+      cost: Number(HOSPITAL_RULES.healCost || 0),
+    };
   };
 
   const moveToPrivateClinic = async () => {
-    if (!criticalCareStatus.active) return pushLog("Nie jestes teraz w stanie krytycznym.");
+    if (!criticalCareStatus.active) {
+      pushLog("Nie jestes teraz w stanie krytycznym.");
+      return false;
+    }
     if (hasOnlineAuthority) {
       try {
         const result = await choosePrivateClinicOnline(sessionToken);
         mergeServerUser(result.user);
         pushLog(result?.result?.logMessage || "Prywatna klinika bierze Cie od razu.");
+        return {
+          id: Date.now(),
+          cost: Number(result?.result?.price || 0),
+          remainingMs: Number(result?.result?.status?.remainingMs || result?.result?.mode?.durationMs || CRITICAL_CARE_RULES.private.durationMs),
+        };
       } catch (error) {
         pushLog(error.message);
+        return false;
       }
-      return;
     }
     pushLog("Prywatna klinika w tej wersji dziala tylko online.");
+    return false;
   };
 
   const fightClubRound = async () => {
@@ -9439,10 +9513,12 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               xpRequired={respectInfo.requirement}
               xpProgress={respectInfo.progress}
               cash={formatMoney(game.player.cash)}
+              bank={formatMoney(game.player.bank)}
               hp={game.player.hp}
               maxHp={game.player.maxHp}
               energy={game.player.energy}
               maxEnergy={game.player.maxEnergy}
+              energyFeedback={mealFeedback}
               activeAvatar={activeAvatar}
               criticalCareStatus={criticalCareStatus}
               formatCooldown={formatCooldown}

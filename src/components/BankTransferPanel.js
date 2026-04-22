@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -37,6 +37,8 @@ export function BankTransferPanel({
   recentTransfers = [],
   feedback = null,
 }) {
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 410;
   const [selectedAction, setSelectedAction] = useState("deposit");
   const bankScale = useRef(new Animated.Value(1)).current;
   const cashScale = useRef(new Animated.Value(1)).current;
@@ -155,7 +157,7 @@ export function BankTransferPanel({
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.balanceRow}>
+      <View style={[styles.balanceRow, compactLayout && styles.balanceRowStacked]}>
         <Pressable onPress={() => setSelectedAction("deposit")} style={styles.balancePressable}>
           <Animated.View style={[styles.balanceCardWrap, { transform: [{ scale: cashScale }] }]}>
             <LinearGradient
@@ -216,7 +218,7 @@ export function BankTransferPanel({
       </View>
 
       <LinearGradient colors={["#191511", "#100d09"]} style={styles.transferCard}>
-        <View style={styles.transferTop}>
+        <View style={[styles.transferTop, compactLayout && styles.transferTopStacked]}>
           <View style={styles.transferTitleWrap}>
             <Text style={styles.transferTitle}>Ruchy kasy</Text>
             <Text style={styles.transferSubtitle}>{transferLabel}</Text>
@@ -247,7 +249,7 @@ export function BankTransferPanel({
           />
         </View>
 
-        <View style={styles.quickRow}>
+        <View style={[styles.quickRow, compactLayout && styles.quickRowWrapped]}>
           {QUICK_AMOUNTS.map((amount) => {
             const disabled = availableMax <= 0 || amount > availableMax;
             const active = parsedAmount === amount && amount > 0;
@@ -255,7 +257,12 @@ export function BankTransferPanel({
               <Pressable
                 key={amount}
                 onPress={() => setAmountDraft(String(amount))}
-                style={[styles.quickButton, active && styles.quickButtonActive, disabled && styles.quickButtonDisabled]}
+                style={[
+                  styles.quickButton,
+                  compactLayout && styles.quickButtonCompact,
+                  active && styles.quickButtonActive,
+                  disabled && styles.quickButtonDisabled,
+                ]}
                 disabled={disabled}
               >
                 <Text style={[styles.quickButtonText, active && styles.quickButtonTextActive]}>{`+${Math.floor(amount / 1000)}k`}</Text>
@@ -264,7 +271,12 @@ export function BankTransferPanel({
           })}
           <Pressable
             onPress={() => setPresetAmount(availableMax)}
-            style={[styles.quickButton, styles.quickButtonMax, availableMax <= 0 && styles.quickButtonDisabled]}
+            style={[
+              styles.quickButton,
+              compactLayout && styles.quickButtonCompact,
+              styles.quickButtonMax,
+              availableMax <= 0 && styles.quickButtonDisabled,
+            ]}
             disabled={availableMax <= 0}
           >
             <Text style={styles.quickButtonText}>MAX</Text>
@@ -278,7 +290,7 @@ export function BankTransferPanel({
           </Text>
         ) : null}
 
-        <View style={styles.actionRow}>
+        <View style={[styles.actionRow, compactLayout && styles.actionRowStacked]}>
           <Pressable
             onPress={() => handleActionPress("deposit")}
             style={[
@@ -355,13 +367,19 @@ export function BankTransferPanel({
 const styles = StyleSheet.create({
   wrap: {
     gap: 12,
+    width: "100%",
+    alignSelf: "stretch",
   },
   balanceRow: {
     flexDirection: "row",
     gap: 10,
   },
+  balanceRowStacked: {
+    flexDirection: "column",
+  },
   balancePressable: {
     flex: 1,
+    minWidth: 0,
   },
   balanceCardWrap: {
     flex: 1,
@@ -462,6 +480,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
+  transferTopStacked: {
+    alignItems: "flex-start",
+  },
   transferTitleWrap: {
     flex: 1,
     gap: 3,
@@ -516,6 +537,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  quickRowWrapped: {
+    flexWrap: "wrap",
+  },
   quickButton: {
     flex: 1,
     minHeight: 42,
@@ -525,6 +549,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.03)",
     justifyContent: "center",
     alignItems: "center",
+  },
+  quickButtonCompact: {
+    flexBasis: "48%",
+    flexGrow: 0,
   },
   quickButtonActive: {
     borderColor: "rgba(241, 200, 116, 0.42)",
@@ -560,6 +588,9 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  actionRowStacked: {
+    flexDirection: "column",
   },
   actionButton: {
     flex: 1,

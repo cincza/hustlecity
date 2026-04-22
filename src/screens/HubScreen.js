@@ -33,7 +33,7 @@ export function HubScreen({
   const quickActions = [
     { id: "quick-bank", title: "Bank", icon: "bank", image: QUICK_ACTION_IMAGES.bank, onPress: () => actions.openQuickAction("bank") },
     { id: "quick-casino", title: "Kasyno", icon: "casino", image: QUICK_ACTION_IMAGES.casino, onPress: () => actions.openQuickAction("casino") },
-    { id: "quick-food", title: "Jedzenie", icon: "food", image: QUICK_ACTION_IMAGES.restaurant, onPress: () => actions.openQuickAction("restaurant") },
+    { id: "quick-food", title: "Restauracja", icon: "food", image: QUICK_ACTION_IMAGES.restaurant, onPress: () => actions.openQuickAction("restaurant") },
     { id: "quick-hospital", title: "Szpital", icon: "hospital", image: QUICK_ACTION_IMAGES.hospital, onPress: () => actions.openQuickAction("hospital") },
     { id: "quick-gym", title: "Trening", icon: "training", image: QUICK_ACTION_IMAGES.gym, onPress: () => actions.openQuickAction("gym") },
   ];
@@ -57,15 +57,15 @@ export function HubScreen({
       subtitle: focusDistrictSummary?.name
         ? `${focusDistrictSummary.name} jest teraz najlepszym frontem do pchania wplywu.`
         : "Sprawdz dzielnice, odbiory i szybkie wejscia.",
-      highlight: focusDistrictSummary?.name || "Dashboard",
-      onPress: () => actions.openSection("city", "dashboard"),
+      highlight: focusDistrictSummary?.name || "Dzielnice",
+      onPress: () => actions.openSection("city", "districts"),
     },
     {
       id: "hub-heists",
-      title: "Napady",
+      title: "Skoki",
       subtitle: criticalCareActive
         ? "Wroc po wyjsciu ze szpitala."
-        : `Najblizszy sensowny prog: ${nextHeistTierLabel}.`,
+        : `Szybkie roboty na terenie. Najblizszy sensowny prog: ${nextHeistTierLabel}.`,
       highlight: criticalCareActive ? "Szpital" : nextHeistTierLabel,
       onPress: () => actions.openSection("heists", "solo"),
     },
@@ -135,8 +135,8 @@ export function HubScreen({
         ]}
         primaryAction={{
           label: criticalCareActive ? "Otworz szpital" : "Wejdz do miasta",
-          meta: criticalCareActive ? "Leczenie i szybki powrot." : "Dzielnice, odbiory i glowna tablica.",
-          onPress: () => actions.openSection("city", criticalCareActive ? "hospital" : "dashboard"),
+          meta: criticalCareActive ? "Leczenie i szybki powrot." : "Dzielnice, uslugi i glowny front miasta.",
+          onPress: () => actions.openSection("city", criticalCareActive ? "hospital" : "districts"),
         }}
         secondaryAction={{
           label: "Profil i status",

@@ -23,7 +23,7 @@ export function ProfileMenuScreen({
         { id: "bank", title: "Bank", subtitle: "Wplaty i wyplaty.", visual: systemVisuals.bank, onPress: () => actions.openSection("profile", "bank") },
         { id: "casino", title: "Kasyno", subtitle: "Blackjack i ruletka.", visual: systemVisuals.casino, onPress: () => actions.openSection("profile", "casino") },
         { id: "gym", title: "Silownia", subtitle: "Karnety i trening.", visual: systemVisuals.pvp, onPress: () => actions.openSection("profile", "gym") },
-        { id: "restaurant", title: "Jedzenie", subtitle: "Buffy i regeneracja.", visual: systemVisuals.energy, onPress: () => actions.openSection("profile", "restaurant") },
+        { id: "restaurant", title: "Restauracja", subtitle: "Buffy i regeneracja.", visual: systemVisuals.energy, onPress: () => actions.openSection("profile", "restaurant") },
         { id: "hospital", title: "Szpital", subtitle: "Leczenie i wyjscie z celi.", visual: systemVisuals.defense, onPress: () => actions.openSection("profile", "hospital") },
       ]
     : [

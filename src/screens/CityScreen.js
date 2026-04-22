@@ -4,7 +4,10 @@ import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getDistrictAlertText, getDistrictEffectLines } from "../game/selectors/metaGameplay";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 import { BankTransferPanel } from "../components/BankTransferPanel";
+import { GymSection } from "../components/GymSection";
+import { HospitalSection } from "../components/HospitalSection";
 import { MissionPlaceholderTile, MissionTile } from "../components/MissionTile";
+import { RestaurantSection } from "../components/RestaurantSection";
 
 const MAX_GYM_BATCH = 10;
 
@@ -75,9 +78,6 @@ export function CityScreen({
   const criticalCareActive = Boolean(criticalCareStatus?.active);
   const criticalCareProtected = Boolean(criticalCareStatus?.protected);
   const activeCriticalCareMode = criticalCareStatus?.mode || criticalCareModes?.public || null;
-  const publicCriticalCareMode = criticalCareModes?.public || null;
-  const privateCriticalCareMode = criticalCareModes?.private || null;
-  const canAffordPrivateClinic = Number(game.player.cash || 0) >= Number(privateCriticalCareMode?.cost || 0);
   const businessCollectionSubtitle =
     businessCash > 0
       ? businessCollectableCash > 0
@@ -400,214 +400,47 @@ export function CityScreen({
 
   if (section === "gym") {
     return (
-      <>
-        <SectionCard title="Silownia" subtitle={helpers.hasGymPass(game.player) ? `Karnet aktywny: ${game.player.gymPassTier === "perm" ? "na stale" : `jeszcze ${formatDuration((game.player.gymPassUntil || 0) - Date.now())}`}` : "Bez karnetu nie wejdziesz."}>
-          {gymPasses.map((pass) => (
-            <View key={pass.id} style={styles.listCard}>
-              <View style={styles.inlineRow}>
-                <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{pass.name}</Text>
-                  <Text style={styles.listCardMeta}>{pass.id === "perm" ? "Pelny dostep bez limitu czasu." : "Dostep czasowy do wszystkich cwiczen."}</Text>
-                </View>
-                <Pressable onPress={() => actions.buyGymPass(pass)} style={styles.inlineButton}>
-                  <Text style={styles.inlineButtonText}>Kup {formatMoney(pass.price)}</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
-        </SectionCard>
-
-        <SectionCard title="Cwiczenia" subtitle="Ustawiasz serie raz i robisz trening jednym ruchem.">
-          {gymExercises.map((exercise) => {
-            const affordableSeries = getAffordableGymSeries(game.player.energy, exercise.costEnergy);
-            const maxSeries = Math.max(1, affordableSeries || 1);
-            const selectedSeries = clampGymSeries(gymBatchByExercise[exercise.id] || 1, maxSeries);
-            const totalEnergyCost = selectedSeries * exercise.costEnergy;
-            const canTrainNow = helpers.hasGymPass(game.player) && affordableSeries > 0 && !criticalCareActive;
-
-            return (
-              <View key={exercise.id} style={styles.listCard}>
-                <View style={styles.inlineRow}>
-                  <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{exercise.name}</Text>
-                    <Text style={styles.listCardMeta}>{exercise.note} | 1 seria kosztuje {exercise.costEnergy} energii</Text>
-                  </View>
-                  <Text style={styles.costLabel}>
-                    {canTrainNow ? `Do ${affordableSeries} serii` : criticalCareActive ? "Stan krytyczny" : "Brak energii"}
-                  </Text>
-                </View>
-
-                <View style={styles.gymBatchControls}>
-                  <Pressable
-                    onPress={() => setGymSeries(exercise.id, selectedSeries - 1, maxSeries)}
-                    style={[styles.gymBatchAdjustButton, selectedSeries <= 1 && styles.tileDisabled]}
-                  >
-                    <Text style={styles.gymBatchAdjustText}>-</Text>
-                  </Pressable>
-
-                  <View style={styles.gymBatchTrack}>
-                    {Array.from({ length: maxSeries }).map((_, index) => {
-                      const step = index + 1;
-                      const active = step <= selectedSeries;
-
-                      return (
-                        <Pressable
-                          key={`${exercise.id}-batch-${step}`}
-                          onPress={() => setGymSeries(exercise.id, step, maxSeries)}
-                          style={[styles.gymBatchStep, active && styles.gymBatchStepActive]}
-                        >
-                          <Text style={[styles.gymBatchStepText, active && styles.gymBatchStepTextActive]}>{step}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
-                  <Pressable
-                    onPress={() => setGymSeries(exercise.id, selectedSeries + 1, maxSeries)}
-                    style={[styles.gymBatchAdjustButton, selectedSeries >= maxSeries && styles.tileDisabled]}
-                  >
-                    <Text style={styles.gymBatchAdjustText}>+</Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.inlineRow}>
-                  <Text style={styles.gymBatchMeta}>
-                    {canTrainNow
-                      ? `${selectedSeries} ${selectedSeries === 1 ? "seria" : selectedSeries < 5 ? "serie" : "serii"} | energia ${totalEnergyCost}`
-                      : criticalCareActive
-                        ? "Na intensywnej terapii nie trenujesz. Wroc po wyjsciu ze szpitala."
-                        : "Najpierw doladuj energie albo kup karnet."}
-                  </Text>
-                  <Pressable
-                    onPress={() => actions.handleTrain(exercise, selectedSeries)}
-                    style={[styles.inlineButton, !canTrainNow && styles.tileDisabled]}
-                  >
-                    <Text style={styles.inlineButtonText}>{selectedSeries > 1 ? `Cwicz x${selectedSeries}` : "Cwicz"}</Text>
-                  </Pressable>
-                </View>
-              </View>
-            );
-          })}
-        </SectionCard>
-      </>
+      <GymSection
+        SectionCard={SectionCard}
+        game={game}
+        gymPasses={gymPasses}
+        gymExercises={gymExercises}
+        gymBatchByExercise={gymBatchByExercise}
+        setGymSeries={setGymSeries}
+        formatMoney={formatMoney}
+        formatDuration={formatDuration}
+        helpers={helpers}
+        actions={actions}
+        criticalCareActive={criticalCareActive}
+      />
     );
   }
 
   if (section === "restaurant") {
     return (
-      <SectionCard title="Restauracja" subtitle="Energia sama wraca, ale jedzenie daje szybkie doladowanie.">
-        {restaurantItems.map((meal) => (
-          <View key={meal.id} style={styles.listCard}>
-            <View style={styles.inlineRow}>
-              <View style={styles.flexOne}>
-                <Text style={styles.listCardTitle}>{meal.name}</Text>
-                <Text style={styles.listCardMeta}>+{meal.energy} energii</Text>
-              </View>
-              <Pressable onPress={() => actions.handleEat(meal)} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Kup {formatMoney(meal.price)}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ))}
-      </SectionCard>
+      <RestaurantSection
+        SectionCard={SectionCard}
+        restaurantItems={restaurantItems}
+        formatMoney={formatMoney}
+        energy={game.player.energy}
+        maxEnergy={game.player.maxEnergy}
+        onEat={actions.handleEat}
+      />
     );
   }
 
   return (
-    <SectionCard
-      title="Szpital"
-      subtitle={
-        criticalCareActive
-          ? "Tu wybierasz jak wychodzisz ze stanu krytycznego."
-          : "Jak wtopisz akcje albo przedawkujesz, tu wracasz do pionu."
-      }
-    >
-      <StatLine label="Obecne zdrowie" value={`${game.player.hp}/${game.player.maxHp}`} visual={systemVisuals.defense} />
-      <StatLine label="Regeneracja" value={`+${healthRegenAmount} HP / ${Math.round(healthRegenSeconds / 60)} min`} visual={systemVisuals.defense} />
-      <StatLine label="Heat" value={`${game.player.heat}%`} visual={systemVisuals.heat} />
-      {criticalCareActive ? (
-        <>
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>
-              {activeCriticalCareMode?.label || "Intensywna terapia"} | {formatCooldown(criticalCareStatus?.remainingMs || 0)}
-            </Text>
-            <Text style={styles.listCardMeta}>
-              Zlapalo Cie po {criticalCareStatus?.source || "ciezkiej akcji"}. Ryzykowne akcje sa chwilowo wyciete, ale bank, rynek, gang i chat dalej dzialaja.
-            </Text>
-            <Text style={styles.listCardMeta}>
-              Po wyjsciu dostajesz krotka oslone od dobijania w PvP.
-            </Text>
-          </View>
-
-          {publicCriticalCareMode ? (
-            <View style={styles.listCard}>
-              <View style={styles.listCardHeader}>
-                <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{publicCriticalCareMode.label}</Text>
-                  <Text style={styles.listCardMeta}>
-                    Okolo {formatCooldown(publicCriticalCareMode.durationMs)} | koszt {formatMoney(publicCriticalCareMode.cost || 0)}
-                  </Text>
-                </View>
-                <Tag text={activeCriticalCareMode?.id === publicCriticalCareMode.id ? "Aktywna" : "Opcja"} warning={activeCriticalCareMode?.id !== publicCriticalCareMode.id} />
-              </View>
-              <Text style={styles.listCardMeta}>
-                Wracasz z okolo {Math.round(Number(publicCriticalCareMode.returnHpRatio || 0) * 100)}% HP. Kara glownie czasem, nie kasa.
-              </Text>
-            </View>
-          ) : null}
-
-          {privateCriticalCareMode ? (
-            <View style={styles.listCard}>
-              <View style={styles.listCardHeader}>
-                <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{privateCriticalCareMode.label}</Text>
-                  <Text style={styles.listCardMeta}>
-                    Okolo {formatCooldown(privateCriticalCareMode.durationMs)} | koszt {formatMoney(privateCriticalCareMode.cost || 0)}
-                  </Text>
-                </View>
-                <Tag text={activeCriticalCareMode?.id === privateCriticalCareMode.id ? "Aktywna" : "Szybka"} warning={activeCriticalCareMode?.id !== privateCriticalCareMode.id} />
-              </View>
-              <Text style={styles.listCardMeta}>
-                Wracasz z okolo {Math.round(Number(privateCriticalCareMode.returnHpRatio || 0) * 100)}% HP i zbijasz lekko heat.
-              </Text>
-              <View style={styles.inlineRow}>
-                <Text style={styles.costLabel}>Po wyjsciu dalej dostajesz oslone po terapii.</Text>
-                <Pressable
-                  onPress={actions.moveToPrivateClinic}
-                  style={[
-                    styles.inlineButton,
-                    (activeCriticalCareMode?.id === privateCriticalCareMode.id || !canAffordPrivateClinic) && styles.tileDisabled,
-                  ]}
-                  disabled={activeCriticalCareMode?.id === privateCriticalCareMode.id || !canAffordPrivateClinic}
-                >
-                  <Text style={styles.inlineButtonText}>
-                    {activeCriticalCareMode?.id === privateCriticalCareMode.id ? "Aktywna" : !canAffordPrivateClinic ? "Brak kasy" : "Przepisz"}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-
-          <Text style={styles.listCardMeta}>
-            Zablokowane: {(criticalCareBlockedActions || []).join(", ")}.
-          </Text>
-        </>
-      ) : (
-        <>
-          {criticalCareProtected ? (
-            <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>Oslona po terapii</Text>
-              <Text style={styles.listCardMeta}>
-                Jeszcze przez {formatCooldown(criticalCareStatus?.protectionRemainingMs || 0)} nie mozna Cie od razu dobic w PvP.
-              </Text>
-            </View>
-          ) : null}
-          <View style={styles.grid}>
-            <ActionTile title="Lekarz zaplecza" subtitle="Koszt $220, +30 HP i lekki zjazd heat." visual={systemVisuals.defense} onPress={actions.handleHeal} />
-            <ActionTile title="Kaucja" subtitle={helpers.inJail(game.player) ? `Wyjdz za ${formatMoney(400 + Math.ceil(jailRemaining / 1000) * 8)}` : "Niedostepne poza odsiadka."} visual={systemVisuals.bank} onPress={actions.bribeOutOfJail} disabled={!helpers.inJail(game.player)} />
-          </View>
-        </>
-      )}
-    </SectionCard>
+    <HospitalSection
+      SectionCard={SectionCard}
+      formatMoney={formatMoney}
+      formatCooldown={formatCooldown}
+      player={game.player}
+      healthRegenAmount={healthRegenAmount}
+      healthRegenSeconds={healthRegenSeconds}
+      criticalCareStatus={criticalCareStatus}
+      criticalCareModes={criticalCareModes}
+      onHeal={actions.handleHeal}
+      onPrivateClinic={actions.moveToPrivateClinic}
+    />
   );
 }
