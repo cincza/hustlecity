@@ -20,7 +20,7 @@ import {
   normalizeSupplies,
 } from "../../../shared/empire.js";
 import { getDistrictModifierSummary, getFactoryDistrictId } from "../../../shared/districts.js";
-import { ESCORTS, findDrugById } from "../../../shared/socialGameplay.js";
+import { ESCORTS, createDrugCounterMap, findDrugById } from "../../../shared/socialGameplay.js";
 import {
   findStreetDistrictById,
   getEscortDistrictCount,
@@ -30,7 +30,7 @@ import {
   getEscortWorkingCount,
   normalizeEscortsOwned,
 } from "../../../shared/street.js";
-import { getTaskStates } from "../../../shared/tasks.js";
+import { getTaskStateById } from "../../../shared/tasks.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -57,6 +57,10 @@ function buildTaskSnapshot(player) {
     stats: player?.stats || {},
     gang: player?.gang || {},
     club: player?.club || {},
+    city: player?.city || {},
+    contracts: player?.contracts || {},
+    businessesOwned: player?.businessesOwned || [],
+    factoriesOwned: player?.factoriesOwned || {},
     tasksClaimed: player?.tasksClaimed || [],
   };
 }
@@ -138,10 +142,10 @@ export function syncEscortCollections(player, now = Date.now()) {
 
 export function claimTaskForPlayer(player, taskId, now = Date.now()) {
   ensurePlayerEmpireState(player);
-  const task = getTaskStates(buildTaskSnapshot(player), {
+  const task = getTaskStateById(taskId, buildTaskSnapshot(player), {
     mode: "online_alpha",
     now,
-  }).find((entry) => entry.id === taskId);
+  });
 
   if (!task) {
     fail("Nie ma takiej misji.");
@@ -162,17 +166,32 @@ export function claimTaskForPlayer(player, taskId, now = Date.now()) {
   );
 
   player.profile.cash = Number(player.profile?.cash || 0) + task.rewardCash;
+  player.profile.energy = Math.min(
+    Number(player.profile?.maxEnergy || 0),
+    Number(player.profile?.energy || 0) + Math.max(0, Number(task.rewardEnergy || 0))
+  );
+  player.profile.hp = Math.min(
+    Number(player.profile?.maxHp || 0),
+    Number(player.profile?.hp || 0) + Math.max(0, Number(task.rewardHp || 0))
+  );
   player.profile.respect = progression.respect;
   player.profile.xp = progression.xp;
   player.profile.level = progression.respect;
   player.tasksClaimed.push(task.id);
   player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + task.rewardCash;
 
+  const extraRewards = [];
+  if (Number(task.rewardXp || 0) > 0) extraRewards.push(`+${task.rewardXp} XP`);
+  if (Number(task.rewardEnergy || 0) > 0) extraRewards.push(`+${task.rewardEnergy} energii`);
+  if (Number(task.rewardHp || 0) > 0) extraRewards.push(`+${task.rewardHp} HP`);
+
   return {
     taskId: task.id,
     rewardCash: task.rewardCash,
     rewardXp: task.rewardXp,
-    logMessage: `Odebrano zadanie: ${task.title}. $${task.rewardCash} i +${task.rewardXp} XP.`,
+    rewardEnergy: Math.max(0, Number(task.rewardEnergy || 0)),
+    rewardHp: Math.max(0, Number(task.rewardHp || 0)),
+    logMessage: `Odebrano zadanie: ${task.title}. $${task.rewardCash}${extraRewards.length ? ` i ${extraRewards.join(", ")}` : ""}.`,
   };
 }
 
@@ -261,6 +280,7 @@ export function collectBusinessIncomeForPlayer(player, now = Date.now()) {
 
   player.profile.cash = Number(player.profile?.cash || 0) + payout;
   player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + payout;
+  player.stats.businessCollections = Math.max(0, Number(player.stats?.businessCollections || 0)) + 1;
   player.collections.businessCash = 0;
   player.collections.businessCollectedAt = now;
   player.collections.businessAccruedAt = now;
@@ -593,7 +613,12 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   }
 
   player.drugInventory = player.drugInventory || {};
+  if (!player.producedDrugInventory || typeof player.producedDrugInventory !== "object" || Array.isArray(player.producedDrugInventory)) {
+    player.producedDrugInventory = createDrugCounterMap();
+  }
   player.drugInventory[drug.id] = Number(player.drugInventory?.[drug.id] || 0) + Number(drug.batchSize || 0);
+  player.producedDrugInventory[drug.id] =
+    Number(player.producedDrugInventory?.[drug.id] || 0) + Number(drug.batchSize || 0);
   player.profile.heat = clamp(
     Number(player.profile?.heat || 0) +
       Math.max(

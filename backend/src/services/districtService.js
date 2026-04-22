@@ -45,6 +45,31 @@ export function ensurePlayerCityState(player) {
   player.city = normalizeCityState(player.city || createCityState());
 }
 
+function recordDistrictTaskAction(player, districtId, amount = 1) {
+  if (!player || typeof player !== "object") return;
+  if (!player.stats || typeof player.stats !== "object" || Array.isArray(player.stats)) {
+    player.stats = {};
+  }
+  if (!player.stats.districtActionsById || typeof player.stats.districtActionsById !== "object" || Array.isArray(player.stats.districtActionsById)) {
+    player.stats.districtActionsById = {};
+  }
+  const safeDistrictId = findDistrictById(districtId).id;
+  player.stats.districtActionsById[safeDistrictId] =
+    Math.max(0, Math.floor(Number(player.stats.districtActionsById[safeDistrictId] || 0))) +
+    Math.max(1, Math.floor(Number(amount || 1)));
+}
+
+function consumeProducedDrugStock(player, drugId, quantity = 1) {
+  if (!player?.producedDrugInventory || typeof player.producedDrugInventory !== "object" || Array.isArray(player.producedDrugInventory)) {
+    return 0;
+  }
+  const safeQuantity = Math.max(0, Math.floor(Number(quantity || 0)));
+  const available = Math.max(0, Number(player.producedDrugInventory?.[drugId] || 0));
+  const consumed = Math.min(available, safeQuantity);
+  player.producedDrugInventory[drugId] = Math.max(0, available - consumed);
+  return consumed;
+}
+
 export function resolveClubDistrictId(player, venueId = null) {
   const preferredId = String(
     venueId || player?.club?.districtId || player?.club?.sourceId || player?.club?.visitId || ""
@@ -153,6 +178,7 @@ export function applyHeistDistrictOutcome(player, heist, { success = false, now 
     now,
   });
   player.city = activity.city;
+  recordDistrictTaskAction(player, districtId);
 
   if (player?.gang?.joined && player.gang.focusDistrictId === districtId) {
     player.gang = incrementGangGoalProgress(player.gang, "focusHeists", 1, now);
@@ -190,6 +216,7 @@ export function applyGangHeistDistrictOutcome(player, heist, { success = false, 
     now,
   });
   player.city = activity.city;
+  recordDistrictTaskAction(player, districtId);
 
   if (player?.gang?.joined && player.gang.focusDistrictId === districtId) {
     player.gang = incrementGangGoalProgress(player.gang, "focusHeists", 1, now);
@@ -230,6 +257,7 @@ export function applyClubActionDistrictOutcome(player, venue, actionResult, now 
     now,
   });
   player.city = activity.city;
+  recordDistrictTaskAction(player, districtId);
 
   if (player?.gang?.joined && player.gang.focusDistrictId === districtId) {
     player.gang = incrementGangGoalProgress(player.gang, "clubActions", 1, now);
@@ -258,6 +286,7 @@ export function applyOperationDistrictOutcome(
     now,
   });
   player.city = activity.city;
+  recordDistrictTaskAction(player, districtId);
 
   if (player?.gang?.joined) {
     player.gang = incrementGangGoalProgress(player.gang, "operations", 1, now);
@@ -992,7 +1021,9 @@ export function moveDrugToClubForPlayer(player, drugId, quantity = 1, now = Date
   }
 
   player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - safeQuantity);
+  consumeProducedDrugStock(player, drug.id, safeQuantity);
   player.club.stash[drug.id] = Number(player.club.stash?.[drug.id] || 0) + safeQuantity;
+  player.stats.clubStashMoves = Math.max(0, Number(player.stats?.clubStashMoves || 0)) + 1;
   player.club.recentIncident = {
     tone: "supply",
     text: `Na zaplecze wpada ${safeQuantity}x ${drug.name}.`,

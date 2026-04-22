@@ -83,6 +83,7 @@ export function trainPlayerAtGym(player, exerciseId, repetitions = 1, now = Date
     player.profile.maxHp,
     player.profile.hp + totalGains.hp
   );
+  player.stats.gymTrainings = Math.max(0, Number(player.stats?.gymTrainings || 0)) + seriesCount;
 
   return {
     exercise,
@@ -110,6 +111,7 @@ export function buyRestaurantItemForPlayer(player, itemId, now = Date.now()) {
 
   player.profile.cash -= item.price;
   player.profile.energy = Math.min(player.profile.maxEnergy, player.profile.energy + item.energy);
+  player.stats.mealsEaten = Math.max(0, Number(player.stats?.mealsEaten || 0)) + 1;
 
   return {
     item,
@@ -126,6 +128,7 @@ export function healPlayer(player, now = Date.now()) {
   player.profile.cash -= HOSPITAL_RULES.healCost;
   player.profile.hp = Math.min(player.profile.maxHp, player.profile.hp + HOSPITAL_RULES.healHp);
   player.profile.heat = Math.max(0, player.profile.heat - HOSPITAL_RULES.healHeatReduction);
+  player.stats.hospitalHeals = Math.max(0, Number(player.stats?.hospitalHeals || 0)) + 1;
 
   return {
     logMessage: "Lekarz poskladal Cie do kupy. Wracasz do gry.",

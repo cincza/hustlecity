@@ -49,6 +49,7 @@ function ensureGangHeistStats(player) {
     player.stats = {};
   }
   player.stats.gangHeistsWon = Math.max(0, Math.floor(Number(player.stats.gangHeistsWon || 0)));
+  player.stats.gangHeistsParticipated = Math.max(0, Math.floor(Number(player.stats.gangHeistsParticipated || 0)));
   player.stats.totalEarned = Math.max(0, Math.floor(Number(player.stats.totalEarned || 0)));
 }
 
@@ -416,6 +417,7 @@ export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()
   participantEntries.forEach((entry) => {
     const player = entry.player;
     player.profile.energy = Math.max(0, Number(player.profile.energy || 0) - Number(heist.energy || 0));
+    player.stats.gangHeistsParticipated = Math.max(0, Number(player.stats?.gangHeistsParticipated || 0)) + 1;
     if (!player.timers || typeof player.timers !== "object") {
       player.timers = {};
     }

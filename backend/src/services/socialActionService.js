@@ -65,11 +65,23 @@ function ensurePlayerSocialState(player) {
   if (!player.drugInventory || typeof player.drugInventory !== "object" || Array.isArray(player.drugInventory)) {
     player.drugInventory = createDrugCounterMap();
   }
+  if (!player.producedDrugInventory || typeof player.producedDrugInventory !== "object" || Array.isArray(player.producedDrugInventory)) {
+    player.producedDrugInventory = createDrugCounterMap();
+  }
   if (!Array.isArray(player.escortsOwned)) {
     player.escortsOwned = [];
   }
   player.club = normalizeClubState(player.club || createClubState());
   player.profile.bounty = Math.max(0, Math.floor(Number(player.profile?.bounty || 0)));
+}
+
+function consumeProducedDrugStock(player, drugId, quantity = 1) {
+  ensurePlayerSocialState(player);
+  const safeQuantity = Math.max(0, Math.floor(Number(quantity || 0)));
+  const available = Math.max(0, Number(player.producedDrugInventory?.[drugId] || 0));
+  const consumed = Math.min(available, safeQuantity);
+  player.producedDrugInventory[drugId] = Math.max(0, available - consumed);
+  return consumed;
 }
 
 export function appendPlayerMessage(player, message) {
@@ -180,6 +192,7 @@ export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quan
   player.profile.cash = Number(player.profile.cash || 0) - totalPrice;
   player.drugInventory[drug.id] = Number(player.drugInventory?.[drug.id] || 0) + safeQuantity;
   safeDealerInventory[drug.id] = Math.max(0, Number(safeDealerInventory?.[drug.id] || 0) - safeQuantity);
+  player.stats.drugsBought = Math.max(0, Number(player.stats?.drugsBought || 0)) + safeQuantity;
 
   return {
     drug,
@@ -205,10 +218,14 @@ export function sellDrugToDealerForPlayer(player, dealerInventory, drugId, quant
 
   const payoutPerUnit = getDealerPayoutForDrug(drug);
   const payout = payoutPerUnit * safeQuantity;
+  const producedUnitsSold = consumeProducedDrugStock(player, drug.id, safeQuantity);
   player.profile.cash = Number(player.profile.cash || 0) + payout;
   player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - safeQuantity);
   safeDealerInventory[drug.id] = Number(safeDealerInventory?.[drug.id] || 0) + safeQuantity;
   player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + payout;
+  player.stats.dealerDrugSalesValue = Math.max(0, Number(player.stats?.dealerDrugSalesValue || 0)) + payout;
+  player.stats.producedDrugSalesValue =
+    Math.max(0, Number(player.stats?.producedDrugSalesValue || 0)) + producedUnitsSold * payoutPerUnit;
 
   return {
     drug,
@@ -278,6 +295,7 @@ export function consumeDrugForPlayer(player, drugId, now = Date.now()) {
   }
 
   player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - 1);
+  consumeProducedDrugStock(player, drug.id, 1);
   return applyDrugConsumptionToPlayer(player, drug, now);
 }
 

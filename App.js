@@ -229,7 +229,7 @@ import {
   OPERATION_CATALOG,
   OPERATION_STAGE_ORDER,
 } from "./shared/operations.js";
-import { getActiveTaskStates as getSharedActiveTaskStates } from "./shared/tasks.js";
+import { getTaskBoard as getSharedTaskBoard } from "./shared/tasks.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
   CLUB_NIGHT_PLANS,
@@ -303,6 +303,7 @@ const TAB_SIGILS = {
   gang: "?",
   profile: "?",
   dashboard: "¦",
+  districts: "D",
   solo: "?",
   fightclub: "?",
   cell: "?",
@@ -542,11 +543,11 @@ const TAB_DEFINITIONS = [
     id: "city",
     label: "Miasto",
     sections: [
-      { id: "dashboard", label: "Miasto", title: "Miasto" },
+      { id: "districts", label: "Dzielnice", title: "Dzielnice" },
       { id: "tasks", label: "Misje", title: "Zadania" },
       { id: "bank", label: "Bank", title: "Bank" },
       { id: "gym", label: "Silownia", title: "Silownia" },
-      { id: "restaurant", label: "Jedzenie", title: "Restauracja" },
+      { id: "restaurant", label: "Restauracja", title: "Restauracja" },
       { id: "hospital", label: "Szpital", title: "Szpital" },
     ],
   },
@@ -554,7 +555,7 @@ const TAB_DEFINITIONS = [
     id: "heists",
     label: "Napady",
     sections: [
-      { id: "solo", label: "Solo", title: "Napady" },
+      { id: "solo", label: "Skoki", title: "Skoki" },
       { id: "contracts", label: "Kontrakty", title: "Kontrakty" },
       { id: "fightclub", label: "Fight", title: "Fightclub" },
       { id: "prison", label: "Cela", title: "Wiezienie" },
@@ -587,7 +588,7 @@ const TAB_DEFINITIONS = [
       { id: "tasks", label: "Misje", title: "Zadania", hidden: true },
       { id: "bank", label: "Bank", title: "Bank", hidden: true },
       { id: "gym", label: "Silownia", title: "Silownia", hidden: true },
-      { id: "restaurant", label: "Jedzenie", title: "Restauracja", hidden: true },
+      { id: "restaurant", label: "Restauracja", title: "Restauracja", hidden: true },
       { id: "hospital", label: "Szpital", title: "Szpital", hidden: true },
       { id: "players", label: "Gracze", title: "Gracze", hidden: true },
       { id: "friends", label: "Znajomi", title: "Znajomi", hidden: true },
@@ -652,7 +653,32 @@ const INITIAL = {
     adminGrantPresets: [],
     adminRespectPresets: [],
   },
-  stats: { heistsDone: 0, heistsWon: 0, totalEarned: 0, gangHeistsWon: 0, casinoWins: 0, drugBatches: 0 },
+  stats: {
+    heistsDone: 0,
+    heistsWon: 0,
+    totalEarned: 0,
+    gangHeistsWon: 0,
+    gangHeistsParticipated: 0,
+    casinoWins: 0,
+    drugBatches: 0,
+    mealsEaten: 0,
+    hospitalHeals: 0,
+    gymTrainings: 0,
+    bankDepositedTotal: 0,
+    marketGoodsBought: 0,
+    marketGoodsSold: 0,
+    drugsBought: 0,
+    dealerDrugSalesValue: 0,
+    businessCollections: 0,
+    producedDrugSalesValue: 0,
+    clubStashMoves: 0,
+    gangVaultContributed: 0,
+    contractAssetsBought: 0,
+    contractLoadoutEquips: 0,
+    contractsCompleted: 0,
+    operationsCompleted: 0,
+    districtActionsById: {},
+  },
   gang: createGangState(),
   city: createCityState(),
   operations: createOperationsState(),
@@ -671,6 +697,10 @@ const INITIAL = {
     return acc;
   }, {}),
   drugInventory: DRUGS.reduce((acc, item) => {
+    acc[item.id] = 0;
+    return acc;
+  }, {}),
+  producedDrugInventory: DRUGS.reduce((acc, item) => {
     acc[item.id] = 0;
     return acc;
   }, {}),
@@ -1222,6 +1252,18 @@ function createDrugCounterMap(initialValue = 0) {
     acc[item.id] = initialValue;
     return acc;
   }, {});
+}
+
+function consumeProducedDrugCounter(map, drugId, quantity = 1) {
+  const safeMap = map && typeof map === "object" ? { ...map } : createDrugCounterMap();
+  const safeQuantity = Math.max(0, Math.floor(Number(quantity || 0)));
+  const available = Math.max(0, Number(safeMap?.[drugId] || 0));
+  const consumed = Math.min(available, safeQuantity);
+  safeMap[drugId] = Math.max(0, available - consumed);
+  return {
+    nextMap: safeMap,
+    consumed,
+  };
 }
 
 function createClubListings() {
@@ -1864,6 +1906,8 @@ function AppRuntime() {
   const [gangDraftName, setGangDraftName] = useState("Night Reign");
   const [gangHeistNoteDraft, setGangHeistNoteDraft] = useState("");
   const [bankAmountDraft, setBankAmountDraft] = useState("1000");
+  const [bankRecentTransfers, setBankRecentTransfers] = useState([]);
+  const [bankFeedback, setBankFeedback] = useState(null);
   const [dealerTradeDraft, setDealerTradeDraft] = useState("1");
   const [notice, setNotice] = useState(null);
   const [quickActionModal, setQuickActionModal] = useState(null);
@@ -2055,10 +2099,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   const criticalCareStatus = useMemo(() => getCriticalCareStatus(game.player), [game.player]);
   const publicCriticalCareMode = useMemo(() => getCriticalCareMode(CRITICAL_CARE_RULES.public.id), []);
   const privateCriticalCareMode = useMemo(() => getCriticalCareMode(CRITICAL_CARE_RULES.private.id), []);
-  const activeTaskStates = useMemo(
-    () => getSharedActiveTaskStates(game, { mode: gameMode }),
+  const taskBoard = useMemo(
+    () => getSharedTaskBoard(game, { mode: gameMode }),
     [game, gameMode]
   );
+  const activeTaskStates = taskBoard.visibleTasks;
   const topTask =
     activeTaskStates.find((task) => !task.onlineDisabled) ||
     activeTaskStates[0] ||
@@ -3087,6 +3132,31 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     return true;
   };
 
+  const registerBankTransferFeedback = (type, amount) => {
+    const safeAmount = Math.max(0, Math.floor(Number(amount || 0)));
+    if (!safeAmount) return;
+
+    const now = Date.now();
+    const entry = {
+      id: `bank-${type === "withdraw" ? "withdraw" : "deposit"}-${now}`,
+      type: type === "withdraw" ? "withdraw" : "deposit",
+      amount: safeAmount,
+      createdAt: now,
+    };
+
+    setBankFeedback(entry);
+    setBankRecentTransfers((prev) => [entry, ...prev].slice(0, 3));
+    showExplicitNotice({
+      tone: "success",
+      title: entry.type === "withdraw" ? "WYPLATA" : "WPLATA",
+      message:
+        entry.type === "withdraw"
+          ? `Wyplacono ${formatMoney(safeAmount)} z banku.`
+          : `Wplacono ${formatMoney(safeAmount)} do banku.`,
+      deltas: null,
+    });
+  };
+
   const openQuickAction = (action) => {
     setNotice(null);
     setQuickActionModal(action);
@@ -3145,6 +3215,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setDirectMessageRecipient(null);
     setGangDraftName("Night Reign");
     setBankAmountDraft("1000");
+    setBankRecentTransfers([]);
+    setBankFeedback(null);
     setNotice(null);
     setQuickActionModal(null);
     setGangProfileView("actions");
@@ -3372,6 +3444,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       return {
         ...prev,
         player,
+        stats: {
+          ...prev.stats,
+          gymTrainings: Number(prev.stats?.gymTrainings || 0) + safeRepetitions,
+        },
         log: [
           safeRepetitions > 1
             ? `Silownia zaliczona x${safeRepetitions}: ${exercise.name}. ${exercise.note}.`
@@ -3402,13 +3478,19 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       }
     }
     if (game.player.cash < meal.price) return pushLog(`Brakuje kasy na ${meal.name}.`);
-    updateLocalPlayer(
-      {
-        cash: game.player.cash - meal.price,
-        energy: clamp(game.player.energy + meal.energy, 0, game.player.maxEnergy),
+    setGame((prev) => ({
+      ...prev,
+      player: {
+        ...prev.player,
+        cash: prev.player.cash - meal.price,
+        energy: clamp(prev.player.energy + meal.energy, 0, prev.player.maxEnergy),
       },
-      `Zjedzone: ${meal.name}. Energia +${meal.energy}.`
-    );
+      stats: {
+        ...prev.stats,
+        mealsEaten: Number(prev.stats?.mealsEaten || 0) + 1,
+      },
+      log: [`Zjedzone: ${meal.name}. Energia +${meal.energy}.`, ...prev.log].slice(0, 16),
+    }));
   };
 
   const heal = async () => {
@@ -3423,14 +3505,20 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       }
     }
     if (game.player.cash < 220) return pushLog("Brakuje kasy na lekarza.");
-    updateLocalPlayer(
-      {
-        cash: game.player.cash - 220,
-        hp: clamp(game.player.hp + 30, 0, game.player.maxHp),
-        heat: clamp(game.player.heat - 2, 0, 100),
+    setGame((prev) => ({
+      ...prev,
+      player: {
+        ...prev.player,
+        cash: prev.player.cash - 220,
+        hp: clamp(prev.player.hp + 30, 0, prev.player.maxHp),
+        heat: clamp(prev.player.heat - 2, 0, 100),
       },
-      "Lekarz poskladal Cie do kupy. Wracasz do gry."
-    );
+      stats: {
+        ...prev.stats,
+        hospitalHeals: Number(prev.stats?.hospitalHeals || 0) + 1,
+      },
+      log: ["Lekarz poskladal Cie do kupy. Wracasz do gry.", ...prev.log].slice(0, 16),
+    }));
   };
 
   const moveToPrivateClinic = async () => {
@@ -4348,7 +4436,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setGame((prev) => ({
       ...prev,
       player: { ...prev.player, cash: prev.player.cash + payout },
-      stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + payout },
+      stats: {
+        ...prev.stats,
+        totalEarned: prev.stats.totalEarned + payout,
+        businessCollections: Number(prev.stats?.businessCollections || 0) + 1,
+      },
       collections: { ...prev.collections, businessCash: 0, businessCollectedAt: Date.now() },
       log: [`Zgarnales z biznesow ${formatMoney(payout)}. Skrytka znowu jest pusta.`, ...prev.log].slice(0, 16),
     }));
@@ -5121,6 +5213,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         ...prev,
         supplies: nextSupplies,
         drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] + drug.batchSize },
+        producedDrugInventory: {
+          ...(prev.producedDrugInventory || createDrugCounterMap()),
+          [drug.id]: Number(prev.producedDrugInventory?.[drug.id] || 0) + drug.batchSize,
+        },
         player: {
           ...prev.player,
           heat: clamp(prev.player.heat + policeProfile.heatGain, 0, 100),
@@ -5160,9 +5256,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     if (!requireOfflineDemoAuthority("Boosty z towaru")) return;
 
     if (Math.random() < drug.overdoseRisk) {
+      const producedCounter = consumeProducedDrugCounter(game.producedDrugInventory, drug.id, 1);
       setGame((prev) => ({
         ...prev,
         drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - 1 },
+        producedDrugInventory: producedCounter.nextMap,
         player: {
           ...prev.player,
           hp: clamp(prev.player.hp - randomBetween(28, 55), 0, prev.player.maxHp),
@@ -5173,9 +5271,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       return;
     }
 
+    const producedCounter = consumeProducedDrugCounter(game.producedDrugInventory, drug.id, 1);
     setGame((prev) => ({
       ...prev,
       drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - 1 },
+      producedDrugInventory: producedCounter.nextMap,
       activeBoosts: [...prev.activeBoosts, { id: `${drug.id}-${Date.now()}`, name: drug.name, effect: drug.effect, expiresAt: Date.now() + drug.durationSeconds * 1000 }],
       log: [`Weszlo ${drug.name}. Staty podbite na ${Math.round(drug.durationSeconds / 60)} min.`, ...prev.log].slice(0, 16),
     }));
@@ -5206,6 +5306,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       player: { ...prev.player, cash: prev.player.cash - drug.streetPrice * quantity },
       drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] + quantity },
       dealerInventory: { ...prev.dealerInventory, [drug.id]: Math.max(0, (prev.dealerInventory[drug.id] || 0) - quantity) },
+      stats: {
+        ...prev.stats,
+        drugsBought: Number(prev.stats?.drugsBought || 0) + quantity,
+      },
       log: [`Kupiles od dilera: ${drug.name} x${quantity} za ${formatMoney(drug.streetPrice * quantity)}.`, ...prev.log].slice(0, 16),
     }));
   };
@@ -5229,13 +5333,21 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }
 
     if (!requireOfflineDemoAuthority("Dealer")) return;
+    const producedCounter = consumeProducedDrugCounter(game.producedDrugInventory, drug.id, quantity);
 
     setGame((prev) => ({
       ...prev,
       player: { ...prev.player, cash: prev.player.cash + payout },
       drugInventory: { ...prev.drugInventory, [drug.id]: prev.drugInventory[drug.id] - quantity },
+      producedDrugInventory: producedCounter.nextMap,
       dealerInventory: { ...prev.dealerInventory, [drug.id]: (prev.dealerInventory[drug.id] || 0) + quantity },
-      stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + payout },
+      stats: {
+        ...prev.stats,
+        totalEarned: prev.stats.totalEarned + payout,
+        dealerDrugSalesValue: Number(prev.stats?.dealerDrugSalesValue || 0) + payout,
+        producedDrugSalesValue:
+          Number(prev.stats?.producedDrugSalesValue || 0) + producedCounter.consumed * payoutPerUnit,
+      },
       log: [`Sprzedales dilerowi ${drug.name} x${quantity} za ${formatMoney(payout)}.`, ...prev.log].slice(0, 16),
     }));
   };
@@ -5408,12 +5520,18 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
     if (!requireOfflineDemoAuthority("Stash klubu")) return;
 
+    const producedCounter = consumeProducedDrugCounter(game.producedDrugInventory, drug.id, quantity);
     setGame((prev) => ({
       ...prev,
       drugInventory: { ...prev.drugInventory, [drug.id]: Math.max(0, Number(prev.drugInventory[drug.id] || 0) - quantity) },
+      producedDrugInventory: producedCounter.nextMap,
       club: {
         ...prev.club,
         stash: { ...prev.club.stash, [drug.id]: Number(prev.club.stash?.[drug.id] || 0) + quantity },
+      },
+      stats: {
+        ...prev.stats,
+        clubStashMoves: Number(prev.stats?.clubStashMoves || 0) + 1,
       },
       log: [`Przerzucono ${quantity}x ${drug.name} do klubu.`, ...prev.log].slice(0, 16),
     }));
@@ -5641,6 +5759,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       ...prev,
       player: { ...prev.player, cash: prev.player.cash - prev.market[product.id] },
       inventory: { ...prev.inventory, [product.id]: prev.inventory[product.id] + 1 },
+      stats: {
+        ...prev.stats,
+        marketGoodsBought: Number(prev.stats?.marketGoodsBought || 0) + 1,
+      },
       log: [`Kupiono 1 sztuke: ${product.name}.`, ...prev.log].slice(0, 16),
     }));
   };
@@ -5667,7 +5789,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       ...prev,
       player: { ...prev.player, cash: prev.player.cash + sellPrice },
       inventory: { ...prev.inventory, [product.id]: prev.inventory[product.id] - 1 },
-      stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + sellPrice },
+      stats: {
+        ...prev.stats,
+        totalEarned: prev.stats.totalEarned + sellPrice,
+        marketGoodsSold: Number(prev.stats?.marketGoodsSold || 0) + 1,
+      },
       log: [`Sprzedano ${product.name} za ${formatMoney(sellPrice)}.`, ...prev.log].slice(0, 16),
     }));
   };
@@ -5807,6 +5933,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setGame((prev) => ({
       ...prev,
       player: { ...prev.player, cash: prev.player.cash - amount },
+      stats: {
+        ...prev.stats,
+        gangVaultContributed: Number(prev.stats?.gangVaultContributed || 0) + amount,
+      },
       gang: {
         ...prev.gang,
         vault: prev.gang.vault + amount,
@@ -6260,6 +6390,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         const result = await depositOnline(sessionToken, parsed);
         mergeServerUser(result.user);
         setBankAmountDraft(String(parsed));
+        registerBankTransferFeedback("deposit", parsed);
         return;
       } catch (error) {
         pushLog(error.message);
@@ -6270,8 +6401,17 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     const amount = Math.min(parsed, Math.max(0, game.player.cash));
     if (!amount) return pushLog("Nie masz gotowki do wplaty.");
     if (parsed > game.player.cash) return pushLog("Nie masz tyle gotowki przy sobie.");
-    updateLocalPlayer({ cash: game.player.cash - amount, bank: (game.player.bank || 0) + amount }, `Wplacono do banku ${formatMoney(amount)}.`);
+    setGame((prev) => ({
+      ...prev,
+      player: { ...prev.player, cash: prev.player.cash - amount, bank: (prev.player.bank || 0) + amount },
+      stats: {
+        ...prev.stats,
+        bankDepositedTotal: Number(prev.stats?.bankDepositedTotal || 0) + amount,
+      },
+      log: [`Wplacono do banku ${formatMoney(amount)}.`, ...prev.log].slice(0, 16),
+    }));
     setBankAmountDraft(String(amount));
+    registerBankTransferFeedback("deposit", amount);
   };
 
   // Offline demo keeps a tiny fallback, but online always delegates withdrawal validation to backend.
@@ -6284,6 +6424,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         const result = await withdrawOnline(sessionToken, parsed);
         mergeServerUser(result.user);
         setBankAmountDraft(String(parsed));
+        registerBankTransferFeedback("withdraw", parsed);
         return;
       } catch (error) {
         pushLog(error.message);
@@ -6297,6 +6438,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     if (parsed > bankBalance) return pushLog("Nie masz tyle siana na koncie.");
     updateLocalPlayer({ cash: game.player.cash + amount, bank: Math.max(0, (game.player.bank || 0) - amount) }, `Wyplacono z banku ${formatMoney(amount)}.`);
     setBankAmountDraft(String(amount));
+    registerBankTransferFeedback("withdraw", amount);
   };
 
   const claimTask = async (task) => {
@@ -6304,23 +6446,40 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       try {
         const result = await claimTaskOnline(sessionToken, task.id);
         mergeServerUser(result.user);
+        return result?.result || true;
       } catch (error) {
         pushLog(error.message);
+        return false;
       }
-      return;
     }
-    if (!requireOfflineDemoAuthority("Misje i nagrody")) return;
-    if (!task.completed || task.claimed) return;
+    if (!requireOfflineDemoAuthority("Misje i nagrody")) return false;
+    if (!task.completed || task.claimed) return false;
+    const rewardNotes = [];
+    if (task.rewardXp) rewardNotes.push(`+${task.rewardXp} XP`);
+    if (task.rewardEnergy) rewardNotes.push(`+${task.rewardEnergy} energii`);
+    if (task.rewardHp) rewardNotes.push(`+${task.rewardHp} HP`);
     setGame((prev) => ({
       ...prev,
       player: applyProgressionToPlayer(
-        { ...prev.player, cash: prev.player.cash + task.rewardCash },
+        {
+          ...prev.player,
+          cash: prev.player.cash + task.rewardCash,
+          energy: clamp(prev.player.energy + Number(task.rewardEnergy || 0), 0, prev.player.maxEnergy),
+          hp: clamp(prev.player.hp + Number(task.rewardHp || 0), 0, prev.player.maxHp),
+        },
         task.rewardXp
       ).player,
       tasksClaimed: [...prev.tasksClaimed, task.id],
       stats: { ...prev.stats, totalEarned: prev.stats.totalEarned + task.rewardCash },
-      log: [`Odebrano zadanie: ${task.title}. ${formatMoney(task.rewardCash)} i +${task.rewardXp} XP.`, ...prev.log].slice(0, 16),
+      log: [`Odebrano zadanie: ${task.title}. ${formatMoney(task.rewardCash)}${rewardNotes.length ? ` i ${rewardNotes.join(", ")}` : ""}.`, ...prev.log].slice(0, 16),
     }));
+    return {
+      taskId: task.id,
+      rewardCash: task.rewardCash,
+      rewardXp: task.rewardXp,
+      rewardEnergy: Number(task.rewardEnergy || 0),
+      rewardHp: Number(task.rewardHp || 0),
+    };
   };
 
   const claimReferralMilestone = (milestone) => {
@@ -8870,6 +9029,9 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     gymPasses: GYM_PASSES,
     gymExercises: GYM_EXERCISES,
     taskStates: activeTaskStates,
+    taskBoard,
+    bankRecentTransfers,
+    bankFeedback,
     helpers: {
       hasGymPass,
       inJail,
@@ -9128,7 +9290,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   const quickActionModalTitles = {
     bank: "Bank",
     casino: "Kasyno",
-    restaurant: "Jedzenie",
+    restaurant: "Restauracja",
     hospital: "Szpital",
     gym: "Trening",
     "compose-message": directMessageRecipient?.name ? `Wiadomosc do ${directMessageRecipient.name}` : "Nowa wiadomosc",
@@ -9136,6 +9298,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
   const renderActiveSection = () => {
     switch (`${tab}:${activeSectionId}`) {
+      case "city:districts":
       case "city:dashboard":
       case "city:tasks":
       case "city:bank":
@@ -9147,7 +9310,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       case "profile:gym":
       case "profile:restaurant":
       case "profile:hospital":
-        return <CityScreen {...cityScreenProps} section={activeSectionId} />;
+        return <CityScreen {...cityScreenProps} section={activeSectionId === "dashboard" ? "districts" : activeSectionId} />;
       case "profile:casino":
         return <CasinoScreen {...casinoScreenProps} />;
       case "heists:solo":

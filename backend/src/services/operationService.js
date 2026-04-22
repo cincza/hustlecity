@@ -169,6 +169,7 @@ export function executeOperationForPlayer(player, now = Date.now()) {
     player.profile.xp = progression.xp;
     player.profile.level = progression.respect;
     player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + reward;
+    player.stats.operationsCompleted = Math.max(0, Number(player.stats?.operationsCompleted || 0)) + 1;
     player.operations.history = [
       {
         id: active.id,

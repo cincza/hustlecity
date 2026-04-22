@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { FACTORIES, SUPPLIERS, getDrugBatchSupplyCost } from "../shared/empire.js";
 import { DRUGS, getDealerPayoutForDrug } from "../shared/socialGameplay.js";
+import { getTaskBoard, TASK_BOARD_SLOT_COUNT } from "../shared/tasks.js";
 
 const HOST = "127.0.0.1";
 const PORT = 4100;
@@ -454,14 +455,14 @@ async function main() {
       body: { passId: "day" },
     });
 
-    const claimedGymTask = await request("/tasks/claim", {
+    const claimedFirstHeistTask = await request("/tasks/claim", {
       method: "POST",
       token,
-      body: { taskId: "gym-pass" },
+      body: { taskId: "pierwszy-skok" },
     });
 
-    if (!claimedGymTask?.result?.rewardCash) {
-      throw new Error("Claim taska gym-pass nie zwrocil nagrody.");
+    if (!claimedFirstHeistTask?.result?.rewardCash) {
+      throw new Error("Claim taska pierwszy-skok nie zwrocil nagrody.");
     }
 
     const gymTrainResult = await request("/player/gym/train", {
@@ -474,25 +475,26 @@ async function main() {
       throw new Error("Backend nie policzyl treningu wieloserii.");
     }
 
-    const claimedFirstWaveTask = await request("/tasks/claim", {
+    const claimedFirstTrainingTask = await request("/tasks/claim", {
       method: "POST",
       token,
-      body: { taskId: "first-wave" },
+      body: { taskId: "pierwszy-trening" },
     });
 
-    if (!claimedFirstWaveTask?.result?.rewardXp) {
-      throw new Error("Claim taska first-wave nie zwrocil XP.");
+    if (!claimedFirstTrainingTask?.result?.rewardXp) {
+      throw new Error("Claim taska pierwszy-trening nie zwrocil XP.");
     }
 
-    await expectRequestFailure(
-      "/tasks/claim",
-      {
-        method: "POST",
-        token,
-        body: { taskId: "crew" },
-      },
-      /gang|serwerowo/i
-    );
+    const visibleTaskBoard = getTaskBoard(claimedFirstTrainingTask.user, { mode: "online_alpha" });
+    if (!Array.isArray(visibleTaskBoard.visibleTasks) || visibleTaskBoard.visibleTasks.length > TASK_BOARD_SLOT_COUNT) {
+      throw new Error("Board misji pokazuje za duzo aktywnych slotow.");
+    }
+    if (visibleTaskBoard.visibleTasks.some((task) => task.id === "pierwszy-skok" || task.id === "pierwszy-trening")) {
+      throw new Error("Odebrane misje dalej wisza na aktywnej planszy slotow.");
+    }
+    if (!visibleTaskBoard.visibleTasks.some((task) => task.id === "piec-wejsc" || task.id === "pierwszy-prog")) {
+      throw new Error("Board misji nie dociagnal kolejnych zadan po odebraniu pierwszych slotow.");
+    }
 
     const initialDistricts = await request("/districts", { token });
     if (!Array.isArray(initialDistricts?.districts) || initialDistricts.districts.length !== 3) {
@@ -1373,7 +1375,7 @@ async function main() {
     const claimedClubTask = await request("/tasks/claim", {
       method: "POST",
       token,
-      body: { taskId: "club" },
+      body: { taskId: "klub-na-zapleczu" },
     });
 
     if (!claimedClubTask?.result?.rewardCash) {
@@ -1779,7 +1781,7 @@ async function main() {
       throw new Error("Ownership klubu nie przetrwal restartu backendu.");
     }
 
-    if (!Array.isArray(persistedMe.user.tasksClaimed) || !persistedMe.user.tasksClaimed.includes("club")) {
+    if (!Array.isArray(persistedMe.user.tasksClaimed) || !persistedMe.user.tasksClaimed.includes("klub-na-zapleczu")) {
       throw new Error("Claim taska klubu nie przetrwal restartu backendu.");
     }
 

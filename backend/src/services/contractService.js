@@ -70,6 +70,7 @@ export function buyContractItemForPlayer(player, itemId) {
 
   player.profile.cash = Number(player.profile.cash || 0) - Number(item.price || 0);
   player.contracts.ownedItems[item.id] = 1;
+  player.stats.contractAssetsBought = Math.max(0, Number(player.stats?.contractAssetsBought || 0)) + 1;
 
   return {
     assetType: "item",
@@ -97,6 +98,7 @@ export function buyContractCarForPlayer(player, carId) {
 
   player.profile.cash = Number(player.profile.cash || 0) - Number(car.price || 0);
   player.contracts.ownedCars[car.id] = 1;
+  player.stats.contractAssetsBought = Math.max(0, Number(player.stats?.contractAssetsBought || 0)) + 1;
 
   return {
     assetType: "car",
@@ -130,6 +132,7 @@ export function equipContractLoadoutForPlayer(player, slotId, assetId = null) {
       fail(`Najpierw kup ${car.name}.`);
     }
     player.contracts.loadout.car = car.id;
+    player.stats.contractLoadoutEquips = Math.max(0, Number(player.stats?.contractLoadoutEquips || 0)) + 1;
     return {
       slotId: "car",
       equippedId: car.id,
@@ -149,6 +152,7 @@ export function equipContractLoadoutForPlayer(player, slotId, assetId = null) {
   }
 
   player.contracts.loadout[slot.id] = item.id;
+  player.stats.contractLoadoutEquips = Math.max(0, Number(player.stats?.contractLoadoutEquips || 0)) + 1;
   return {
     slotId: slot.id,
     equippedId: item.id,
@@ -214,6 +218,7 @@ export function executeContractForPlayer(player, contractId, now = Date.now()) {
     player.profile.xp = progression.xp;
     player.profile.level = progression.respect;
     player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + reward;
+    player.stats.contractsCompleted = Math.max(0, Number(player.stats?.contractsCompleted || 0)) + 1;
 
     const historyEntry = {
       id: `contract-${contract.id}-${now}`,

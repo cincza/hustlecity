@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getDistrictAlertText, getDistrictEffectLines } from "../game/selectors/metaGameplay";
 import { HeroPanel } from "../components/GameScreenPrimitives";
+import { BankTransferPanel } from "../components/BankTransferPanel";
+import { MissionPlaceholderTile, MissionTile } from "../components/MissionTile";
 
 const MAX_GYM_BATCH = 10;
 
@@ -55,6 +57,9 @@ export function CityScreen({
   gymPasses,
   gymExercises,
   taskStates,
+  taskBoard,
+  bankRecentTransfers,
+  bankFeedback,
   criticalCareStatus,
   criticalCareModes,
   criticalCareBlockedActions,
@@ -182,97 +187,68 @@ export function CityScreen({
     </SectionCard>
   );
 
-  if (section === "dashboard") {
-    const dashboardHeroTitle = criticalCareActive
-      ? "Najpierw dojdz do siebie"
+  if (section === "districts" || section === "dashboard") {
+    const focusEffectLines = focusDistrictSummary
+      ? getDistrictEffectLines(focusDistrictSummary, {
+          focused: true,
+          gangEffects,
+        })
+      : [];
+    const districtHeroTitle = criticalCareActive
+      ? "Miasto zyje dalej bez Ciebie"
       : focusDistrictSummary?.name
-        ? `${focusDistrictSummary.name} trzyma dzis puls miasta`
-        : "Miasto po zmroku";
-    const dashboardHeroSummary = criticalCareActive
-      ? `Jestes na ${activeCriticalCareMode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ostrej akcji"}. Wroc przez szpital, potem od razu wskocz z powrotem do miasta.`
-      : `Najwazniejsze fronty sa trzy: szybki ruch, cashflow z zaplecza i walka o dzielnice. ${hottestDistrictSummary?.name || "Miasto"} jest teraz ${String(hottestDistrictSummary?.pressureLabel || "spokojne").toLowerCase()}.`;
+        ? `${focusDistrictSummary.name} jest teraz glownym frontem`
+        : "Dzielnice trzymaja tempo miasta";
+    const districtHeroSummary = criticalCareActive
+      ? `Jestes na ${activeCriticalCareMode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ostrej akcji"}, ale dalej widzisz gdzie gang powinien cisnac influence i gdzie robi sie za goraco.`
+      : "To nie jest drugi dashboard. Tutaj sprawdzasz tylko walke o teren: fokus gangu, presje policji i realny wplyw dzielnic na klub, operacje i cale zaplecze.";
     return (
       <>
         <SceneArtwork
-          eyebrow="Miasto"
-          title="Miasto po zmroku"
-          lines={["Wchodzisz, klikasz, bierzesz swoj kawalek nocy."]}
-          accent={["#352215", "#120d09", "#050505"]}
+          eyebrow="Dzielnice"
+          title="Fronty miasta"
+          lines={["Tutaj widzisz, gdzie naciskac influence i gdzie trzeba odpuscic presje."]}
+          accent={["#23180f", "#0f1014", "#050505"]}
           source={sceneBackgrounds.city}
         />
         <HeroPanel
-          eyebrow={criticalCareActive ? "Stan krytyczny" : criticalCareProtected ? "Oslona po terapii" : "Miasto"}
-          title={dashboardHeroTitle}
-          summary={dashboardHeroSummary}
+          eyebrow={criticalCareActive ? "Stan krytyczny" : criticalCareProtected ? "Powrot do gry" : "Dzielnice"}
+          title={districtHeroTitle}
+          summary={districtHeroSummary}
           tone={criticalCareActive ? "danger" : criticalCareProtected ? "gold" : "gold"}
           pills={[
             {
-              label: criticalCareActive ? "Do wyjscia" : "Fokus",
-              value: criticalCareActive
-                ? formatCooldown(criticalCareStatus?.remainingMs || 0)
-                : focusDistrictSummary?.shortName || "-",
-              note: criticalCareActive ? "Ryzykowne akcje sa zablokowane." : focusDistrictSummary?.pressureLabel || "Brak fokusu",
-              tone: criticalCareActive ? "danger" : "gold",
-              icon: criticalCareActive ? "hospital-box-outline" : "target-variant",
-            },
-            {
-              label: "Biznes / min",
-              value: formatMoney(totalBusinessIncome),
-              note: businessCash > 0 ? businessCollectionSubtitle : "Czysta skrytka.",
-              tone: "success",
-              icon: "cash-multiple",
-            },
-            {
-              label: "Ulica / min",
-              value: formatMoney(totalEscortIncome),
-              note: escortCash > 0 ? escortCollectionSubtitle : "Noc dopiero sie rozpedza.",
-              tone: "info",
-              icon: "storefront-outline",
+              label: "Fokus gangu",
+              value: focusDistrictSummary?.shortName || "-",
+              note: focusEffectLines[0] || focusDistrictSummary?.bonusLabel || "Brak aktywnego fokusu.",
+              tone: "gold",
+              icon: "target-variant",
             },
             {
               label: "Najgorecej",
               value: hottestDistrictSummary?.shortName || "-",
-              note: hottestDistrictSummary?.pressureLabel || "Spokojnie",
-              tone: criticalCareActive ? "danger" : "neutral",
+              note: getDistrictAlertText(hottestDistrictSummary) || hottestDistrictSummary?.pressureLabel || "Spokojnie",
+              tone: hottestDistrictSummary?.pressureLabel === "Lockdown" || hottestDistrictSummary?.pressureLabel === "Crackdown" ? "danger" : "neutral",
               icon: "alert-outline",
             },
+            {
+              label: "Kontakt na ulicy",
+              value: `${Math.round(escortFindChance * 100)}%`,
+              note: "To tempo, z jakim ulica moze podrzucic nowa dziewczyne.",
+              tone: "info",
+              icon: "account-search-outline",
+            },
+            {
+              label: "Haracz",
+              value: !game.gang?.joined ? "-" : gangTributeRemaining > 0 ? formatCooldown(gangTributeRemaining) : "Gotowy",
+              note: !game.gang?.joined ? "Bez gangu nie ma regularnej koperty." : gangTributeRemaining > 0 ? "Nastepna koperta jeszcze stygnie." : "Mozesz odebrac regularna koperte z terenu.",
+              tone: !game.gang?.joined ? "neutral" : gangTributeRemaining > 0 ? "neutral" : "success",
+              icon: "briefcase-outline",
+            },
           ]}
-          primaryAction={{
-            label: criticalCareActive ? "Szpital" : "Napad na szybko",
-            meta: criticalCareActive ? "Publiczna terapia albo prywatna klinika." : "Od razu wejdz w akcje z tablicy miasta.",
-            onPress: criticalCareActive ? () => actions.openSection("city", "hospital") : actions.quickHeist,
-          }}
-          secondaryAction={{
-            label: "Odbiory i zaplecze",
-            meta: "Biznes, ulica, klub i cashflow.",
-            onPress: () => actions.openSection("empire", "businesses"),
-          }}
         />
 
-        <SectionCard title="Teraz w miescie" subtitle="Najpierw to, co daje Ci natychmiastowy ruch albo szybka decyzje.">
-          <View style={styles.grid}>
-            {quickStartCards.map((card) => (
-              <ActionTile key={card.id} title={card.title} subtitle={card.subtitle} visual={card.visual} onPress={card.onPress} danger={card.danger} />
-            ))}
-          </View>
-        </SectionCard>
-
-        <SectionCard title="Imperium i zaplecze" subtitle="Tu wchodzisz po cashflow, raport klubu i stale koperty.">
-          <View style={styles.grid}>
-            {empireCards.map((card) => (
-              <ActionTile key={card.id} title={card.title} subtitle={card.subtitle} visual={card.visual} onPress={card.onPress} />
-            ))}
-            <ActionTile title="Fightclub" subtitle="Sparing podbija sile, zrecznosc i szacun." visual={systemVisuals.pvp} onPress={actions.fightClubRound} />
-            <ActionTile title="Haracz" subtitle={gangTributeRemaining > 0 ? `Kolejna koperta za ${formatCooldown(gangTributeRemaining)}.` : "Regularna wyplata z terenu i ochrony."} visual={systemVisuals.gang} onPress={actions.collectGangTribute} disabled={!game.gang.joined || gangTributeRemaining > 0} />
-            <ActionTile title="Raport klubu" subtitle={game.club?.owned ? "Wejdz po sejf, stash i stan lokalu." : "Przejmij albo odwiedz lokal."} visual={systemVisuals.club} onPress={() => actions.openSection("empire", "club")} />
-            <ActionTile title="Odbierz biznes" subtitle={businessCash > 0 ? businessCollectionSubtitle : "Skrytka pusta."} visual={systemVisuals.cash} onPress={actions.collectBusinessIncome} disabled={businessCollectableCash <= 0} />
-            <ActionTile title="Odbierz ulice" subtitle={escortCash > 0 ? escortCollectionSubtitle : "Rozliczenie puste."} visual={systemVisuals.street} onPress={actions.collectEscortIncome} disabled={escortCollectableCash <= 0} />
-          </View>
-        </SectionCard>
-
-        {renderCollectionsPanel("Cashflow i odbiory", "Dwa szybkie raporty. Widzisz ile jest do wziecia i kiedy dobijesz do capu.")}
-
-        <SectionCard title="Fronty miasta" subtitle="Jedna karta pokazuje gdzie cisniesz, druga gdzie robi sie za goraco.">
+        <SectionCard title="Fronty miasta" subtitle="Tu nie ma juz drugiego dashboardu. Jest tylko walka o teren i to, co realnie zmienia gre.">
           <View style={styles.mobileStatusGrid}>
             <View style={styles.mobileStatusCard}>
               <Text style={styles.mobileStatusLabel}>Fokus gangu</Text>
@@ -321,46 +297,25 @@ export function CityScreen({
                 </View>
               ))
             : null}
+        </SectionCard>
+
+        <SectionCard title="Co to zmienia" subtitle="Krotko: dlaczego dzielnice w ogole obchodza Cie w praktyce.">
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Energia</Text>
-              <Text style={styles.mobileOverviewValue}>{`+1 / ${Math.round(energyRegenSeconds / 60)} min`}</Text>
+              <Text style={styles.mobileOverviewLabel}>Klub</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Traffic, pressure i incydenty leca z dzielnicy.</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Cela</Text>
-              <Text style={styles.mobileOverviewValue}>{helpers.inJail(game.player) ? formatDuration(jailRemaining) : "Wolny"}</Text>
+              <Text style={styles.mobileOverviewLabel}>Operacje</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Hot zone podbija leak, prep i ryzyko.</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Nastepny napad</Text>
-              <Text style={styles.mobileOverviewValueSmall}>{helpers.nextHeistName}</Text>
+              <Text style={styles.mobileOverviewLabel}>Fabryki</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Goraca dzielnica cisnie presje i robi przypal.</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Szansa panienki</Text>
-              <Text style={styles.mobileOverviewValue}>{`${Math.round(escortFindChance * 100)}%`}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Biznes / min</Text>
-              <Text style={styles.mobileOverviewValue}>{formatMoney(totalBusinessIncome)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Ulica / min</Text>
-              <Text style={styles.mobileOverviewValue}>{formatMoney(totalEscortIncome)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Cap biznesow</Text>
-              <Text style={styles.mobileOverviewValueSmall}>{formatLongDuration(businessCapEta)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Cap ulicy</Text>
-              <Text style={styles.mobileOverviewValueSmall}>{formatLongDuration(escortCapEta)}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Fokus</Text>
-              <Text style={styles.mobileOverviewValueSmall}>{focusDistrictSummary?.shortName || "-"}</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Najgorzej</Text>
-              <Text style={styles.mobileOverviewValueSmall}>{hottestDistrictSummary?.shortName || "-"}</Text>
+              <Text style={styles.mobileOverviewLabel}>Gang</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Fokus daje bonus do influence i pcha teren pod ekipe.</Text>
             </View>
           </View>
         </SectionCard>
@@ -369,86 +324,76 @@ export function CityScreen({
   }
 
   if (section === "tasks") {
+    const board = taskBoard || {
+      claimableTasks: Array.isArray(taskStates) ? taskStates.filter((task) => task.completed && !task.onlineDisabled) : [],
+      activeTasks: Array.isArray(taskStates) ? taskStates.filter((task) => !(task.completed && !task.onlineDisabled)) : [],
+      placeholders: [],
+      slotCount: Array.isArray(taskStates) ? taskStates.length : 0,
+    };
+    const readyTasks = Array.isArray(board.claimableTasks) ? board.claimableTasks : [];
+    const inProgressTasks = Array.isArray(board.activeTasks) ? board.activeTasks : [];
+    const placeholderTasks = Array.isArray(board.placeholders) ? board.placeholders : [];
+
     return (
-      <SectionCard title="Zadania" subtitle="Misje i szybkie nagrody.">
-        {!taskStates.length ? <Text style={styles.emptyText}>Aktywna lista jest czysta. Odebrane nagrody nie wisza juz na ekranie.</Text> : null}
-        {taskStates.map((task) => (
-          <View key={task.id} style={styles.listCard}>
-            <View style={styles.listCardHeader}>
-              <View style={styles.flexOne}>
-                <Text style={styles.listCardTitle}>{task.title}</Text>
-                <Text style={styles.listCardMeta}>{task.description}</Text>
-                {task.onlineDisabled ? <Text style={styles.listCardMeta}>{task.disabledReason}</Text> : null}
-              </View>
-              <View style={styles.taskMeta}>
-                <Tag
-                  text={task.onlineDisabled ? "Online wkrotce" : task.completed ? "Gotowe" : "W toku"}
-                  warning={task.onlineDisabled || !task.completed}
+      <>
+        {readyTasks.length ? (
+          <SectionCard title="Gotowe do odbioru" subtitle="Klikasz, wpada nagroda i slot od razu robi miejsce na kolejna robote.">
+            <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+              {readyTasks.map((task) => (
+                <MissionTile
+                  key={task.id}
+                  task={task}
+                  formatMoney={formatMoney}
+                  onClaim={actions.claimTask}
                 />
-              </View>
+              ))}
             </View>
-            <View style={styles.inlineRow}>
-              <Text style={styles.costLabel}>{formatMoney(task.rewardCash)} i +{task.rewardXp} XP</Text>
-              <Pressable onPress={() => actions.claimTask(task)} style={[styles.inlineButton, (task.onlineDisabled || !task.completed) && styles.tileDisabled]}>
-                <Text style={styles.inlineButtonText}>
-                  {task.onlineDisabled ? "Czeka" : "Odbierz"}
-                </Text>
-              </Pressable>
-            </View>
+          </SectionCard>
+        ) : null}
+
+        <SectionCard
+          title="W toku"
+          subtitle={
+            readyTasks.length
+              ? "Reszta aktywnych slotow. Domknij je i od razu wpada kolejna robota."
+              : "Aktywne zlecenia. Widzisz tylko zywe sloty, bez martwej listy i bez zablokowanych kart."
+          }
+        >
+          {!inProgressTasks.length && !placeholderTasks.length ? (
+            <Text style={styles.emptyText}>Aktywna lista jest czysta. Odebrane nagrody nie wisza juz na ekranie.</Text>
+          ) : null}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+            {inProgressTasks.map((task) => (
+              <MissionTile
+                key={task.id}
+                task={task}
+                formatMoney={formatMoney}
+                onClaim={actions.claimTask}
+              />
+            ))}
+            {placeholderTasks.map((slot) => (
+              <MissionPlaceholderTile key={slot.id} title={slot.title} description={slot.description} />
+            ))}
           </View>
-        ))}
-      </SectionCard>
+        </SectionCard>
+      </>
     );
   }
 
   if (section === "bank") {
-    const maxDepositAmount = Math.max(0, Math.floor(Number(game.player.cash || 0)));
-    const maxWithdrawAmount = Math.max(0, Math.floor(Number(game.player.bank || 0)));
-
     return (
-      <SectionCard title="Bank" subtitle={apiStatus === "online" ? "Saldo i walidacja leca z backendu." : "Lokalny fallback do testow offline."}>
-        <StatLine label="Gotowka przy sobie" value={formatMoney(game.player.cash)} visual={systemVisuals.cash} />
-        <StatLine label="Saldo bankowe" value={formatMoney(game.player.bank || 0)} visual={systemVisuals.bank} />
-        <StatLine label="Operacje" value={apiStatus === "online" ? "Bez podatku, z limitem serwera." : "Tryb lokalny."} visual={systemVisuals.bank} />
-        <View style={styles.listCard}>
-          <View style={styles.entityHead}>
-            <EntityBadge visual={systemVisuals.bank} />
-            <View style={styles.flexOne}>
-              <Text style={styles.listCardTitle}>Kwota operacji</Text>
-              <Text style={styles.listCardMeta}>Wpisz kwote i rusz hajs.</Text>
-            </View>
-          </View>
-          <View style={styles.inlineRow}>
-            <TextInput
-              value={bankAmountDraft}
-              onChangeText={(text) => setBankAmountDraft(text.replace(/[^\d]/g, ""))}
-              placeholder="Np. 25000"
-              placeholderTextColor="#6c6c6c"
-              keyboardType="numeric"
-              style={styles.chatInput}
-            />
-          </View>
-          <View style={styles.inlineRow}>
-            <Pressable
-              onPress={() => setBankAmountDraft(String(maxDepositAmount))}
-              style={[styles.inlineButton, maxDepositAmount <= 0 && styles.tileDisabled]}
-              disabled={maxDepositAmount <= 0}
-            >
-              <Text style={styles.inlineButtonText}>Wplac wszystko</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setBankAmountDraft(String(maxWithdrawAmount))}
-              style={[styles.inlineButton, maxWithdrawAmount <= 0 && styles.tileDisabled]}
-              disabled={maxWithdrawAmount <= 0}
-            >
-              <Text style={styles.inlineButtonText}>Wyplac wszystko</Text>
-            </Pressable>
-          </View>
-        </View>
-        <View style={styles.grid}>
-          <ActionTile title="Wplac" subtitle={`Do banku leci ${bankAmountDraft || 0}.`} visual={systemVisuals.bank} onPress={actions.depositCash} />
-          <ActionTile title="Wyplac" subtitle={`Z konta sciagasz ${bankAmountDraft || 0}.`} visual={systemVisuals.cash} onPress={actions.withdrawCash} />
-        </View>
+      <SectionCard title="Bank">
+        <BankTransferPanel
+          cash={game.player.cash}
+          bank={game.player.bank || 0}
+          amountDraft={bankAmountDraft}
+          setAmountDraft={setBankAmountDraft}
+          onDeposit={actions.depositCash}
+          onWithdraw={actions.withdrawCash}
+          formatMoney={formatMoney}
+          recentTransfers={bankRecentTransfers}
+          feedback={bankFeedback}
+        />
       </SectionCard>
     );
   }

@@ -473,13 +473,32 @@ function createInitialPlayerData(username = "gracz") {
       heistsDone: 0,
       heistsWon: 0,
       gangHeistsWon: 0,
+      gangHeistsParticipated: 0,
       totalEarned: 0,
       casinoWins: 0,
       drugBatches: 0,
+      mealsEaten: 0,
+      hospitalHeals: 0,
+      gymTrainings: 0,
+      bankDepositedTotal: 0,
+      marketGoodsBought: 0,
+      marketGoodsSold: 0,
+      drugsBought: 0,
+      dealerDrugSalesValue: 0,
+      businessCollections: 0,
+      producedDrugSalesValue: 0,
+      clubStashMoves: 0,
+      gangVaultContributed: 0,
+      contractAssetsBought: 0,
+      contractLoadoutEquips: 0,
+      contractsCompleted: 0,
+      operationsCompleted: 0,
+      districtActionsById: {},
     },
     inventory: Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0])),
     activeBoosts: [],
     drugInventory: createDrugCounterMap(),
+    producedDrugInventory: createDrugCounterMap(),
     cooldowns: {
       heists: {},
       casinoActionUntil: 0,
@@ -573,6 +592,38 @@ function ensurePlayerExtendedState(player) {
     player.stats = {};
   }
   player.stats.gangHeistsWon = Math.max(0, Math.floor(Number(player.stats.gangHeistsWon || 0)));
+  player.stats.gangHeistsParticipated = Math.max(0, Math.floor(Number(player.stats.gangHeistsParticipated || 0)));
+  player.stats.heistsDone = Math.max(0, Math.floor(Number(player.stats.heistsDone || 0)));
+  player.stats.heistsWon = Math.max(0, Math.floor(Number(player.stats.heistsWon || 0)));
+  player.stats.totalEarned = Math.max(0, Math.floor(Number(player.stats.totalEarned || 0)));
+  player.stats.casinoWins = Math.max(0, Math.floor(Number(player.stats.casinoWins || 0)));
+  player.stats.drugBatches = Math.max(0, Math.floor(Number(player.stats.drugBatches || 0)));
+  player.stats.mealsEaten = Math.max(0, Math.floor(Number(player.stats.mealsEaten || 0)));
+  player.stats.hospitalHeals = Math.max(0, Math.floor(Number(player.stats.hospitalHeals || 0)));
+  player.stats.gymTrainings = Math.max(0, Math.floor(Number(player.stats.gymTrainings || 0)));
+  player.stats.bankDepositedTotal = Math.max(0, Math.floor(Number(player.stats.bankDepositedTotal || 0)));
+  player.stats.marketGoodsBought = Math.max(0, Math.floor(Number(player.stats.marketGoodsBought || 0)));
+  player.stats.marketGoodsSold = Math.max(0, Math.floor(Number(player.stats.marketGoodsSold || 0)));
+  player.stats.drugsBought = Math.max(0, Math.floor(Number(player.stats.drugsBought || 0)));
+  player.stats.dealerDrugSalesValue = Math.max(0, Math.floor(Number(player.stats.dealerDrugSalesValue || 0)));
+  player.stats.businessCollections = Math.max(0, Math.floor(Number(player.stats.businessCollections || 0)));
+  player.stats.producedDrugSalesValue = Math.max(0, Math.floor(Number(player.stats.producedDrugSalesValue || 0)));
+  player.stats.clubStashMoves = Math.max(0, Math.floor(Number(player.stats.clubStashMoves || 0)));
+  player.stats.gangVaultContributed = Math.max(0, Math.floor(Number(player.stats.gangVaultContributed || 0)));
+  player.stats.contractAssetsBought = Math.max(0, Math.floor(Number(player.stats.contractAssetsBought || 0)));
+  player.stats.contractLoadoutEquips = Math.max(0, Math.floor(Number(player.stats.contractLoadoutEquips || 0)));
+  player.stats.contractsCompleted = Math.max(0, Math.floor(Number(player.stats.contractsCompleted || 0)));
+  player.stats.operationsCompleted = Math.max(0, Math.floor(Number(player.stats.operationsCompleted || 0)));
+  if (!player.stats.districtActionsById || typeof player.stats.districtActionsById !== "object" || Array.isArray(player.stats.districtActionsById)) {
+    player.stats.districtActionsById = {};
+  } else {
+    player.stats.districtActionsById = Object.fromEntries(
+      Object.entries(player.stats.districtActionsById).map(([districtId, count]) => [
+        String(districtId || "").trim(),
+        Math.max(0, Math.floor(Number(count || 0))),
+      ])
+    );
+  }
   if (!player.inventory || typeof player.inventory !== "object" || Array.isArray(player.inventory)) {
     player.inventory = Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0]));
   } else {
@@ -614,6 +665,7 @@ function ensurePlayerExtendedState(player) {
     ? Number(player.profile.criticalProtectionUntil)
     : null;
   player.drugInventory = normalizeDrugInventory(player.drugInventory);
+  player.producedDrugInventory = normalizeDrugInventory(player.producedDrugInventory);
   if ("dealerInventory" in player) {
     delete player.dealerInventory;
   }
@@ -5158,6 +5210,7 @@ app.post("/market/buy", auth, asyncHandler(async (req, res) => {
     await commitPlayerMutation(req, "market-buy", async (player) => {
       player.profile.cash -= quote.total;
       player.inventory[product.id] += qty;
+      player.stats.marketGoodsBought += qty;
       pushLog(
         player,
         `Kupiono ${qty}x ${product.name} za $${quote.total}. Rynek: ${quote.streetUnits}, fallback NPC: ${quote.fallbackUnits}.`
@@ -5225,6 +5278,7 @@ app.post("/market/sell", auth, asyncHandler(async (req, res) => {
       player.inventory[product.id] -= qty;
       player.profile.cash += sale.total;
       player.stats.totalEarned += sale.total;
+      player.stats.marketGoodsSold += qty;
       pushLog(player, `Sprzedano ${qty}x ${product.name} za $${sale.total}. Towar zasila uliczna podaz.`);
       return null;
     });
@@ -5272,6 +5326,7 @@ app.post("/bank/deposit", auth, asyncHandler(async (req, res) => {
     await commitPlayerMutation(req, "bank-deposit", async (player) => {
       player.profile.cash -= totalCost;
       player.profile.bank += amount;
+      player.stats.bankDepositedTotal += amount;
       pushLog(player, `Wplacono do banku $${amount}.`);
       return null;
     });

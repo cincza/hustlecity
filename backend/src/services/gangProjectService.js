@@ -432,6 +432,7 @@ export function contributeGangVaultForPlayer(player, amount, now = Date.now()) {
 
   player.profile.cash = Number(player.profile.cash || 0) - safeAmount;
   player.gang.vault = Math.max(0, Number(player.gang.vault || 0) + safeAmount);
+  player.stats.gangVaultContributed = Math.max(0, Number(player.stats?.gangVaultContributed || 0)) + safeAmount;
   player.gang = incrementGangGoalProgress(player.gang, "projectInvestments", 1, now);
   player.gang = recordGangJobProgress(player.gang, "vaultContributed", safeAmount, now).gang;
 
