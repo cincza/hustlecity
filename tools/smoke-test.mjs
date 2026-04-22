@@ -1105,6 +1105,15 @@ async function main() {
     }
 
     const dealerTradeStartingSmokes = Number(fightClubResult?.user?.drugInventory?.smokes || 0);
+    const dealerStockBeforeTrade = Number(fightClubResult?.user?.dealerInventory?.smokes || 0);
+    const observerDealerSnapshotBefore = await request("/market", {
+      token: rivalRegister.token,
+    });
+
+    if (Number(observerDealerSnapshotBefore?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade) {
+      throw new Error("Drugi gracz nie widzi tego samego stocku dilera przed transakcja.");
+    }
+
     const boughtDealerBatch = await request("/dealer/buy", {
       method: "POST",
       token,
@@ -1113,6 +1122,17 @@ async function main() {
 
     if (Number(boughtDealerBatch?.user?.drugInventory?.smokes || 0) !== dealerTradeStartingSmokes + 3) {
       throw new Error("Dealer buy x3 nie dodal pelnej ilosci towaru.");
+    }
+    if (Number(boughtDealerBatch?.user?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade - 3) {
+      throw new Error("Dealer buy x3 nie odjal wspolnego stocku.");
+    }
+
+    const observerDealerSnapshotAfterBuy = await request("/market", {
+      token: rivalRegister.token,
+    });
+
+    if (Number(observerDealerSnapshotAfterBuy?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade - 3) {
+      throw new Error("Drugi gracz nie widzi wspolnego stanu dilera po kupnie.");
     }
 
     const consumeResult = await request("/dealer/consume", {
@@ -1143,6 +1163,17 @@ async function main() {
 
     if (Number(soldDealerBatch?.user?.drugInventory?.smokes || 0) !== smokesAfterConsume - 2) {
       throw new Error("Dealer sell x2 nie odjal poprawnej ilosci towaru.");
+    }
+    if (Number(soldDealerBatch?.user?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade - 1) {
+      throw new Error("Dealer sell x2 nie oddal wspolnego stocku.");
+    }
+
+    const observerDealerSnapshotAfterSell = await request("/market", {
+      token: rivalRegister.token,
+    });
+
+    if (Number(observerDealerSnapshotAfterSell?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade - 1) {
+      throw new Error("Drugi gracz nie widzi wspolnego stanu dilera po sprzedazy.");
     }
 
     const friendResult = await request(`/social/friends/${firstAttackTarget.id}`, {

@@ -47,6 +47,12 @@ import {
   saveUserPlayerData,
 } from "./repositories/userRepository.js";
 import {
+  getWorldState,
+  initWorldStateStore,
+  resetWorldState,
+  saveDealerInventory,
+} from "./repositories/worldStateRepository.js";
+import {
   logMutationFailure,
   logMutationSuccess,
 } from "./services/actionLogService.js";
@@ -182,7 +188,6 @@ import { logError, logInfo, logWarn } from "./utils/logger.js";
 import {
   CLUB_MARKET,
   createClubState,
-  createDealerInventory,
   createDrugCounterMap,
   createOnlineSocialState,
   findClubVenueById,
@@ -468,7 +473,6 @@ function createInitialPlayerData(username = "gracz") {
     inventory: Object.fromEntries(MARKET_PRODUCTS.map((item) => [item.id, 0])),
     activeBoosts: [],
     drugInventory: createDrugCounterMap(),
-    dealerInventory: createDealerInventory(),
     cooldowns: {
       heists: {},
       casinoActionUntil: 0,
@@ -527,13 +531,16 @@ function createAdminPlayerData() {
 
 const state = {
   activeUsers: new Map(),
+  dealerInventory: {},
   market: createMarketState(),
   routeRateLimit: new Map(),
   actionLocks: new Map(),
 };
 
 await initUserStore();
+await initWorldStateStore();
 await deleteUserByLogin("boss");
+state.dealerInventory = normalizeDealerInventory((await getWorldState())?.dealerInventory);
 
 const existingAdmin = await findUserByLogin(ADMIN_ACCOUNT.username);
 if (!existingAdmin) {
@@ -600,7 +607,9 @@ function ensurePlayerExtendedState(player) {
     ? Number(player.profile.criticalProtectionUntil)
     : null;
   player.drugInventory = normalizeDrugInventory(player.drugInventory);
-  player.dealerInventory = normalizeDealerInventory(player.dealerInventory);
+  if ("dealerInventory" in player) {
+    delete player.dealerInventory;
+  }
   if (!player.online || typeof player.online !== "object" || Array.isArray(player.online)) {
     player.online = createOnlineSocialState();
   } else {
@@ -704,6 +713,23 @@ function getActiveUserCount(now = Date.now()) {
 function isUserOnline(userId, now = Date.now()) {
   const lastSeenAt = state.activeUsers.get(userId) || 0;
   return now - lastSeenAt <= 30 * 60 * 1000;
+}
+
+function getSharedDealerInventory() {
+  state.dealerInventory = normalizeDealerInventory(state.dealerInventory);
+  return state.dealerInventory;
+}
+
+async function persistSharedDealerInventory() {
+  const safeDealerInventory = normalizeDealerInventory(state.dealerInventory);
+  try {
+    await saveDealerInventory(safeDealerInventory);
+  } catch (error) {
+    logWarn("dealer", "persist-shared-inventory-failed", {
+      reason: error?.message || "unknown",
+    });
+  }
+  return safeDealerInventory;
 }
 
 function buildDirectoryEntry(userRecord, now = Date.now()) {
@@ -1554,6 +1580,7 @@ function logHeistEvent(message, level = "log") {
 function publicPlayer(player, now = Date.now()) {
   syncPlayerState(player, now);
   const isAdmin = isAdminUsername(player?.username || player?.profile?.name);
+  const dealerInventory = getSharedDealerInventory();
   return {
     id: player.id,
     username: player.username,
@@ -1562,7 +1589,7 @@ function publicPlayer(player, now = Date.now()) {
     inventory: player.inventory,
     activeBoosts: player.activeBoosts,
     drugInventory: player.drugInventory,
-    dealerInventory: player.dealerInventory,
+    dealerInventory,
     escortsOwned: player.escortsOwned,
     gang: player.gang,
     city: player.city,
@@ -1907,6 +1934,7 @@ app.post("/reset-game", asyncHandler(async (req, res) => {
   state.routeRateLimit.clear();
   state.actionLocks.clear();
   state.market = createMarketState();
+  state.dealerInventory = normalizeDealerInventory((await resetWorldState())?.dealerInventory);
 
   console.log(
     `[reset-game] cleared runtime data :: users=${usersCleared}, globalChat=${globalChatCleared}, prisonChat=${prisonChatCleared}`
@@ -2063,6 +2091,7 @@ app.get("/me", auth, asyncHandler(async (req, res) => {
     ...(await buildPlayerEnvelope(req.player, now)),
     market: marketView.prices,
     marketState: marketView.products,
+    dealerInventory: getSharedDealerInventory(),
     heists: HEIST_DEFINITIONS,
     economy: {
       version: ECONOMY_RULES.version,
@@ -3299,6 +3328,7 @@ app.post("/fightclub/round", auth, asyncHandler(async (req, res) => {
 }));
 
 app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
   const drugId = String(req.body?.drugId || "").trim();
   const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
     min: 1,
@@ -3311,12 +3341,23 @@ app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
   }
   let result = null;
 
-  await withPlayerActionLock(req, "dealer-buy", async () => {
+  await withUserMutationLocks([req.user.id, "dealer:global"], "dealer-buy", async () => {
+    let nextDealerInventory = null;
     await commitPlayerMutation(req, "dealer-buy", async (player) => {
-      result = buyDrugFromDealerForPlayer(player, drugId, parsedQuantity.value);
+      result = buyDrugFromDealerForPlayer(
+        player,
+        { ...getSharedDealerInventory() },
+        drugId,
+        parsedQuantity.value
+      );
+      nextDealerInventory = result?.dealerInventory || null;
       pushLog(player, result.logMessage);
       return null;
     });
+    if (nextDealerInventory) {
+      state.dealerInventory = normalizeDealerInventory(nextDealerInventory);
+      await persistSharedDealerInventory();
+    }
   });
 
   logInfo("dealer", "buy", {
@@ -3328,12 +3369,13 @@ app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
   });
 
   res.json({
-    user: publicPlayer(req.player),
+    user: publicPlayer(req.player, now),
     result,
   });
 }));
 
 app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
   const drugId = String(req.body?.drugId || "").trim();
   const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
     min: 1,
@@ -3346,12 +3388,23 @@ app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
   }
   let result = null;
 
-  await withPlayerActionLock(req, "dealer-sell", async () => {
+  await withUserMutationLocks([req.user.id, "dealer:global"], "dealer-sell", async () => {
+    let nextDealerInventory = null;
     await commitPlayerMutation(req, "dealer-sell", async (player) => {
-      result = sellDrugToDealerForPlayer(player, drugId, parsedQuantity.value);
+      result = sellDrugToDealerForPlayer(
+        player,
+        { ...getSharedDealerInventory() },
+        drugId,
+        parsedQuantity.value
+      );
+      nextDealerInventory = result?.dealerInventory || null;
       pushLog(player, result.logMessage);
       return null;
     });
+    if (nextDealerInventory) {
+      state.dealerInventory = normalizeDealerInventory(nextDealerInventory);
+      await persistSharedDealerInventory();
+    }
   });
 
   logInfo("dealer", "sell", {
@@ -3363,7 +3416,7 @@ app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
   });
 
   res.json({
-    user: publicPlayer(req.player),
+    user: publicPlayer(req.player, now),
     result,
   });
 }));
@@ -4825,6 +4878,7 @@ app.get("/market", auth, asyncHandler(async (req, res) => {
     products: MARKET_PRODUCTS,
     prices: marketView.prices,
     supply: marketView.products,
+    dealerInventory: getSharedDealerInventory(),
     refreshedAt: marketView.refreshedAt,
     sellRate: ECONOMY_RULES.market.sellRate,
     npcFallbackMarkup: ECONOMY_RULES.market.npcFallbackMarkup,

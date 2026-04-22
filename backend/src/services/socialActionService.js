@@ -13,7 +13,6 @@ import {
   PLAYER_BOUNTY_COST,
   PLAYER_BOUNTY_INCREMENT,
   clampSocialValue,
-  createDealerInventory,
   createDrugCounterMap,
   createOnlineSocialState,
   findClubVenueById,
@@ -28,6 +27,7 @@ import {
   getDealerPayoutForDrug,
   hasClubGuestAccess,
   getLeadTargetEscortForVenue,
+  normalizeDealerInventory,
   normalizeClubState,
 } from "../../../shared/socialGameplay.js";
 import { applyCriticalCareDamage, assertPlayerNotInCriticalCare } from "./criticalCareService.js";
@@ -64,9 +64,6 @@ function ensurePlayerSocialState(player) {
   }
   if (!player.drugInventory || typeof player.drugInventory !== "object" || Array.isArray(player.drugInventory)) {
     player.drugInventory = createDrugCounterMap();
-  }
-  if (!player.dealerInventory || typeof player.dealerInventory !== "object" || Array.isArray(player.dealerInventory)) {
-    player.dealerInventory = createDealerInventory();
   }
   if (!Array.isArray(player.escortsOwned)) {
     player.escortsOwned = [];
@@ -161,8 +158,9 @@ export function fightClubRoundForPlayer(player, now = Date.now()) {
   };
 }
 
-export function buyDrugFromDealerForPlayer(player, drugId, quantity = 1) {
+export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quantity = 1) {
   ensurePlayerSocialState(player);
+  const safeDealerInventory = normalizeDealerInventory(dealerInventory);
   const drug = findDrugById(drugId);
   const safeQuantity = Math.max(1, Math.floor(Number(quantity || 1)));
   if (!drug) {
@@ -171,7 +169,7 @@ export function buyDrugFromDealerForPlayer(player, drugId, quantity = 1) {
   if (Number(player.profile?.respect || 0) < Number(drug.unlockRespect || 0)) {
     fail(`Diler puszcza ${drug.name} dopiero od ${drug.unlockRespect} szacunu.`);
   }
-  if (Number(player.dealerInventory?.[drug.id] || 0) < safeQuantity) {
+  if (Number(safeDealerInventory?.[drug.id] || 0) < safeQuantity) {
     fail(`Diler nie ma tyle ${drug.name} na stanie.`);
   }
   const totalPrice = Number(drug.streetPrice || 0) * safeQuantity;
@@ -181,19 +179,21 @@ export function buyDrugFromDealerForPlayer(player, drugId, quantity = 1) {
 
   player.profile.cash = Number(player.profile.cash || 0) - totalPrice;
   player.drugInventory[drug.id] = Number(player.drugInventory?.[drug.id] || 0) + safeQuantity;
-  player.dealerInventory[drug.id] = Math.max(0, Number(player.dealerInventory?.[drug.id] || 0) - safeQuantity);
+  safeDealerInventory[drug.id] = Math.max(0, Number(safeDealerInventory?.[drug.id] || 0) - safeQuantity);
 
   return {
     drug,
     quantity: safeQuantity,
     price: Number(drug.streetPrice || 0),
     totalPrice,
+    dealerInventory: safeDealerInventory,
     logMessage: `Kupiles od dilera: ${drug.name} x${safeQuantity} za $${totalPrice}.`,
   };
 }
 
-export function sellDrugToDealerForPlayer(player, drugId, quantity = 1) {
+export function sellDrugToDealerForPlayer(player, dealerInventory, drugId, quantity = 1) {
   ensurePlayerSocialState(player);
+  const safeDealerInventory = normalizeDealerInventory(dealerInventory);
   const drug = findDrugById(drugId);
   const safeQuantity = Math.max(1, Math.floor(Number(quantity || 1)));
   if (!drug) {
@@ -207,7 +207,7 @@ export function sellDrugToDealerForPlayer(player, drugId, quantity = 1) {
   const payout = payoutPerUnit * safeQuantity;
   player.profile.cash = Number(player.profile.cash || 0) + payout;
   player.drugInventory[drug.id] = Math.max(0, Number(player.drugInventory?.[drug.id] || 0) - safeQuantity);
-  player.dealerInventory[drug.id] = Number(player.dealerInventory?.[drug.id] || 0) + safeQuantity;
+  safeDealerInventory[drug.id] = Number(safeDealerInventory?.[drug.id] || 0) + safeQuantity;
   player.stats.totalEarned = Number(player.stats?.totalEarned || 0) + payout;
 
   return {
@@ -215,6 +215,7 @@ export function sellDrugToDealerForPlayer(player, drugId, quantity = 1) {
     quantity: safeQuantity,
     payoutPerUnit,
     payout,
+    dealerInventory: safeDealerInventory,
     logMessage: `Sprzedales dilerowi ${drug.name} x${safeQuantity} za $${payout}.`,
   };
 }

@@ -1108,6 +1108,7 @@ function nowTimeLabel() {
 function normalizeMarketPayload(payload, fallbackMarket, fallbackState, fallbackMeta) {
   if (!payload) {
     return {
+      dealerInventory: null,
       market: fallbackMarket,
       marketState: fallbackState,
       marketMeta: fallbackMeta,
@@ -1120,6 +1121,10 @@ function normalizeMarketPayload(payload, fallbackMarket, fallbackState, fallback
     fallbackState;
 
   return {
+    dealerInventory:
+      payload.dealerInventory && typeof payload.dealerInventory === "object" && !Array.isArray(payload.dealerInventory)
+        ? payload.dealerInventory
+        : null,
     market: payload.prices || payload.market || fallbackMarket,
     marketState: nextMarketState,
     marketMeta: {
@@ -2391,6 +2396,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setGame((prev) => ({
       ...prev,
       ...normalizeMarketPayload(marketSnapshot, prev.market, prev.marketState, prev.marketMeta),
+      dealerInventory:
+        marketSnapshot?.dealerInventory && typeof marketSnapshot.dealerInventory === "object"
+          ? { ...prev.dealerInventory, ...marketSnapshot.dealerInventory }
+          : prev.dealerInventory,
     }));
   };
 
@@ -5127,7 +5136,6 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }));
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - dealer stock and buy pricing must be centrally controlled to prevent client exploits
   const buyDrugFromDealer = async (drug, quantityOverride) => {
     if (!canDoStreetAction()) return;
     const parsedQuantity = Number.parseInt(String(quantityOverride ?? dealerTradeDraft).replace(/[^\d]/g, ""), 10);
@@ -5157,7 +5165,6 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }));
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - dealer sell-back and stock refill loop must be validated on backend
   const sellDrugToDealer = async (drug, quantityOverride) => {
     if (!canDoStreetAction()) return;
     const parsedQuantity = Number.parseInt(String(quantityOverride ?? dealerTradeDraft).replace(/[^\d]/g, ""), 10);
