@@ -1,5 +1,6 @@
 ﻿import crypto from "node:crypto";
 import path from "node:path";
+import http from "node:http";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
@@ -185,6 +186,7 @@ import {
   verifyAuthToken,
 } from "./middleware/auth.js";
 import { logError, logInfo, logWarn } from "./utils/logger.js";
+import { createRealtimeServer } from "./realtimeServer.js";
 import {
   CLUB_MARKET,
   createClubState,
@@ -225,8 +227,13 @@ dotenv.config({
 });
 
 const app = express();
+const server = http.createServer(app);
 const port = process.env.PORT || 4000;
 const host = process.env.HOST || "0.0.0.0";
+const realtime = createRealtimeServer({
+  server,
+  findUserById,
+});
 const allowedOriginsFromEnv = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((entry) => entry.trim())
@@ -1261,10 +1268,53 @@ async function persistPlayerForUser(userId, playerData) {
     throw new Error("Cannot persist empty player data");
   }
   const updated = await saveUserPlayerData(userId, playerData);
+  realtime.syncUserRecord(updated);
   if (VERBOSE_SERVER_LOGS) {
     console.log(`[persist] saved player state for ${userId}`);
   }
   return updated;
+}
+
+function emitProfileRealtimeUpdate(userIds, reason) {
+  realtime.notifyUsersInvalidation(userIds, ["profile"], { reason });
+}
+
+function emitSocialRealtimeUpdate(reason) {
+  realtime.broadcastInvalidation(["social"], { reason });
+}
+
+function emitMarketRealtimeUpdate(reason) {
+  realtime.broadcastInvalidation(["market"], { reason });
+}
+
+function emitClubRealtimeUpdate({ userIds = [], clubIds = [], reason = "club.update" } = {}) {
+  emitProfileRealtimeUpdate(userIds, reason);
+  const safeClubIds = Array.from(
+    new Set(
+      (Array.isArray(clubIds) ? clubIds : [clubIds])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+  safeClubIds.forEach((clubId) => {
+    realtime.notifyClubInvalidation(clubId, ["club"], { reason });
+  });
+  realtime.broadcastInvalidation(["club"], { reason });
+}
+
+function emitGangRealtimeUpdate({ userIds = [], gangNames = [], reason = "gang.update" } = {}) {
+  emitProfileRealtimeUpdate(userIds, reason);
+  const safeGangNames = Array.from(
+    new Set(
+      (Array.isArray(gangNames) ? gangNames : [gangNames])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+  safeGangNames.forEach((gangName) => {
+    realtime.notifyGangInvalidation(gangName, ["gang"], { reason });
+  });
+  emitSocialRealtimeUpdate(reason);
 }
 
 function enforceRateLimit(req, res, scope, minIntervalMs, message) {
@@ -2547,6 +2597,8 @@ app.post("/social/players/:id/attack", auth, asyncHandler(async (req, res) => {
       steal,
       damage,
     });
+    emitProfileRealtimeUpdate([attackerRecord._id, targetRecord._id], "social.player.attack");
+    emitSocialRealtimeUpdate("social.player.attack");
 
     res.json({
       user: publicPlayer(req.player, now),
@@ -3367,6 +3419,8 @@ app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
     price: result?.price || 0,
     totalPrice: result?.totalPrice || 0,
   });
+  emitProfileRealtimeUpdate([req.user.id], "dealer.buy");
+  emitMarketRealtimeUpdate("dealer.buy");
 
   res.json({
     user: publicPlayer(req.player, now),
@@ -3414,6 +3468,8 @@ app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
     payoutPerUnit: result?.payoutPerUnit || 0,
     payout: result?.payout || 0,
   });
+  emitProfileRealtimeUpdate([req.user.id], "dealer.sell");
+  emitMarketRealtimeUpdate("dealer.sell");
 
   res.json({
     user: publicPlayer(req.player, now),
@@ -3431,6 +3487,7 @@ app.post("/dealer/consume", auth, asyncHandler(async (req, res) => {
       pushLog(player, result.logMessage);
     });
   });
+  emitProfileRealtimeUpdate([req.user.id], "dealer.consume");
 
   res.json({
     user: publicPlayer(req.player),
@@ -3504,6 +3561,11 @@ app.post("/clubs/visit", auth, asyncHandler(async (req, res) => {
     const [updatedActorRecord] = await Promise.all(persistTasks);
     req.userRecord = updatedActorRecord;
     req.player = updatedActorRecord?.playerData || actor;
+  });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id, ownerUserId].filter(Boolean),
+    clubIds: [venueId, req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: `clubs.visit.${mode || "enter"}`,
   });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
@@ -3587,6 +3649,11 @@ app.post("/clubs/action", auth, asyncHandler(async (req, res) => {
     actionId,
     outcome: result?.outcome || "unknown",
   });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id, ownerUserId].filter(Boolean),
+    clubIds: [venueId, req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: `clubs.action.${actionId}`,
+  });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3659,6 +3726,11 @@ app.post("/clubs/search-escort", auth, asyncHandler(async (req, res) => {
     venueId,
     outcome: result?.outcome || "unknown",
   });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id, ownerUserId].filter(Boolean),
+    clubIds: [venueId, req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.search-escort",
+  });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3692,6 +3764,11 @@ app.post("/clubs/claim", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [venueId, req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.claim",
+  });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3705,6 +3782,11 @@ app.post("/clubs/found", auth, asyncHandler(async (req, res) => {
       pushLog(player, result.logMessage);
       return null;
     });
+  });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.found",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3721,6 +3803,11 @@ app.post("/clubs/plan", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.plan",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -3734,6 +3821,11 @@ app.post("/clubs/settings", auth, asyncHandler(async (req, res) => {
       pushLog(player, result.logMessage);
       return null;
     });
+  });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.settings",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3766,6 +3858,11 @@ app.post("/clubs/stash/move", auth, asyncHandler(async (req, res) => {
     drugId,
     quantity: result?.quantity || parsedQuantity.value,
     stashCount: result?.stashCount || 0,
+  });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.stash.move",
   });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
@@ -3822,6 +3919,11 @@ app.post("/clubs/stash/consume", auth, asyncHandler(async (req, res) => {
     overdose: Boolean(result?.overdose),
     stashCount: Number(result?.stashCount || 0),
   });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id, ownerUserId].filter(Boolean),
+    clubIds: [venueId, req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.stash.consume",
+  });
 
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3836,6 +3938,11 @@ app.post("/clubs/night", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.night",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -3848,6 +3955,11 @@ app.post("/clubs/safe/collect", auth, asyncHandler(async (req, res) => {
       pushLog(player, result.logMessage);
       return null;
     });
+  });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.safe.collect",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3862,6 +3974,11 @@ app.post("/clubs/fortify", auth, asyncHandler(async (req, res) => {
       pushLog(player, `${result.logMessage} Koszt ${result.cost}$.`);
       return null;
     });
+  });
+  emitClubRealtimeUpdate({
+    userIds: [req.user.id],
+    clubIds: [req.player?.club?.sourceId, req.player?.club?.visitId].filter(Boolean),
+    reason: "clubs.fortify",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3884,6 +4001,11 @@ app.post("/gang/create", auth, asyncHandler(async (req, res) => {
       pushLog(player, result.logMessage);
       return null;
     });
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.create",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -3920,11 +4042,17 @@ app.post("/gang/join", auth, asyncHandler(async (req, res) => {
       return null;
     });
   });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name, invitePayload?.gangName].filter(Boolean),
+    reason: "gang.join",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
 app.post("/gang/leave", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
+  const previousGangName = String(req.player?.gang?.name || "").trim();
   let result = null;
   await withPlayerActionLock(req, "gang-leave", async () => {
     await commitPlayerMutation(req, "gang-leave", async (player) => {
@@ -3932,6 +4060,11 @@ app.post("/gang/leave", auth, asyncHandler(async (req, res) => {
       pushLog(player, result.logMessage);
       return null;
     });
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [previousGangName].filter(Boolean),
+    reason: "gang.leave",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4043,6 +4176,11 @@ app.post("/gang/invite", auth, asyncHandler(async (req, res) => {
     };
   });
 
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id, targetUserId],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.invite",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result, target: targetSnapshot }));
 }));
 
@@ -4119,6 +4257,11 @@ app.post("/gang/alliance", auth, asyncHandler(async (req, res) => {
     req.player = updatedActorRecord?.playerData || actorRecord.playerData;
   });
 
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id, actorBossUserId, targetBossUserId].filter(Boolean),
+    gangNames: [req.player?.gang?.name, targetGangName].filter(Boolean),
+    reason: "gang.alliance",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -4249,6 +4392,16 @@ app.post("/gang/pvp/attack", auth, asyncHandler(async (req, res) => {
     req.player = updatedActorRecord?.playerData || actorRecord.playerData;
   });
 
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id, actorBossUserId, targetBossUserId].filter(Boolean),
+    gangNames: [actorGang?.name, targetGang?.name].filter(Boolean),
+    reason: "gang.pvp.attack",
+  });
+  emitClubRealtimeUpdate({
+    userIds: [targetBossUserId].filter(Boolean),
+    clubIds: [targetBossUserId ? (await findUserById(targetBossUserId))?.playerData?.club?.sourceId : null].filter(Boolean),
+    reason: "gang.pvp.attack",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -4263,6 +4416,11 @@ app.post("/gang/settings", auth, asyncHandler(async (req, res) => {
       syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.settings",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4381,6 +4539,11 @@ app.post("/gang/members/role", auth, asyncHandler(async (req, res) => {
     req.player = updatedActorRecord?.playerData || actor;
   });
 
+  emitGangRealtimeUpdate({
+    userIds: affectedUserIds,
+    gangNames: [gangName],
+    reason: "gang.members.role",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -4492,6 +4655,11 @@ app.post("/gang/delete", auth, asyncHandler(async (req, res) => {
     };
   });
 
+  emitGangRealtimeUpdate({
+    userIds: affectedUserIds,
+    gangNames: [gangName],
+    reason: "gang.delete",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -4507,6 +4675,11 @@ app.post("/gang/tribute", auth, asyncHandler(async (req, res) => {
       syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.tribute",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4524,6 +4697,11 @@ app.post("/gang/focus", auth, asyncHandler(async (req, res) => {
     });
     pushLog(actorEntry.player, result.logMessage);
   });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.focus",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -4539,6 +4717,11 @@ app.post("/gang/projects/invest", auth, asyncHandler(async (req, res) => {
       syncSharedGangPatchToPlayer(entry.player, sharedPatch, entries.length, now);
     });
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.projects.invest",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4556,6 +4739,11 @@ app.post("/gang/goals/claim", auth, asyncHandler(async (req, res) => {
     });
     pushLog(actorEntry.player, result.logMessage);
   });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.goals.claim",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
 
@@ -4566,6 +4754,11 @@ app.post("/gang/members/upgrade", auth, asyncHandler(async (req, res) => {
     result = upgradeGangCapacityForGang(entries, req.user.id, now);
     const actorEntry = getGangMutationActor(entries, req.user.id, now);
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.members.upgrade",
   });
   res.json(await buildPlayerEnvelope(req.player, now, { result }));
 }));
@@ -4585,6 +4778,11 @@ app.post("/gang/heists/:id/open", auth, asyncHandler(async (req, res) => {
     result = openGangHeistLobbyForGang(entries, req.user.id, heist.id, note, now);
     const actorEntry = getGangMutationActor(entries, req.user.id, now);
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.heists.open",
   });
   res.json(await buildPlayerEnvelope(req.player, now, {
     result,
@@ -4606,6 +4804,11 @@ app.post("/gang/heists/:id/join", auth, asyncHandler(async (req, res) => {
     const actorEntry = getGangMutationActor(entries, req.user.id, now);
     pushLog(actorEntry.player, result.logMessage);
   });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.heists.join",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, {
     result,
     gangHeists: GANG_HEISTS,
@@ -4625,6 +4828,11 @@ app.post("/gang/heists/:id/leave", auth, asyncHandler(async (req, res) => {
     result = leaveGangHeistLobbyForGang(entries, req.user.id, now);
     const actorEntry = getGangMutationActor(entries, req.user.id, now);
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.heists.leave",
   });
   res.json(await buildPlayerEnvelope(req.player, now, {
     result,
@@ -4646,6 +4854,11 @@ app.post("/gang/heists/:id/start", auth, asyncHandler(async (req, res) => {
     const actorEntry = getGangMutationActor(entries, req.user.id, now);
     pushLog(actorEntry.player, result.logMessage);
   });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.heists.start",
+  });
   res.json(await buildPlayerEnvelope(req.player, now, {
     result,
     gangHeists: GANG_HEISTS,
@@ -4660,6 +4873,11 @@ app.post("/gang/heists/rescue", auth, asyncHandler(async (req, res) => {
     result = rescueGangHeistCrewForGang(entries, req.user.id, optionId, now);
     const actorEntry = getGangMutationActor(entries, req.user.id, now);
     pushLog(actorEntry.player, result.logMessage);
+  });
+  emitGangRealtimeUpdate({
+    userIds: [req.user.id],
+    gangNames: [req.player?.gang?.name].filter(Boolean),
+    reason: "gang.heists.rescue",
   });
   res.json(await buildPlayerEnvelope(req.player, now, {
     result,
@@ -5619,7 +5837,7 @@ app.use((error, _req, res, _next) => {
   sendError(res, error?.message || "Internal server error", error?.statusCode || 500);
 });
 
-app.listen(port, host, () => {
+server.listen(port, host, () => {
   logInfo("api", "server-started", {
     host,
     port,

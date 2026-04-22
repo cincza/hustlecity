@@ -139,6 +139,8 @@ import { ProfileMenuScreen } from "./src/screens/ProfileMenuScreen";
 import { HeistsScreen } from "./src/screens/HeistsScreen";
 import { HeroPanel } from "./src/components/GameScreenPrimitives";
 import { GameHeader, QuickActionModal, ResultModal } from "./src/components/GameShellUI";
+import { createRealtimeClient } from "./src/game/realtime/client";
+import { handleRealtimeInvalidationEvent } from "./src/game/realtime/handlers";
 import { BUSINESSES } from "./src/game/config/businesses";
 import { blockIfOnlineAlpha } from "./src/game/authority";
 import { getGameMode } from "./src/game/modes";
@@ -1877,6 +1879,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   const lastExplicitNoticeAtRef = useRef(0);
   const handledNoticeLogsRef = useRef(new Map());
   const didHydrateSessionRef = useRef(false);
+  const realtimeClientRef = useRef(null);
+  const realtimeEventHandlerRef = useRef(null);
+  const sessionTokenRef = useRef(null);
+  const gameSnapshotRef = useRef(INITIAL);
+  const uiSnapshotRef = useRef({ tab: "heists", activeSectionId: "solo" });
   const previousCriticalCareStateRef = useRef({ active: false, protected: false });
   const [gangProfileView, setGangProfileView] = useState("actions");
   const [casinoState, setCasinoState] = useState(createInitialCasinoState);
@@ -1908,6 +1915,9 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     activeTab.sections.find((entry) => entry.id === requestedSectionId) || activeTab.sections[0];
   const activeSectionId = activeSection.id;
   const visibleSections = activeTab.sections.filter((entry) => !entry.hidden);
+  sessionTokenRef.current = sessionToken;
+  gameSnapshotRef.current = game;
+  uiSnapshotRef.current = { tab, activeSectionId };
 
   const trimHandledNoticeLogs = (now = Date.now()) => {
     handledNoticeLogsRef.current.forEach((handledAt, entry) => {
@@ -2552,6 +2562,20 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }
   };
 
+  realtimeEventHandlerRef.current = (event) =>
+    handleRealtimeInvalidationEvent(event, {
+      token: sessionTokenRef.current,
+      ui: uiSnapshotRef.current,
+      game: gameSnapshotRef.current,
+      refreshProfile: refreshProfileState,
+      refreshMarket: refreshMarketState,
+      refreshSocial: refreshSocialState,
+      refreshContracts: refreshContractBoardState,
+      refreshHeists: refreshHeistsState,
+      refreshCasino: refreshCasinoState,
+      refreshPrison: refreshPrisonChatState,
+    }).catch(() => {});
+
     const hydrateAuthenticatedSession = async (token) => {
       if (typeof token !== "string" || !token.trim()) {
         throw new Error("Brak poprawnego tokena sesji.");
@@ -2694,6 +2718,27 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionToken || apiStatus !== "online") {
+      realtimeClientRef.current?.close?.();
+      realtimeClientRef.current = null;
+      return undefined;
+    }
+
+    const client = createRealtimeClient({
+      token: sessionToken,
+      onEvent: (event) => realtimeEventHandlerRef.current?.(event),
+    });
+    realtimeClientRef.current = client;
+
+    return () => {
+      client.close();
+      if (realtimeClientRef.current === client) {
+        realtimeClientRef.current = null;
+      }
+    };
+  }, [sessionToken, apiStatus]);
 
   useEffect(() => {
     if (!sessionToken || apiStatus !== "online") return undefined;

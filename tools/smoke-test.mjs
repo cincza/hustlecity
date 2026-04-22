@@ -57,6 +57,70 @@ async function request(pathname, { method = "GET", token, body } = {}) {
   return data;
 }
 
+function buildRealtimeUrl(token) {
+  const url = new URL(BASE_URL);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/realtime";
+  url.searchParams.set("token", String(token || "").trim());
+  return url.toString();
+}
+
+async function openRealtimeSocket(token, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(buildRealtimeUrl(token));
+    const timeout = setTimeout(() => {
+      try {
+        socket.close();
+      } catch (_error) {}
+      reject(new Error("Realtime socket nie polaczyl sie na czas."));
+    }, timeoutMs);
+
+    socket.onopen = () => {
+      clearTimeout(timeout);
+      resolve(socket);
+    };
+
+    socket.onerror = () => {
+      clearTimeout(timeout);
+      reject(new Error("Realtime socket zwrocil blad przy laczeniu."));
+    };
+  });
+}
+
+async function waitForRealtimeEvent(socket, predicate, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Realtime event nie przyszedl na czas."));
+    }, timeoutMs);
+
+    const handleMessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event?.data || "{}"));
+        if (!predicate(payload)) {
+          return;
+        }
+        cleanup();
+        resolve(payload);
+      } catch (_error) {}
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.removeEventListener?.("message", handleMessage);
+      if (socket.onmessage === handleMessage) {
+        socket.onmessage = null;
+      }
+    };
+
+    if (typeof socket.addEventListener === "function") {
+      socket.addEventListener("message", handleMessage);
+      return;
+    }
+    socket.onmessage = handleMessage;
+  });
+}
+
 async function expectRequestFailure(pathname, options = {}, pattern) {
   try {
     await request(pathname, options);
@@ -1109,16 +1173,22 @@ async function main() {
     const observerDealerSnapshotBefore = await request("/market", {
       token: rivalRegister.token,
     });
+    const dealerRealtimeSocket = await openRealtimeSocket(rivalRegister.token);
 
     if (Number(observerDealerSnapshotBefore?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade) {
       throw new Error("Drugi gracz nie widzi tego samego stocku dilera przed transakcja.");
     }
 
+    const dealerBuyRealtimeEvent = waitForRealtimeEvent(
+      dealerRealtimeSocket,
+      (event) => event?.type === "state.invalidate" && Array.isArray(event?.scopes) && event.scopes.includes("market")
+    );
     const boughtDealerBatch = await request("/dealer/buy", {
       method: "POST",
       token,
       body: { drugId: "smokes", quantity: 3 },
     });
+    await dealerBuyRealtimeEvent;
 
     if (Number(boughtDealerBatch?.user?.drugInventory?.smokes || 0) !== dealerTradeStartingSmokes + 3) {
       throw new Error("Dealer buy x3 nie dodal pelnej ilosci towaru.");
@@ -1155,11 +1225,16 @@ async function main() {
       throw new Error("Dealer consume nie odjal jednej sztuki towaru.");
     }
 
+    const dealerSellRealtimeEvent = waitForRealtimeEvent(
+      dealerRealtimeSocket,
+      (event) => event?.type === "state.invalidate" && Array.isArray(event?.scopes) && event.scopes.includes("market")
+    );
     const soldDealerBatch = await request("/dealer/sell", {
       method: "POST",
       token,
       body: { drugId: "smokes", quantity: 2 },
     });
+    await dealerSellRealtimeEvent;
 
     if (Number(soldDealerBatch?.user?.drugInventory?.smokes || 0) !== smokesAfterConsume - 2) {
       throw new Error("Dealer sell x2 nie odjal poprawnej ilosci towaru.");
@@ -1175,6 +1250,7 @@ async function main() {
     if (Number(observerDealerSnapshotAfterSell?.dealerInventory?.smokes || 0) !== dealerStockBeforeTrade - 1) {
       throw new Error("Drugi gracz nie widzi wspolnego stanu dilera po sprzedazy.");
     }
+    dealerRealtimeSocket.close();
 
     const friendResult = await request(`/social/friends/${firstAttackTarget.id}`, {
       method: "POST",
