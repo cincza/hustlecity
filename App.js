@@ -8172,282 +8172,381 @@ const [rankingCategory, setRankingCategory] = useState("respect");
           </View>
         </SectionCard>
       ) : null}
-      <SceneArtwork
-        eyebrow="Organizacja"
-        title={game.gang.joined ? `${game.gang.name}` : "Najpierw wejdz do ukladu"}
-        lines={
-          game.gang.joined
-            ? ["Pilnujesz progu wejscia, ludzi, skarbca i napadow gangu.", "Tu ma sie czuc, ze to organizacja, a nie pojedynczy przycisk."]
-            : ["Zakladasz wlasny gang za gruby hajs albo przyjmujesz zaproszenie od ekipy.", "Po wejsciu odblokowuje sie sklad, operacje i chat gangu."]
-        }
-        accent={["#3d2418", "#17100c", "#050505"]}
-        source={SCENE_BACKGROUNDS.gangWide}
-      />
-      <HeroPanel
-        eyebrow="Gang"
-        title={game.gang.joined ? game.gang.name : "Warstwa meta dla ekipy"}
-        summary={
-          game.gang.joined
-            ? "Najpierw lapiesz stan ekipy: role, sklad, skarbiec, aktywna robote i protektorat klubu. Dopiero nizej schodzisz do szczegolow."
-            : "Tu ma byc od razu jasne czy zakladasz swoj gang, czy lepiej wejsc do zywej ekipy z miasta. Bez zbednych ekranow i pustych kart."
-        }
-        tone={game.gang.joined ? "gold" : "info"}
-        pills={
-          game.gang.joined
-            ? [
-                {
-                  label: "Rola",
-                  value: game.gang.role,
-                  note: `${game.gang.members}/${game.gang.maxMembers} ludzi w ekipie.`,
-                  tone: "gold",
-                  icon: "shield-crown-outline",
-                },
-                {
-                  label: "Skarbiec",
-                  value: formatMoney(game.gang.vault),
-                  note: "Wspolna kasa na projekty i akcje.",
-                  tone: "success",
-                  icon: "bank-outline",
-                },
-                {
-                  label: "Aktywna robota",
-                  value: activeGangHeistDefinition?.name || "Brak lobby",
-                  note: game.gang.protectedClub?.name ? `Chroni ${game.gang.protectedClub.name}.` : "Bez aktywnego protektoratu klubu.",
-                  tone: "danger",
-                  icon: "briefcase-outline",
-                },
-              ]
-            : [
-                {
-                  label: "Zaproszenia",
-                  value: `${game.gang.invites.length}`,
-                  note: "Aktywne wejscia do zywych ekip.",
-                  tone: "info",
-                  icon: "email-outline",
-                },
-                {
-                  label: "Gangi online",
-                  value: `${game.online.gangs.length}`,
-                  note: "Prawdziwe ekipy z miasta.",
-                  tone: "gold",
-                  icon: "account-group-outline",
-                },
-                {
-                  label: "Koszt zalozenia",
-                  value: formatMoney(game.gang.createCost),
-                  note: "Do tego potrzebujesz 15 RES.",
-                  tone: "danger",
-                  icon: "cash-multiple",
-                },
-              ]
-        }
-      />
-      {!game.gang.joined ? (
+      {!selectedGangProfile ? (
         <>
-          <View style={styles.heroBanner}>
-            <Text style={styles.heroBannerTitle}>Brak gangu</Text>
-            <Text style={styles.heroBannerText}>Zakladasz ekipe albo wchodzisz do jednej z nich.</Text>
-          </View>
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Zaloz wlasny gang</Text>
-            <Text style={styles.listCardMeta}>Koszt: {formatMoney(game.gang.createCost)}. Potrzebujesz tez 15 szacunu.</Text>
-            <View style={styles.inlineRow}>
-              <TextInput value={gangDraftName} onChangeText={setGangDraftName} placeholder="Nazwa gangu" placeholderTextColor="#6c6c6c" style={styles.chatInput} />
-              <Pressable onPress={createGang} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Zaloz</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.listCardMeta}>Masz przy sobie: {formatMoney(game.player.cash)}</Text>
-          </View>
-          <SectionCard title="Zaproszenia" subtitle="Wejscie od progu szacunu.">
-            {game.gang.invites.length ? game.gang.invites.map((invite) => (
-              <View key={invite.id} style={styles.listCard}>
-                <View style={styles.inlineRow}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={getGangVisual(invite.gangName)} />
-                    <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{invite.gangName}</Text>
-                    <Text style={styles.listCardMeta}>Boss: {invite.leader} | Ludzie: {invite.members} | Wejscie od {invite.inviteRespectMin} szacunu</Text>
-                    </View>
+          <HeroPanel
+            eyebrow="Gang"
+            title={game.gang.joined ? game.gang.name : "Wejdz do ekipy albo zaloz swoja"}
+            summary={
+              game.gang.joined
+                ? "Szybki stan skladu, skarbca i najwazniejszych wejsc. Reszta siedzi nizej, bez ciezkiego dashboardu."
+                : "Tutaj od razu wiesz, czy lepiej wejsc do zywej ekipy z miasta, czy stawiac swoj sklad od zera."
+            }
+            tone={game.gang.joined ? "gold" : "info"}
+            pills={
+              game.gang.joined
+                ? [
+                    {
+                      label: "Rola",
+                      value: game.gang.role,
+                      note: `${game.gang.members}/${game.gang.maxMembers} ludzi w ekipie.`,
+                      tone: "gold",
+                      icon: "shield-crown-outline",
+                    },
+                    {
+                      label: "Skarbiec",
+                      value: formatMoney(game.gang.vault),
+                      note: "Wspolna kasa na projekty i akcje.",
+                      tone: "success",
+                      icon: "bank-outline",
+                    },
+                    {
+                      label: "Aktywna robota",
+                      value: activeGangHeistDefinition?.name || "Brak lobby",
+                      note: game.gang.protectedClub?.name ? `Chroni ${game.gang.protectedClub.name}.` : "Bez protektoratu klubu.",
+                      tone: "danger",
+                      icon: "briefcase-outline",
+                    },
+                  ]
+                : [
+                    {
+                      label: "Zaproszenia",
+                      value: `${game.gang.invites.length}`,
+                      note: "Aktywne wejscia do ekip.",
+                      tone: "info",
+                      icon: "email-outline",
+                    },
+                    {
+                      label: "Gangi online",
+                      value: `${game.online.gangs.length}`,
+                      note: "Prawdziwe ekipy z miasta.",
+                      tone: "gold",
+                      icon: "account-group-outline",
+                    },
+                    {
+                      label: "Koszt startu",
+                      value: formatMoney(game.gang.createCost),
+                      note: "Do tego potrzebujesz 15 RES.",
+                      tone: "danger",
+                      icon: "cash-multiple",
+                    },
+                  ]
+            }
+            primaryAction={
+              game.gang.joined
+                ? {
+                    label: "Napad gangu",
+                    meta: activeGangHeistDefinition?.name || "Bez otwartego lobby",
+                    onPress: () => setActiveSection("gang", "heists"),
+                  }
+                : null
+            }
+            secondaryAction={
+              game.gang.joined
+                ? {
+                    label: "Czlonkowie",
+                    meta: `${game.gang.members}/${game.gang.maxMembers} ludzi`,
+                    onPress: () => setActiveSection("gang", "members"),
+                  }
+                : null
+            }
+          />
+          {!game.gang.joined ? (
+            <>
+              <View style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>Zaloz wlasny gang</Text>
+                    <Text style={styles.listCardMeta}>Koszt {formatMoney(game.gang.createCost)}. Minimum 15 RES i nazwa ekipy.</Text>
                   </View>
-                  <Pressable onPress={() => joinGang(invite.id)} style={[styles.inlineButton, game.player.respect < invite.inviteRespectMin && styles.tileDisabled]}>
-                    <Text style={styles.inlineButtonText}>Dolacz</Text>
+                  <Tag text="Start" warning={game.player.cash < game.gang.createCost || game.player.respect < 15} />
+                </View>
+                <View style={styles.inlineRow}>
+                  <TextInput value={gangDraftName} onChangeText={setGangDraftName} placeholder="Nazwa gangu" placeholderTextColor="#6c6c6c" style={styles.chatInput} />
+                  <Pressable onPress={createGang} style={styles.inlineButton}>
+                    <Text style={styles.inlineButtonText}>Zaloz</Text>
                   </Pressable>
                 </View>
+                <View style={styles.playerRosterStats}>
+                  <View style={styles.playerRosterStat}>
+                    <Text style={styles.playerRosterStatLabel}>Gotowka</Text>
+                    <Text style={styles.playerRosterStatValue}>{formatMoney(game.player.cash)}</Text>
+                  </View>
+                  <View style={styles.playerRosterStat}>
+                    <Text style={styles.playerRosterStatLabel}>Szacun</Text>
+                    <Text style={styles.playerRosterStatValue}>{game.player.respect}</Text>
+                  </View>
+                  <View style={styles.playerRosterStat}>
+                    <Text style={styles.playerRosterStatLabel}>Zaproszenia</Text>
+                    <Text style={styles.playerRosterStatValue}>{game.gang.invites.length}</Text>
+                  </View>
+                </View>
               </View>
-            )) : <Text style={styles.emptyText}>Brak aktywnych zaproszen do prawdziwych gangow.</Text>}
-          </SectionCard>
-          <SectionCard title="Lista gangow" subtitle="Zywe gangi z miasta, bez testowych fantomow.">
-            {game.online.gangs.length ? game.online.gangs.map((gang) => {
-              const matchingInvite = game.gang.invites.find((invite) => invite.gangName === gang.name);
-              return (
-                <View key={gang.id} style={styles.listCard}>
-                  <View style={styles.inlineRow}>
-                    <View style={styles.entityHead}>
-                      <EntityBadge visual={getGangVisual(gang.name)} />
-                      <View style={styles.flexOne}>
-                        <Text style={styles.listCardTitle}>{gang.name}</Text>
-                        <Text style={styles.listCardMeta}>Boss: {gang.boss} | Ludzie: {gang.members} | Wejscie: {gang.inviteRespectMin} RES | Wplywy: {gang.influence}</Text>
+
+              <SectionCard title={`Zaproszenia • ${game.gang.invites.length}`} subtitle="Aktywne wejscia do ekip.">
+                {game.gang.invites.length ? game.gang.invites.map((invite) => (
+                  <View key={invite.id} style={[styles.listCard, styles.playerRosterCard]}>
+                    <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
+                      <View style={styles.entityHead}>
+                        <EntityBadge visual={getGangVisual(invite.gangName)} />
+                        <View style={styles.flexOne}>
+                          <Text style={styles.listCardTitle}>{invite.gangName}</Text>
+                          <Text style={styles.listCardMeta}>Boss {invite.leader} • Ludzie {invite.members} • Prog {invite.inviteRespectMin} RES</Text>
+                        </View>
+                      </View>
+                      <Pressable onPress={() => joinGang(invite.id)} style={[styles.inlineButton, game.player.respect < invite.inviteRespectMin && styles.tileDisabled]}>
+                        <Text style={styles.inlineButtonText}>Dolacz</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )) : <Text style={styles.emptyText}>Brak aktywnych zaproszen do prawdziwych gangow.</Text>}
+              </SectionCard>
+
+              <SectionCard title={`Gangi online • ${game.online.gangs.length}`} subtitle="Zywe ekipy z miasta.">
+                {game.online.gangs.length ? game.online.gangs.map((gang) => {
+                  const matchingInvite = game.gang.invites.find((invite) => invite.gangName === gang.name);
+                  return (
+                    <View key={gang.id} style={[styles.listCard, styles.playerRosterCard]}>
+                      <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
+                        <View style={styles.entityHead}>
+                          <EntityBadge visual={getGangVisual(gang.name)} />
+                          <View style={styles.flexOne}>
+                            <Text style={styles.listCardTitle}>{gang.name}</Text>
+                            <Text style={styles.listCardMeta}>Boss {gang.boss} • Ludzie {gang.members} • Wejscie {gang.inviteRespectMin} RES • Wplywy {gang.influence}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.listActionsRow}>
+                          <Pressable onPress={() => openGangProfile(gang.name)} style={styles.inlineButton}>
+                            <Text style={styles.inlineButtonText}>Profil</Text>
+                          </Pressable>
+                          {matchingInvite ? (
+                            <Pressable onPress={() => joinGang(matchingInvite.id)} style={[styles.inlineButton, game.player.respect < matchingInvite.inviteRespectMin && styles.tileDisabled]}>
+                              <Text style={styles.inlineButtonText}>Dolacz</Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
                       </View>
                     </View>
-                    <View style={styles.listActionsRow}>
-                      <Pressable onPress={() => openGangProfile(gang.name)} style={styles.inlineButton}>
-                        <Text style={styles.inlineButtonText}>Profil</Text>
-                      </Pressable>
-                      {matchingInvite ? (
-                        <Pressable onPress={() => joinGang(matchingInvite.id)} style={[styles.inlineButton, game.player.respect < matchingInvite.inviteRespectMin && styles.tileDisabled]}>
-                          <Text style={styles.inlineButtonText}>Dolacz</Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  </View>
+                  );
+                }) : <Text style={styles.emptyText}>Na razie nie ma jeszcze zadnych zywych gangow na miescie.</Text>}
+              </SectionCard>
+            </>
+          ) : (
+            <>
+              <View style={styles.mobileOverviewGrid}>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Wejscie od</Text>
+                  <Text style={styles.mobileOverviewValue}>{game.gang.inviteRespectMin} RES</Text>
                 </View>
-              );
-            }) : <Text style={styles.emptyText}>Na razie nie ma jeszcze zadnych zywych gangow na miescie.</Text>}
-          </SectionCard>
-        </>
-      ) : (
-        <>
-          <View style={styles.heroBanner}>
-            <Text style={styles.heroBannerTitle}>{game.gang.name}</Text>
-            <Text style={styles.heroBannerText}>Rola: {game.gang.role}. Tutaj widzisz skarbiec, bonus ekipy i 3 najwazniejsze wejscia.</Text>
-          </View>
-          <SectionCard title="Rdzen ekipy" subtitle="To ma byc prosty panel glowny gangu.">
-            <StatLine label="Rola" value={game.gang.role} />
-            <StatLine label="Ludzie" value={`${game.gang.members}/${game.gang.maxMembers}`} />
-            <StatLine label="Skarbiec" value={formatMoney(game.gang.vault)} />
-            <StatLine label="Wejscie od" value={`${game.gang.inviteRespectMin} RES`} />
-            <StatLine label="Bonus do napadow gangu" value={`+${Math.round(getGangHeistBonusRate(game.gang) * 100)}% hajsu`} />
-            <StatLine label="Ludzie w celi" value={game.gang.jailedCrew ? `${game.gang.jailedCrew} (${formatDuration(crewLockdownRemaining)})` : "0"} />
-            <StatLine label="Aktywna robota" value={activeGangHeistDefinition?.name || "Brak lobby"} />
-            <StatLine label="Chroniony klub" value={game.gang.protectedClub?.name || "Brak protektoratu"} />
-            {game.gang.role === "Boss" ? (
-              <View style={styles.listActionsRow}>
-                <Pressable onPress={deleteGang} style={[styles.inlineButton, styles.inlineButtonDanger]}>
-                  <Text style={[styles.inlineButtonText, styles.inlineButtonDangerText]}>Usun gang</Text>
-                </Pressable>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Bonus napadu</Text>
+                  <Text style={styles.mobileOverviewValue}>+{Math.round(getGangHeistBonusRate(game.gang) * 100)}%</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Cela</Text>
+                  <Text style={styles.mobileOverviewValue}>{game.gang.jailedCrew || 0}</Text>
+                  <Text style={styles.listCardMeta}>{game.gang.jailedCrew ? formatDuration(crewLockdownRemaining) : "Sklad czysty"}</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Wplywy / teren</Text>
+                  <Text style={styles.mobileOverviewValueSmall}>{game.gang.influence} • {game.gang.territory} dziel.</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Fokus</Text>
+                  <Text style={styles.mobileOverviewValueSmall}>{focusDistrictSummary?.name || "Brak"}</Text>
+                </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Chroni klub</Text>
+                  <Text style={styles.mobileOverviewValueSmall}>{game.gang.protectedClub?.name || "Brak"}</Text>
+                </View>
               </View>
-            ) : null}
-          </SectionCard>
 
-          {game.gang.role === "Boss" ? (
-            <SectionCard title="Ustawienia gangu" subtitle="Boss ustawia prog wejscia do ekipy.">
-              <Text style={styles.listCardMeta}>Nowe zaproszenia i dolaczanie leca po tym progu.</Text>
-              <View style={styles.listActionsRow}>
-                <Pressable
-                  onPress={() => changeGangInviteThreshold(-5)}
-                  style={[
-                    styles.inlineButton,
-                    (gangSettingsBusy || game.gang.inviteRespectMin <= GANG_INVITE_RESPECT_MIN) && styles.tileDisabled,
-                  ]}
-                >
-                  <Text style={styles.inlineButtonText}>-5 RES</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => changeGangInviteThreshold(5)}
-                  style={[
-                    styles.inlineButton,
-                    (gangSettingsBusy || game.gang.inviteRespectMin >= GANG_INVITE_RESPECT_MAX) && styles.tileDisabled,
-                  ]}
-                >
-                  <Text style={styles.inlineButtonText}>+5 RES</Text>
-                </Pressable>
-                {GANG_INVITE_THRESHOLD_PRESETS.map((threshold) => (
-                  <Pressable
-                    key={`gang-threshold-${threshold}`}
-                    onPress={() => updateGangInviteThreshold(threshold)}
-                    style={[
-                      styles.inlineButton,
-                      game.gang.inviteRespectMin === threshold && styles.tileDisabled,
-                      gangSettingsBusy && styles.tileDisabled,
-                    ]}
-                  >
-                    <Text style={styles.inlineButtonText}>{threshold} RES</Text>
+              <View style={styles.grid}>
+                <ActionTile title="Wplac do skarbca" subtitle="Szybkie zasilenie wspolnej kasy." onPress={depositGangCash} visual={SYSTEM_VISUALS.bank} />
+                <ActionTile title="Napad gangu" subtitle="Wskocz od razu do roboty ekipy." onPress={() => setActiveSection("gang", "heists")} visual={SYSTEM_VISUALS.heist} danger />
+                <ActionTile title="Czlonkowie" subtitle="Sprawdz sklad i role." onPress={() => setActiveSection("gang", "members")} visual={SYSTEM_VISUALS.gang} />
+                <ActionTile title="Operacje" subtitle="Fokus, projekty i tablica roboty." onPress={() => setActiveSection("gang", "ops")} visual={SYSTEM_VISUALS.business} />
+              </View>
+
+              <View style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>Skarbiec i prog wejscia</Text>
+                    <Text style={styles.listCardMeta}>Wrzucone tu pieniadze podpiera projekty, rescue i rozbudowe skladu.</Text>
+                  </View>
+                  <Tag text={game.gang.role} warning={game.gang.role !== "Boss"} />
+                </View>
+                <View style={styles.inlineRow}>
+                  <TextInput value={bankAmountDraft} onChangeText={setBankAmountDraft} placeholder="Kwota dla gangu" placeholderTextColor="#6c6c6c" keyboardType="numeric" style={styles.chatInput} />
+                  <Pressable onPress={depositGangCash} style={styles.inlineButton}>
+                    <Text style={styles.inlineButtonText}>Wrzuc</Text>
                   </Pressable>
-                ))}
+                </View>
+                {game.gang.role === "Boss" ? (
+                  <View style={styles.planChipRow}>
+                    <Pressable
+                      onPress={() => changeGangInviteThreshold(-5)}
+                      style={[styles.planChip, (gangSettingsBusy || game.gang.inviteRespectMin <= GANG_INVITE_RESPECT_MIN) && styles.tileDisabled]}
+                    >
+                      <Text style={styles.planChipText}>-5 RES</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => changeGangInviteThreshold(5)}
+                      style={[styles.planChip, (gangSettingsBusy || game.gang.inviteRespectMin >= GANG_INVITE_RESPECT_MAX) && styles.tileDisabled]}
+                    >
+                      <Text style={styles.planChipText}>+5 RES</Text>
+                    </Pressable>
+                    {GANG_INVITE_THRESHOLD_PRESETS.map((threshold) => (
+                      <Pressable
+                        key={`gang-threshold-${threshold}`}
+                        onPress={() => updateGangInviteThreshold(threshold)}
+                        style={[
+                          styles.planChip,
+                          game.gang.inviteRespectMin === threshold && styles.planChipActive,
+                          gangSettingsBusy && styles.tileDisabled,
+                        ]}
+                      >
+                        <Text style={[styles.planChipText, game.gang.inviteRespectMin === threshold && styles.planChipTextActive]}>{threshold} RES</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+                {game.gang.role === "Boss" ? (
+                  <View style={styles.listActionsRow}>
+                    <Pressable onPress={deleteGang} style={[styles.inlineButton, styles.inlineButtonDanger]}>
+                      <Text style={[styles.inlineButtonText, styles.inlineButtonDangerText]}>Usun gang</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
               </View>
-            </SectionCard>
-          ) : null}
 
-          <SectionCard title="Skarbiec" subtitle="Wrzucone tu pieniadze wzmacniaja zaplecze ekipy.">
-            <View style={styles.inlineRow}>
-              <TextInput value={bankAmountDraft} onChangeText={setBankAmountDraft} placeholder="Kwota dla gangu" placeholderTextColor="#6c6c6c" keyboardType="numeric" style={styles.chatInput} />
-              <Pressable onPress={depositGangCash} style={styles.inlineButton}>
-                <Text style={styles.inlineButtonText}>Wrzuc do gangu</Text>
-              </Pressable>
-            </View>
-          </SectionCard>
-
-          <View style={styles.grid}>
-            <ActionTile title="Wplac do skarbca" subtitle="Szybkie zasilenie wspolnej kasy." onPress={depositGangCash} visual={SYSTEM_VISUALS.bank} />
-            <ActionTile title="Napad gangu" subtitle="Wskocz od razu do roboty ekipy." onPress={() => setActiveSection("gang", "heists")} visual={SYSTEM_VISUALS.heist} danger />
-            <ActionTile title="Czlonkowie" subtitle="Sprawdz sklad i zaproszenia." onPress={() => setActiveSection("gang", "members")} visual={SYSTEM_VISUALS.gang} />
-          </View>
-
-          <SectionCard title="Ostatnia aktywnosc" subtitle="Krotki log ekipy bez grzebania po calym chacie.">
-            {(game.gang.chat || []).slice(0, 4).map((entry) => (
-              <View key={entry.id} style={styles.chatBubble}>
-                <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
-                <Text style={styles.chatText}>{entry.text}</Text>
+              <View style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>Ostatnia aktywnosc</Text>
+                    <Text style={styles.listCardMeta}>Krotki log ekipy bez grzebania po calym chacie.</Text>
+                  </View>
+                  <Tag text={`${(game.gang.chat || []).length}`} warning={!(game.gang.chat || []).length} />
+                </View>
+                {(game.gang.chat || []).length ? (
+                  (game.gang.chat || []).slice(0, 3).map((entry) => (
+                    <View key={entry.id} style={styles.chatBubble}>
+                      <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
+                      <Text style={styles.chatText}>{entry.text}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.emptyText}>Na razie cisza. Chat ozyje, jak ekipa ruszy z robota.</Text>
+                )}
               </View>
-            ))}
-          </SectionCard>
+            </>
+          )}
         </>
-      )}
+      ) : null}
     </SectionCard>
   );
 
   const renderGangMembers = () => (
-    <SectionCard title="Czlonkowie" subtitle="Prawdziwi ludzie w ekipie.">
+    <SectionCard title="Czlonkowie" subtitle="Sklad, role i zaproszenia.">
       {!game.gang.joined ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Najpierw musisz miec wlasny gang albo przyjac zaproszenie.</Text>
         </View>
       ) : (
         <>
-          <StatLine label="Aktualna liczba ludzi" value={`${game.gang.members}/${game.gang.maxMembers}`} />
-          <StatLine label="Do pelnego skladu" value={`${Math.max(0, game.gang.maxMembers - game.gang.members)}`} />
-          <StatLine label="Wplyw na napady" value={`+${Math.round(game.gang.members * 0.9)} mocy gangu`} />
-          <SectionCard title="Rozbudowa skladu" subtitle="Boss odblokowuje kolejne sloty ze skarbca gangu.">
-            <Text style={styles.listCardMeta}>
-              Start: 8 ludzi. Kolejne progi: 12 / 16 / 20 / 25.
-            </Text>
-            <Text style={styles.listCardMeta}>
-              Teraz: {game.gang.members}/{game.gang.maxMembers}. {nextGangMemberCapUpgrade ? `Nastepny skok: ${nextGangMemberCapUpgrade.maxMembers} za ${formatMoney(nextGangMemberCapUpgrade.cost)}.` : "Gang ma juz wbity maksymalny limit."}
-            </Text>
+          <View style={styles.mobileOverviewGrid}>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Sklad</Text>
+              <Text style={styles.mobileOverviewValue}>{game.gang.members}/{game.gang.maxMembers}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Wolne sloty</Text>
+              <Text style={styles.mobileOverviewValue}>{Math.max(0, game.gang.maxMembers - game.gang.members)}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Moc napadu</Text>
+              <Text style={styles.mobileOverviewValue}>+{Math.round(game.gang.members * 0.9)}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Cela</Text>
+              <Text style={styles.mobileOverviewValue}>{game.gang.jailedCrew || 0}</Text>
+              <Text style={styles.listCardMeta}>{game.gang.jailedCrew ? formatDuration(crewLockdownRemaining) : "Wszyscy na wolce"}</Text>
+            </View>
+          </View>
+
+          <View style={styles.listCard}>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Rozbudowa skladu</Text>
+                <Text style={styles.listCardMeta}>Start 8 ludzi. Kolejne progi: 12 / 16 / 20 / 25.</Text>
+              </View>
+              <Tag text={nextGangMemberCapUpgrade ? `Do ${nextGangMemberCapUpgrade.maxMembers}` : "Max"} warning={!nextGangMemberCapUpgrade} />
+            </View>
+            <View style={styles.playerRosterStats}>
+              <View style={styles.playerRosterStat}>
+                <Text style={styles.playerRosterStatLabel}>Teraz</Text>
+                <Text style={styles.playerRosterStatValue}>{game.gang.members}/{game.gang.maxMembers}</Text>
+              </View>
+              <View style={styles.playerRosterStat}>
+                <Text style={styles.playerRosterStatLabel}>Nastepny prog</Text>
+                <Text style={styles.playerRosterStatValue}>{nextGangMemberCapUpgrade ? nextGangMemberCapUpgrade.maxMembers : "MAX"}</Text>
+              </View>
+              <View style={styles.playerRosterStat}>
+                <Text style={styles.playerRosterStatLabel}>Koszt</Text>
+                <Text style={styles.playerRosterStatValue}>{nextGangMemberCapUpgrade ? formatMoney(nextGangMemberCapUpgrade.cost) : "-"}</Text>
+              </View>
+            </View>
             {game.gang.role === "Boss" ? (
-              <Pressable
-                onPress={upgradeGangMembers}
-                disabled={!nextGangMemberCapUpgrade}
-                style={[styles.inlineButton, !nextGangMemberCapUpgrade && styles.tileDisabled]}
-              >
-                <Text style={styles.inlineButtonText}>
-                  {nextGangMemberCapUpgrade ? `Rozbuduj gang do ${nextGangMemberCapUpgrade.maxMembers}` : "Max skladu"}
-                </Text>
-              </Pressable>
+              <View style={styles.listActionsRow}>
+                <Pressable
+                  onPress={upgradeGangMembers}
+                  disabled={!nextGangMemberCapUpgrade}
+                  style={[styles.inlineButton, !nextGangMemberCapUpgrade && styles.tileDisabled]}
+                >
+                  <Text style={styles.inlineButtonText}>
+                    {nextGangMemberCapUpgrade ? `Rozbuduj do ${nextGangMemberCapUpgrade.maxMembers}` : "Max skladu"}
+                  </Text>
+                </Pressable>
+              </View>
             ) : null}
-          </SectionCard>
-          <SectionCard title="Sklad i role" subtitle="Boss i vice boss zarzadzaja, a napady gangu odpalaja tylko boss, vice boss i zaufani. To nie sa kupieni ludzie, tylko realni gracze.">
+          </View>
+
+          <View style={styles.listCard}>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Sklad i role</Text>
+                <Text style={styles.listCardMeta}>Prawdziwi gracze, nie kupione sloty. Boss ustawia role, a zaufani odpalaja robote.</Text>
+              </View>
+              <Tag text={`${game.gang.membersList.length}`} warning={!game.gang.membersList.length} />
+            </View>
             {game.gang.membersList.map((member) => (
-              <View key={member.id} style={styles.listCard}>
-                <View style={styles.inlineRow}>
+              <View key={member.id} style={styles.districtCard}>
+                <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{member.name}</Text>
-                    <Text style={styles.listCardMeta}>{member.role}</Text>
+                    <Text style={styles.listCardMeta}>{member.role} • RES {member.respect ?? "-"} • {member.trusted ? "Zaufany" : "Czlonek"}</Text>
                   </View>
-                  <Tag text={member.trusted ? "Zaufany" : "Zwykly"} warning={!member.trusted} />
+                  <Tag text={member.online ? "ONLINE" : "OFFLINE"} warning={!member.online} />
                 </View>
                 {renderGangRoleControls(member)}
               </View>
             ))}
-          </SectionCard>
-          <SectionCard title="Gracze do zaproszenia" subtitle={`Na liscie sa tylko gracze bez gangu, ktorzy lapia sie na prog ${game.gang.inviteRespectMin} RES.`}>
+          </View>
+
+          <View style={styles.listCard}>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Gracze do zaproszenia</Text>
+                <Text style={styles.listCardMeta}>Tylko gracze bez gangu, ktorzy lapia sie na prog {game.gang.inviteRespectMin} RES.</Text>
+              </View>
+              <Tag text={`${gangInviteTargets.length}`} warning={!gangInviteTargets.length} />
+            </View>
             {gangInviteTargets.length ? gangInviteTargets.map((candidate) => (
-              <View key={candidate.id} style={styles.listCard}>
-                <View style={styles.inlineRow}>
+              <View key={candidate.id} style={styles.districtCard}>
+                <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{candidate.name}</Text>
-                    <Text style={styles.listCardMeta}>Szacun: {candidate.respect} | Status: {candidate.online ? "Online" : "Offline"}</Text>
+                    <Text style={styles.listCardMeta}>Szacun {candidate.respect} • {candidate.online ? "Online" : "Offline"}</Text>
                   </View>
                   <Pressable onPress={() => inviteCandidate(candidate.id)} style={[styles.inlineButton, (game.gang.role !== "Boss" || candidate.respect < game.gang.inviteRespectMin || game.gang.members >= game.gang.maxMembers) && styles.tileDisabled]}>
                     <Text style={styles.inlineButtonText}>Zapros</Text>
@@ -8455,62 +8554,100 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                 </View>
               </View>
             )) : <Text style={styles.emptyText}>Brak realnych graczy bez gangu, ktorzy lapia sie na obecny prog.</Text>}
-          </SectionCard>
+          </View>
         </>
       )}
     </SectionCard>
   );
 
   const renderGangChat = () => (
-    <SectionCard title="Chat gangu" subtitle="Wiadomosci ekipy.">
+    <SectionCard title="Chat gangu" subtitle="Szybki kontakt z ekipa.">
       {!game.gang.joined ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Bez gangu nie ma dostepu do chatu gangu.</Text>
         </View>
       ) : (
         <>
-          <View style={styles.chatComposer}>
-            <TextInput value={gangMessage} onChangeText={setGangMessage} placeholder="Napisz do ekipy..." placeholderTextColor="#6c6c6c" style={styles.chatInput} />
-            <Pressable onPress={sendGangMessage} style={styles.inlineButton}>
-              <Text style={styles.inlineButtonText}>Wyslij</Text>
-            </Pressable>
+          <View style={styles.listCard}>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Nowa wiadomosc</Text>
+                <Text style={styles.listCardMeta}>Krotko, konkretnie i od razu do ekipy.</Text>
+              </View>
+              <Tag text={`${game.gang.chat.length}`} warning={!game.gang.chat.length} />
+            </View>
+            <View style={styles.chatComposer}>
+              <TextInput value={gangMessage} onChangeText={setGangMessage} placeholder="Napisz do ekipy..." placeholderTextColor="#6c6c6c" style={styles.chatInput} />
+              <Pressable onPress={sendGangMessage} style={styles.inlineButton}>
+                <Text style={styles.inlineButtonText}>Wyslij</Text>
+              </Pressable>
+            </View>
           </View>
-          {game.gang.chat.map((entry) => (
-            <View key={entry.id} style={styles.chatBubble}>
+          {game.gang.chat.length ? game.gang.chat.map((entry) => (
+            <View key={entry.id} style={styles.districtCard}>
               <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
               <Text style={styles.chatText}>{entry.text}</Text>
             </View>
-          ))}
+          )) : <Text style={styles.emptyText}>Na razie cisza. Pierwsza wiadomosc ustawia tempo ekipy.</Text>}
         </>
       )}
     </SectionCard>
   );
 
   const renderGangOps = () => (
-    <SectionCard title="Operacje gangu" subtitle="Gotowosc ekipy na robote.">
+    <SectionCard title="Operacje gangu" subtitle="Fokus, tablica roboty i projekty.">
       {!game.gang.joined ? (
         <View style={styles.lockedPanel}>
           <Text style={styles.lockedPanelText}>Operacje gangu odblokuja sie dopiero po wejsciu do organizacji.</Text>
         </View>
       ) : (
         <>
-          <StatLine label="Fokus gangu" value={focusDistrictSummary?.name || "-"} />
-          <StatLine label="Wplywy / kontrola" value={`${game.gang.influence} | ${game.gang.territory} dzielnice`} />
-          <StatLine
-            label="Cel tygodnia"
-            value={`${gangGoalProgress.goal?.title || "Brak"} ${gangGoalProgress.current}/${gangGoalProgress.target}`}
-          />
+          <View style={styles.mobileOverviewGrid}>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Fokus</Text>
+              <Text style={styles.mobileOverviewValueSmall}>{focusDistrictSummary?.name || "Brak"}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Wplywy / teren</Text>
+              <Text style={styles.mobileOverviewValueSmall}>{game.gang.influence} • {game.gang.territory} dziel.</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Cel tygodnia</Text>
+              <Text style={styles.mobileOverviewValueSmall}>{gangGoalProgress.goal?.title || "Brak"}</Text>
+              <Text style={styles.listCardMeta}>{gangGoalProgress.current}/{gangGoalProgress.target}</Text>
+            </View>
+            <View style={styles.mobileOverviewCard}>
+              <Text style={styles.mobileOverviewLabel}>Rescue</Text>
+              <Text style={styles.mobileOverviewValueSmall}>{pendingGangRescue ? pendingGangRescue.heistName : "Brak wtapy"}</Text>
+            </View>
+          </View>
+
           <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Tablica roboty</Text>
-            <Text style={styles.listCardMeta}>Krotka lista wspolnych celow, bez zasmiecania zakladki gangu.</Text>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Tablica roboty</Text>
+                <Text style={styles.listCardMeta}>Tylko aktywne cele, bez zasmiecania zakladki gangu.</Text>
+              </View>
+              <Tag text={`${activeGangJobBoardProgress.length}`} warning={!activeGangJobBoardProgress.length} />
+            </View>
             {!activeGangJobBoardProgress.length ? (
               <Text style={styles.listCardMeta}>Tablica jest czysta. Wroc po kolejny ruch gangu.</Text>
             ) : null}
             {activeGangJobBoardProgress.map((job) => (
-              <View key={`gang-job-${job.id}`} style={styles.listCard}>
+              <View key={`gang-job-${job.id}`} style={styles.districtCard}>
                 <Text style={styles.listCardTitle}>{job.title}</Text>
                 <Text style={styles.listCardMeta}>{job.summary}</Text>
                 <Text style={styles.listCardMeta}>Postep {job.current}/{job.target}</Text>
+                <View style={styles.progressBar}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: job.target > 0 ? `${Math.max(6, Math.min(100, (job.current / job.target) * 100))}%` : "0%",
+                      },
+                    ]}
+                  />
+                </View>
                 <Text style={styles.listCardMeta}>
                   Nagroda: {formatMoney(job.rewards?.vaultCash || 0)} do skarbca, +{job.rewards?.focusInfluence || 0} influence{job.rewards?.pressureRelief ? `, pressure -${job.rewards.pressureRelief}` : ""}.
                 </Text>
@@ -8519,29 +8656,40 @@ const [rankingCategory, setRankingCategory] = useState("respect");
           </View>
           {game.gang.protectedClub ? (
             <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>Chroniony klub</Text>
-              <Text style={styles.listCardMeta}>
-                {game.gang.protectedClub.name} | {protectedGangDistrict?.name || game.gang.protectedClub.districtId}
-              </Text>
-              <Text style={styles.listCardMeta}>
-                Threat {game.gang.protectedClub.threat} | Stabilnosc {game.gang.protectedClub.stability} | Influence +{Math.round(Number(game.gang.protectedClub.influenceBonus || 0) * 100)}%
-              </Text>
-              <Text style={styles.listCardMeta}>
-                Jeden gang = jeden protektor. Ten lokal dostaje lepsza ochrone, a projekty gangu wzmacniaja jego spokoj.
-              </Text>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>Chroniony klub</Text>
+                  <Text style={styles.listCardMeta}>{game.gang.protectedClub.name} • {protectedGangDistrict?.name || game.gang.protectedClub.districtId}</Text>
+                </View>
+                <Tag text="Protektorat" warning={false} />
+              </View>
+              <View style={styles.playerRosterStats}>
+                <View style={styles.playerRosterStat}>
+                  <Text style={styles.playerRosterStatLabel}>Threat</Text>
+                  <Text style={styles.playerRosterStatValue}>{game.gang.protectedClub.threat}</Text>
+                </View>
+                <View style={styles.playerRosterStat}>
+                  <Text style={styles.playerRosterStatLabel}>Stabilnosc</Text>
+                  <Text style={styles.playerRosterStatValue}>{game.gang.protectedClub.stability}</Text>
+                </View>
+                <View style={styles.playerRosterStat}>
+                  <Text style={styles.playerRosterStatLabel}>Influence</Text>
+                  <Text style={styles.playerRosterStatValue}>+{Math.round(Number(game.gang.protectedClub.influenceBonus || 0) * 100)}%</Text>
+                </View>
+              </View>
             </View>
           ) : null}
           {pendingGangRescue ? (
             <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>Pomoc po wtapie</Text>
-              <Text style={styles.listCardMeta}>
-                Po {pendingGangRescue.heistName} siedza: {pendingGangRescueMembers.map((entry) => entry.name).join(", ") || "ludzie z ekipy"}.
-              </Text>
-              <Text style={styles.listCardMeta}>
-                Placisz ze skarbca i ryzykujesz dodatkowy przypal, ale gang moze wyciagnac swoich albo skrocic im odsiadke.
-              </Text>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>Pomoc po wtapie</Text>
+                  <Text style={styles.listCardMeta}>Po {pendingGangRescue.heistName} siedza: {pendingGangRescueMembers.map((entry) => entry.name).join(", ") || "ludzie z ekipy"}.</Text>
+                </View>
+                <Tag text="Alarm" warning />
+              </View>
               {GANG_HEIST_RESCUE_OPTIONS.map((option) => (
-                <View key={`gang-rescue-${option.id}`} style={styles.listCard}>
+                <View key={`gang-rescue-${option.id}`} style={styles.districtCard}>
                   <Text style={styles.listCardTitle}>{option.name}</Text>
                   <Text style={styles.listCardMeta}>
                     {option.summary} Koszt od {formatMoney(option.baseCost)} | Szansa {Math.round(Number(option.chance || 0) * 100)}%.
@@ -8558,7 +8706,13 @@ const [rankingCategory, setRankingCategory] = useState("respect");
             </View>
           ) : null}
           <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Co robi fokus</Text>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Fokus i przerzut</Text>
+                <Text style={styles.listCardMeta}>Jedna decyzja dla gangu. Tam idzie projekt, operacja i cisnienie tygodnia.</Text>
+              </View>
+              <Tag text={focusDistrictSummary?.shortName || "Brak"} warning={!focusDistrictSummary} />
+            </View>
             {focusDistrictEffectLines.map((line) => (
               <Text key={`gang-focus-${line}`} style={styles.listCardMeta}>
                 {line}
@@ -8569,32 +8723,37 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                 {line}
               </Text>
             ))}
-          </View>
-          <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Przerzut fokusu</Text>
-            <Text style={styles.listCardMeta}>Jedna decyzja dla gangu. Tam idzie projekt, operacja i cisnienie tygodnia.</Text>
-            <View style={styles.listActionsRow}>
+            <View style={styles.planChipRow}>
               {districtSummaries.map((district) => (
                 <Pressable
                   key={`focus-${district.id}`}
                   onPress={() => setGangFocus(district.id)}
                   disabled={game.gang.focusDistrictId === district.id || !["Boss", "Vice Boss"].includes(String(game.gang.role || "").trim())}
-                  style={[styles.inlineButton, (game.gang.focusDistrictId === district.id || !["Boss", "Vice Boss"].includes(String(game.gang.role || "").trim())) && styles.tileDisabled]}
+                  style={[
+                    styles.planChip,
+                    game.gang.focusDistrictId === district.id && styles.planChipActive,
+                    (game.gang.focusDistrictId === district.id || !["Boss", "Vice Boss"].includes(String(game.gang.role || "").trim())) && styles.tileDisabled,
+                  ]}
                 >
-                  <Text style={styles.inlineButtonText}>{district.shortName}</Text>
+                  <Text style={[styles.planChipText, game.gang.focusDistrictId === district.id && styles.planChipTextActive]}>{district.shortName}</Text>
                 </Pressable>
               ))}
             </View>
           </View>
           <View style={styles.listCard}>
-            <Text style={styles.listCardTitle}>Projekty</Text>
-            <Text style={styles.listCardMeta}>Malo opcji, ale kazda podpiera klub, dzielnice albo operacje.</Text>
+            <View style={styles.listCardHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.listCardTitle}>Projekty</Text>
+                <Text style={styles.listCardMeta}>Malo opcji, ale kazda podpiera klub, dzielnice albo operacje.</Text>
+              </View>
+              <Tag text={`${GANG_PROJECTS.length}`} warning={false} />
+            </View>
             {GANG_PROJECTS.map((project) => {
               const level = getGangProjectLevel(game.gang, project.id);
               const cost = getGangProjectCost(game.gang, project.id);
               const locked = !cost;
               return (
-                <View key={project.id} style={styles.listCard}>
+                <View key={project.id} style={styles.districtCard}>
                   <View style={styles.inlineRow}>
                     <View style={styles.flexOne}>
                       <Text style={styles.listCardTitle}>{project.name}</Text>
@@ -8616,8 +8775,23 @@ const [rankingCategory, setRankingCategory] = useState("respect");
           </View>
           {visibleGangGoalProgress ? (
             <View style={styles.listCard}>
-              <Text style={styles.listCardTitle}>Nagroda tygodnia</Text>
-              <Text style={styles.listCardMeta}>{visibleGangGoalProgress.goal?.summary}</Text>
+              <View style={styles.listCardHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={styles.listCardTitle}>Nagroda tygodnia</Text>
+                  <Text style={styles.listCardMeta}>{visibleGangGoalProgress.goal?.summary}</Text>
+                </View>
+                <Tag text={visibleGangGoalProgress.completed ? "Gotowe" : `${visibleGangGoalProgress.current}/${visibleGangGoalProgress.target}`} warning={!visibleGangGoalProgress.completed} />
+              </View>
+              <View style={styles.progressBar}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      width: visibleGangGoalProgress.target > 0 ? `${Math.max(6, Math.min(100, (visibleGangGoalProgress.current / visibleGangGoalProgress.target) * 100))}%` : "0%",
+                    },
+                  ]}
+                />
+              </View>
               <Text style={styles.listCardMeta}>
                 Nagroda: {formatMoney(visibleGangGoalProgress.goal?.rewards?.vaultCash || 0)} do skarbca i puls w fokusie.
               </Text>
