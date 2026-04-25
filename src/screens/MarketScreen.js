@@ -79,6 +79,13 @@ export function MarketScreen({
   const getContractCategoryLabel = (categoryId) => CONTRACT_CATEGORY_LABELS[categoryId] || categoryId;
   const getAssetTags = (asset) => Object.keys(asset?.tags || {}).filter(Boolean);
   const getShopAssetKey = (type, assetId) => `${type}:${assetId}`;
+  const chunkIntoRows = (entries, size = 2) => {
+    const rows = [];
+    for (let index = 0; index < entries.length; index += size) {
+      rows.push(entries.slice(index, index + size));
+    }
+    return rows;
+  };
   const getDrugEffectLine = (drug) =>
     Object.entries(drug?.effect || {})
       .map(([key, value]) => `${key} +${value}`)
@@ -172,13 +179,13 @@ export function MarketScreen({
     const visual = type === "car" ? contractCategoryVisuals.car : contractCategoryVisuals[asset.category];
 
     return (
-      <View style={[styles.listCard, { paddingVertical: 10, gap: 8, borderColor: "#5d4730", backgroundColor: "#0f0b08" }]}>
+      <View style={[styles.listCard, { paddingVertical: 9, gap: 7, borderColor: "#5d4730", backgroundColor: "#0f0b08" }]}>
         <View style={styles.listCardHeader}>
           <View style={styles.entityHead}>
             <EntityBadge visual={visual} />
             <View style={styles.flexOne}>
               <Text style={styles.listCardTitle}>{asset.name}</Text>
-              <Text style={styles.listCardMeta}>{asset.summary}</Text>
+              <Text style={styles.listCardMeta} numberOfLines={2}>{asset.summary}</Text>
             </View>
           </View>
           <Tag text={owned ? "KUPIONE" : "NIE KUPIONE"} warning={!owned} />
@@ -186,7 +193,7 @@ export function MarketScreen({
         <Text style={styles.listCardMeta}>
           Cena {formatMoney(asset.price)} • RES {asset.respect} • {assetTags.length ? assetTags.join(" / ") : "Brak tagow"}
         </Text>
-        <Text style={styles.listCardMeta}>{getContractAssetEffectLine(asset)}</Text>
+        <Text style={styles.listCardMeta} numberOfLines={2}>{getContractAssetEffectLine(asset)}</Text>
         <Text style={styles.listCardMeta}>
           W loadoucie: {compareAsset?.name || "Nic"}{compareAsset ? ` • ${getContractAssetEffectLine(compareAsset)}` : ""}
         </Text>
@@ -199,7 +206,7 @@ export function MarketScreen({
             }
           }}
           disabled={!canBuy}
-          style={[styles.inlineButton, { alignItems: "center", justifyContent: "center", minWidth: 132, backgroundColor: "#271d12", borderColor: "#8b6a43" }, !canBuy && styles.tileDisabled]}
+          style={[styles.inlineButton, { alignItems: "center", justifyContent: "center", minWidth: 112, backgroundColor: "#271d12", borderColor: "#8b6a43" }, !canBuy && styles.tileDisabled]}
         >
           <Text style={styles.inlineButtonText}>{owned ? "Kupione" : "Kup"}</Text>
         </Pressable>
@@ -207,14 +214,15 @@ export function MarketScreen({
     );
   };
 
-  if (section === "items") {
+    if (section === "items") {
     const filteredItems = safeContractItems.filter((item) => item.category === selectedContractCategory);
+    const itemRows = chunkIntoRows(filteredItems);
     const ownedItemsCount = safeContractItems.filter((item) => safeContractState?.ownedItems?.[item.id]).length;
     const selectedItem =
       filteredItems.find((item) => getShopAssetKey("item", item.id) === selectedShopAssetKey) || null;
     return (
       <>
-        <SectionCard title="Itemy" subtitle={`Itemy • ${filteredItems.length} sztuki • Kupione: ${ownedItemsCount}`}>
+        <SectionCard title="Itemy" subtitle={`Itemy / ${filteredItems.length} szt. / Kupione: ${ownedItemsCount}`}>
           <View style={[styles.planChipRow, { marginTop: 0, gap: 6 }]}>
             {contractCategories.map((categoryId) => (
               <Pressable
@@ -230,105 +238,142 @@ export function MarketScreen({
           </View>
           {renderContractShopDetail(selectedItem, "item")}
           {!filteredItems.length ? <Text style={styles.emptyText}>Brak itemow w tej kategorii.</Text> : null}
-          {filteredItems.map((item) => {
-            const owned = Boolean(safeContractState?.ownedItems?.[item.id]);
-            const itemTags = getAssetTags(item);
-            const isSelected = selectedItem?.id === item.id;
-            return (
-              <View
-                key={item.id}
-                style={[
-                  styles.listCard,
-                  {
-                    paddingVertical: 10,
-                    borderColor: isSelected ? "#7e5f3d" : "#252525",
-                    backgroundColor: isSelected ? "#0f0d0a" : "#090909",
-                  },
-                ]}
-              >
-                <View style={[styles.inlineRow, { alignItems: "center", flexWrap: "nowrap" }]}>
-                  <Pressable
-                    onPress={() => setSelectedShopAssetKey(getShopAssetKey("item", item.id))}
-                    style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}
-                  >
-                    <EntityBadge visual={contractCategoryVisuals[item.category]} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{item.name}</Text>
-                      <Text style={styles.listCardMeta}>
-                        {formatMoney(item.price)} • {itemTags.length ? itemTags.join(" / ") : "Brak tagow"}
-                      </Text>
-                      <Text style={styles.listCardMeta}>RES {item.respect}</Text>
+          <View style={{ gap: 10 }}>
+            {itemRows.map((row, rowIndex) => (
+              <View key={`item-row-${rowIndex}`} style={{ flexDirection: "row", gap: 10, alignItems: "stretch" }}>
+                {row.map((item) => {
+                  const owned = Boolean(safeContractState?.ownedItems?.[item.id]);
+                  const itemTags = getAssetTags(item);
+                  const isSelected = selectedItem?.id === item.id;
+                  const disabled = owned || safeGame.player.respect < item.respect || safeGame.player.cash < item.price;
+
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.listCard,
+                        {
+                          flex: 1,
+                          minWidth: 0,
+                          marginBottom: 0,
+                          paddingVertical: 10,
+                          paddingHorizontal: 11,
+                          gap: 8,
+                          borderColor: isSelected ? "#7e5f3d" : "#252525",
+                          backgroundColor: isSelected ? "#0f0d0a" : "#090909",
+                        },
+                      ]}
+                    >
+                      <Pressable onPress={() => setSelectedShopAssetKey(getShopAssetKey("item", item.id))} style={{ gap: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                          <EntityBadge visual={contractCategoryVisuals[item.category]} />
+                          <View style={[styles.flexOne, { minWidth: 0 }]}> 
+                            <Text style={styles.listCardTitle} numberOfLines={2}>{item.name}</Text>
+                            <Text style={styles.listCardMeta} numberOfLines={1}>{formatMoney(item.price)}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.listCardMeta} numberOfLines={1}>
+                          {itemTags.length ? itemTags.join(" / ") : "Brak tagow"}
+                        </Text>
+                        <Text style={styles.listCardMeta}>RES {item.respect}</Text>
+                      </Pressable>
+                      <View style={{ marginTop: "auto", gap: 8 }}>
+                        <Tag text={owned ? "KUPIONE" : "NIE KUPIONE"} warning={!owned} />
+                        <Pressable
+                          onPress={() => actions.buyContractItem(item)}
+                          disabled={disabled}
+                          style={[
+                            styles.inlineButton,
+                            { minWidth: 0, width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 10, backgroundColor: "#20170f", borderColor: "#6f5334" },
+                            disabled && styles.tileDisabled,
+                          ]}
+                        >
+                          <Text style={styles.inlineButtonText}>{owned ? "Kupione" : "Kup"}</Text>
+                        </Pressable>
+                      </View>
                     </View>
-                  </Pressable>
-                  <Tag text={owned ? "KUPIONE" : "NIE KUPIONE"} warning={!owned} />
-                  <Pressable
-                    onPress={() => actions.buyContractItem(item)}
-                    disabled={owned || safeGame.player.respect < item.respect || safeGame.player.cash < item.price}
-                    style={[styles.inlineButton, { minWidth: 82, alignItems: "center", justifyContent: "center", backgroundColor: "#20170f", borderColor: "#6f5334" }, (owned || safeGame.player.respect < item.respect || safeGame.player.cash < item.price) && styles.tileDisabled]}
-                  >
-                    <Text style={styles.inlineButtonText}>{owned ? "Kupione" : "Kup"}</Text>
-                  </Pressable>
-                </View>
+                  );
+                })}
+                {row.length < 2 ? <View style={{ flex: 1 }} /> : null}
               </View>
-            );
-          })}
+            ))}
+          </View>
         </SectionCard>
       </>
     );
   }
 
-  if (section === "cars") {
+    if (section === "cars") {
+    const carRows = chunkIntoRows(safeContractCars);
     const selectedCar =
       safeContractCars.find((car) => getShopAssetKey("car", car.id) === selectedShopAssetKey) || null;
     const ownedCarsCount = safeContractCars.filter((car) => safeContractState?.ownedCars?.[car.id]).length;
     const selectedLoadoutCar = safeContractCars.find((car) => car.id === safeContractState?.loadout?.car)?.name || "Brak";
     return (
       <>
-        <SectionCard title="Auta" subtitle={`Auta • ${safeContractCars.length} modeli • Wybrane: ${selectedLoadoutCar}`}>
+        <SectionCard title="Auta" subtitle={`Auta / ${safeContractCars.length} modeli / Wybrane: ${selectedLoadoutCar}`}>
           <Text style={styles.listCardMeta}>Kupione: {ownedCarsCount}</Text>
           {renderContractShopDetail(selectedCar, "car")}
-          {safeContractCars.map((car) => {
-            const owned = Boolean(safeContractState?.ownedCars?.[car.id]);
-            const carTags = getAssetTags(car);
-            const isSelected = selectedCar?.id === car.id;
-            return (
-              <View
-                key={car.id}
-                style={[
-                  styles.listCard,
-                  {
-                    paddingVertical: 10,
-                    borderColor: isSelected ? "#7e5f3d" : "#252525",
-                    backgroundColor: isSelected ? "#0f0d0a" : "#090909",
-                  },
-                ]}
-              >
-                <View style={[styles.inlineRow, { alignItems: "center", flexWrap: "nowrap" }]}>
-                  <Pressable
-                    onPress={() => setSelectedShopAssetKey(getShopAssetKey("car", car.id))}
-                    style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}
-                  >
-                    <EntityBadge visual={contractCategoryVisuals.car} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{car.name}</Text>
-                      <Text style={styles.listCardMeta}>
-                        {formatMoney(car.price)} • {carTags.length ? carTags.join(" / ") : "Brak tagow"}
-                      </Text>
-                      <Text style={styles.listCardMeta}>RES {car.respect}</Text>
+          <View style={{ gap: 10 }}>
+            {carRows.map((row, rowIndex) => (
+              <View key={`car-row-${rowIndex}`} style={{ flexDirection: "row", gap: 10, alignItems: "stretch" }}>
+                {row.map((car) => {
+                  const owned = Boolean(safeContractState?.ownedCars?.[car.id]);
+                  const carTags = getAssetTags(car);
+                  const isSelected = selectedCar?.id === car.id;
+                  const disabled = owned || safeGame.player.respect < car.respect || safeGame.player.cash < car.price;
+
+                  return (
+                    <View
+                      key={car.id}
+                      style={[
+                        styles.listCard,
+                        {
+                          flex: 1,
+                          minWidth: 0,
+                          marginBottom: 0,
+                          paddingVertical: 10,
+                          paddingHorizontal: 11,
+                          gap: 8,
+                          borderColor: isSelected ? "#7e5f3d" : "#252525",
+                          backgroundColor: isSelected ? "#0f0d0a" : "#090909",
+                        },
+                      ]}
+                    >
+                      <Pressable onPress={() => setSelectedShopAssetKey(getShopAssetKey("car", car.id))} style={{ gap: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                          <EntityBadge visual={contractCategoryVisuals.car} />
+                          <View style={[styles.flexOne, { minWidth: 0 }]}> 
+                            <Text style={styles.listCardTitle} numberOfLines={2}>{car.name}</Text>
+                            <Text style={styles.listCardMeta} numberOfLines={1}>{formatMoney(car.price)}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.listCardMeta} numberOfLines={1}>
+                          {carTags.length ? carTags.join(" / ") : "Brak tagow"}
+                        </Text>
+                        <Text style={styles.listCardMeta}>RES {car.respect}</Text>
+                      </Pressable>
+                      <View style={{ marginTop: "auto", gap: 8 }}>
+                        <Tag text={owned ? "KUPIONE" : "NIE KUPIONE"} warning={!owned} />
+                        <Pressable
+                          onPress={() => actions.buyContractCar(car)}
+                          disabled={disabled}
+                          style={[
+                            styles.inlineButton,
+                            { minWidth: 0, width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 10, backgroundColor: "#20170f", borderColor: "#6f5334" },
+                            disabled && styles.tileDisabled,
+                          ]}
+                        >
+                          <Text style={styles.inlineButtonText}>{owned ? "Kupione" : "Kup"}</Text>
+                        </Pressable>
+                      </View>
                     </View>
-                  </Pressable>
-                  <Tag text={owned ? "KUPIONE" : "NIE KUPIONE"} warning={!owned} />
-                  <Pressable
-                    onPress={() => actions.buyContractCar(car)}
-                    disabled={owned || safeGame.player.respect < car.respect || safeGame.player.cash < car.price}
-                    style={[styles.inlineButton, { minWidth: 82, alignItems: "center", justifyContent: "center", backgroundColor: "#20170f", borderColor: "#6f5334" }, (owned || safeGame.player.respect < car.respect || safeGame.player.cash < car.price) && styles.tileDisabled]}
-                  >
-                    <Text style={styles.inlineButtonText}>{owned ? "Kupione" : "Kup"}</Text>
-                  </Pressable>
-                </View>
+                  );
+                })}
+                {row.length < 2 ? <View style={{ flex: 1 }} /> : null}
               </View>
-            );
-          })}
+            ))}
+          </View>
         </SectionCard>
       </>
     );
