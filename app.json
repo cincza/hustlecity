@@ -28,7 +28,10 @@
     "runtimeVersion": {
       "policy": "appVersion"
     },
-    "ios": {},
+    "ios": {
+      "bundleIdentifier": "com.hustlecity.mobile",
+      "supportsTablet": false
+    },
     "extra": {
       "eas": {
         "projectId": "2720e4db-c63c-41be-906b-80d38c74b4d3"
