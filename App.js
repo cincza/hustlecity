@@ -13,6 +13,7 @@ import {
   Animated,
   Image,
   ImageBackground,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -7280,14 +7281,15 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       }
     };
 
-    Alert.alert(
-      "Usunac konto?",
-      `Konto ${login} zniknie z gry na stale. Tego nie cofnie nawet admin.`,
-      [
-        { text: "Anuluj", style: "cancel" },
-        { text: "Usun konto", style: "destructive", onPress: confirmDelete },
-      ]
-    );
+    const message = `Konto ${login} zniknie z gry na stale. Tego nie cofnie nawet admin.`;
+    if (Platform.OS === "web" && typeof globalThis.confirm === "function") {
+      if (globalThis.confirm(`Usunac konto?\n\n${message}`)) confirmDelete();
+      return;
+    }
+    Alert.alert("Usunac konto?", message, [
+      { text: "Anuluj", style: "cancel" },
+      { text: "Usun konto", style: "destructive", onPress: confirmDelete },
+    ]);
   };
 
   const attackWorldPlayer = (player) => {

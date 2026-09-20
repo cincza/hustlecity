@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 import {
   adjustAdminPlayerOnline,
+  deleteAdminPlayerAccountOnline,
   fetchAdminAuditOnline,
   fetchAdminPlayerOnline,
   fetchAdminPlayersOnline,
@@ -85,10 +86,39 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
     }
   };
 
-  const confirm = (title, message, action) => Alert.alert(title, message, [
-    { text: "Anuluj", style: "cancel" },
-    { text: "Potwierdz", style: "destructive", onPress: action },
-  ]);
+  const confirm = (title, message, action, confirmLabel = "Potwierdz") => {
+    if (Platform.OS === "web" && typeof globalThis.confirm === "function") {
+      if (globalThis.confirm(`${title}\n\n${message}`)) action();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: "Anuluj", style: "cancel" },
+      { text: confirmLabel, style: "destructive", onPress: action },
+    ]);
+  };
+
+  const deleteSelectedAccount = async () => {
+    if (!detail || detail.isAdmin) return;
+    setBusy("delete");
+    setError("");
+    try {
+      await deleteAdminPlayerAccountOnline(token, detail.username, reason);
+      const next = await loadPlayers(query);
+      const nextTarget = next.find((entry) => !entry.isAdmin) || next[0] || null;
+      if (nextTarget) {
+        await loadDetail(nextTarget.id);
+      } else {
+        setSelectedId("");
+        setDetail(null);
+        setAudit([]);
+      }
+      setReason("");
+    } catch (nextError) {
+      setError(nextError.message || "Usuwanie konta nie powiodlo sie.");
+    } finally {
+      setBusy("");
+    }
+  };
 
   return (
     <>
@@ -151,6 +181,7 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
               <Button label="Wyczysc aktywna operacje" disabled={Boolean(busy) || detail.isAdmin} onPress={() => run("operation", () => repairAdminPlayerOnline(token, selectedId, "operation", reason))} />
               <Button label={detail.authDisabled ? "Odblokuj konto" : "Zablokuj konto"} danger={!detail.authDisabled} disabled={Boolean(busy) || detail.isAdmin} onPress={() => confirm("Zmiana dostepu", `${detail.authDisabled ? "Odblokowac" : "Zablokowac"} konto ${detail.username}?`, () => run("ban", () => setAdminPlayerBanOnline(token, selectedId, !detail.authDisabled, reason)))} />
               <Button label="Resetuj caly postep" danger disabled={Boolean(busy) || detail.isAdmin} onPress={() => confirm("Reset postepu", `Przywrocic ${detail.username} do stanu nowego gracza?`, () => run("reset", () => resetAdminPlayerOnline(token, selectedId, reason)))} />
+              <Button label={busy === "delete" ? "Usuwanie..." : "Usun konto na stale"} danger disabled={Boolean(busy) || detail.isAdmin} onPress={() => confirm("Usunac konto?", `Konto ${detail.username} i jego postep zostana trwale usuniete.`, deleteSelectedAccount, "Usun konto")} />
             </View>
           </SectionCard>
 

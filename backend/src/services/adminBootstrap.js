@@ -8,6 +8,7 @@ export function validateAdminPassword(password) {
 
 export async function bootstrapAdmin({ account, adminUsernames, findUser, createUser, updateAuthentication, createPlayer, logWarning }) {
   const configuredPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD || "";
+  const rotateConfiguredPassword = process.env.ADMIN_BOOTSTRAP_ROTATE_PASSWORD === "1";
   if (configuredPassword) validateAdminPassword(configuredPassword);
 
   // Disable legacy test credentials without deleting the account or its progress.
@@ -29,7 +30,7 @@ export async function bootstrapAdmin({ account, adminUsernames, findUser, create
       passwordHash: await bcrypt.hash(configuredPassword, 12),
       playerData: createPlayer(),
     });
-  } else if (existing.authDisabled) {
+  } else if (existing.authDisabled || rotateConfiguredPassword) {
     await updateAuthentication(existing._id, {
       passwordHash: await bcrypt.hash(configuredPassword, 12),
       authDisabled: false,

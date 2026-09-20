@@ -63,6 +63,17 @@ test("admin bootstrap is opt-in; weak legacy credentials and tokens are revoked 
   assert.equal(auth.isSessionCurrent(oldToken, user), false);
   assert.equal(auth.isSessionCurrent(auth.verifyAuthToken(auth.signAuthToken(user)), user), true);
   assert.equal(user.playerData.profile.cash, 4200);
+  process.env.ADMIN_BOOTSTRAP_PASSWORD = "Rotated-Regression-Pass!";
+  process.env.ADMIN_BOOTSTRAP_ROTATE_PASSWORD = "1";
+  const tokenBeforeRotation = auth.verifyAuthToken(auth.signAuthToken(user));
+  try { await bootstrapAdmin(options); } finally {
+    delete process.env.ADMIN_BOOTSTRAP_PASSWORD;
+    delete process.env.ADMIN_BOOTSTRAP_ROTATE_PASSWORD;
+  }
+  user = await store.findUserById(legacy._id);
+  assert.equal(await bcrypt.compare("Rotated-Regression-Pass!", user.passwordHash), true);
+  assert.equal(auth.isSessionCurrent(tokenBeforeRotation, user), false);
+  assert.equal(user.playerData.profile.cash, 4200);
   assert.throws(() => validateAdminPassword("1234"));
   assert.throws(() => validateAdminPassword("ą".repeat(37)));
 });

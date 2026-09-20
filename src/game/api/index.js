@@ -404,11 +404,11 @@ export async function grantAdminRespectToPlayerOnline(token, targetUserId, amoun
   });
 }
 
-export async function deleteAdminPlayerAccountOnline(token, login) {
+export async function deleteAdminPlayerAccountOnline(token, login, reason = "") {
   return request("/admin/players/delete-account", {
     method: "POST",
     token,
-    body: { login },
+    body: { login, reason },
   });
 }
 
