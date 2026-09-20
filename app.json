@@ -30,7 +30,10 @@
     },
     "ios": {
       "bundleIdentifier": "com.hustlecity.mobile",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "extra": {
       "eas": {
