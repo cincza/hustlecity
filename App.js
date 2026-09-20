@@ -629,7 +629,7 @@ const TAB_DEFINITIONS = [
       { id: "protection", label: "Ochrona", title: "Ochrona" },
       { id: "log", label: "Log", title: "Log wydarzen" },
       { id: "admin", label: "Admin", title: "Panel administratora", adminOnly: true },
-      { id: "utilities", label: "Narzedzia", title: "Narzedzia", hidden: true },
+      { id: "utilities", label: "Narzedzia", title: "Narzedzia" },
       { id: "community", label: "Kontakt", title: "Spolecznosc", hidden: true },
       { id: "casino", label: "Kasyno", title: "Kasyno", hidden: true },
       { id: "tasks", label: "Misje", title: "Zadania", hidden: true },
