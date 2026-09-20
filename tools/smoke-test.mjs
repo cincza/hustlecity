@@ -1,5 +1,9 @@
+import { randomBytes } from "node:crypto";
+import assert from "node:assert/strict";
+import { createOperationKey, isTransactionalAction } from "../shared/transactions.js";
+import { CONTACT_SLOT_MS } from "../shared/contacts.js";
 import { spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFixtureUsers, writeFixtureUsers } from "./fixtures/userDatabase.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +11,7 @@ import { FACTORIES, SUPPLIERS, getDrugBatchSupplyCost } from "../shared/empire.j
 import { DRUGS, getDealerPayoutForDrug } from "../shared/socialGameplay.js";
 import { getTaskBoard, TASK_BOARD_SLOT_COUNT } from "../shared/tasks.js";
 
+const ADMIN_TEST_PASSWORD = randomBytes(24).toString("base64url");
 const HOST = "127.0.0.1";
 const PORT = 4100;
 const BASE_URL = `http://${HOST}:${PORT}`;
@@ -31,15 +36,18 @@ async function waitForHealth(retries = 40) {
 }
 
 async function request(pathname, { method = "GET", token, body } = {}) {
-  const response = await fetch(`${BASE_URL}${pathname}`, {
+  const operationKey = token && isTransactionalAction(pathname, method) ? createOperationKey() : null;
+  const init = {
     method,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(operationKey ? { "Idempotency-Key": operationKey } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+  const response = await fetch(`${BASE_URL}${pathname}`, init);
 
   const text = await response.text();
   let data = {};
@@ -53,6 +61,13 @@ async function request(pathname, { method = "GET", token, body } = {}) {
 
   if (!response.ok) {
     throw new Error(`${pathname} -> HTTP ${response.status}: ${data.error || "unknown error"}`);
+  }
+
+  if (operationKey) {
+    const replay = await fetch(`${BASE_URL}${pathname}`, init);
+    assert.equal(replay.status, response.status, `${pathname}: replay status`);
+    assert.equal(replay.headers.get("Idempotency-Replayed"), "true", `${pathname}: must replay the receipt`);
+    assert.deepEqual(await replay.json(), data, `${pathname}: replay must preserve the original result`);
   }
 
   return data;
@@ -146,6 +161,8 @@ function startServer(dataDir) {
         HOST,
         PORT: String(PORT),
         NODE_ENV: "test",
+        BACKEND_ENV_FILE: path.join(dataDir, "no-environment-file"),
+        ADMIN_BOOTSTRAP_PASSWORD: ADMIN_TEST_PASSWORD,
         JWT_SECRET: "smoke-test-secret",
         CORS_ORIGIN: "http://localhost:8090",
         DATA_DIR: dataDir,
@@ -178,7 +195,6 @@ async function stopServer(child) {
 }
 
 async function forceUsersIntoJail(dataDir, logins, durationMs = 15 * 60 * 1000) {
-  const usersDbPath = path.join(dataDir, "users.db");
   const safeLogins = new Set(
     (Array.isArray(logins) ? logins : [logins])
       .map((entry) => String(entry || "").trim().toLowerCase())
@@ -189,7 +205,7 @@ async function forceUsersIntoJail(dataDir, logins, durationMs = 15 * 60 * 1000) 
   }
 
   const now = Date.now();
-  const content = await readFile(usersDbPath, "utf8");
+  const content = (await readFixtureUsers(dataDir)).map((record) => JSON.stringify(record)).join("\n");
   const nextLines = content
     .split(/\r?\n/)
     .filter(Boolean)
@@ -206,11 +222,10 @@ async function forceUsersIntoJail(dataDir, logins, durationMs = 15 * 60 * 1000) 
       return JSON.stringify(doc);
     });
 
-  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+  await writeFixtureUsers(dataDir, nextLines.map((line) => JSON.parse(line)));
 }
 
 async function forceUsersIntoCriticalCare(dataDir, logins, { durationMs = 15 * 60 * 1000, modeId = "public", source = "smoke-tescie" } = {}) {
-  const usersDbPath = path.join(dataDir, "users.db");
   const safeLogins = new Set(
     (Array.isArray(logins) ? logins : [logins])
       .map((entry) => String(entry || "").trim().toLowerCase())
@@ -221,7 +236,7 @@ async function forceUsersIntoCriticalCare(dataDir, logins, { durationMs = 15 * 6
   }
 
   const now = Date.now();
-  const content = await readFile(usersDbPath, "utf8");
+  const content = (await readFixtureUsers(dataDir)).map((record) => JSON.stringify(record)).join("\n");
   const nextLines = content
     .split(/\r?\n/)
     .filter(Boolean)
@@ -245,11 +260,10 @@ async function forceUsersIntoCriticalCare(dataDir, logins, { durationMs = 15 * 6
       return JSON.stringify(doc);
     });
 
-  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+  await writeFixtureUsers(dataDir, nextLines.map((line) => JSON.parse(line)));
 }
 
 async function releaseUsersFromCriticalCare(dataDir, logins, modeId = "private") {
-  const usersDbPath = path.join(dataDir, "users.db");
   const safeLogins = new Set(
     (Array.isArray(logins) ? logins : [logins])
       .map((entry) => String(entry || "").trim().toLowerCase())
@@ -260,7 +274,7 @@ async function releaseUsersFromCriticalCare(dataDir, logins, modeId = "private")
   }
 
   const now = Date.now();
-  const content = await readFile(usersDbPath, "utf8");
+  const content = (await readFixtureUsers(dataDir)).map((record) => JSON.stringify(record)).join("\n");
   const nextLines = content
     .split(/\r?\n/)
     .filter(Boolean)
@@ -283,11 +297,10 @@ async function releaseUsersFromCriticalCare(dataDir, logins, modeId = "private")
       return JSON.stringify(doc);
     });
 
-  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+  await writeFixtureUsers(dataDir, nextLines.map((line) => JSON.parse(line)));
 }
 
 async function grantArenaSmokeResources(dataDir, logins, { tokens = 0, energy = null, hp = null } = {}) {
-  const usersDbPath = path.join(dataDir, "users.db");
   const safeLogins = new Set(
     (Array.isArray(logins) ? logins : [logins])
       .map((entry) => String(entry || "").trim().toLowerCase())
@@ -298,7 +311,7 @@ async function grantArenaSmokeResources(dataDir, logins, { tokens = 0, energy = 
   }
 
   const now = Date.now();
-  const content = await readFile(usersDbPath, "utf8");
+  const content = (await readFixtureUsers(dataDir)).map((record) => JSON.stringify(record)).join("\n");
   const nextLines = content
     .split(/\r?\n/)
     .filter(Boolean)
@@ -329,7 +342,7 @@ async function grantArenaSmokeResources(dataDir, logins, { tokens = 0, energy = 
       return JSON.stringify(doc);
     });
 
-  await writeFile(usersDbPath, `${nextLines.join("\n")}\n`, "utf8");
+  await writeFixtureUsers(dataDir, nextLines.map((line) => JSON.parse(line)));
 }
 
 function assertFactoryRecipeProfitability() {
@@ -379,6 +392,17 @@ async function main() {
     if (!token) {
       throw new Error("Rejestracja nie zwrocila tokena.");
     }
+
+    const initialPlans = await request("/plans", { token });
+    const streetPlan = initialPlans?.board?.proposals?.find((entry) => entry.id === "street-bank");
+    if (!streetPlan) {
+      throw new Error("Tablica nie zaproponowala osiagalnego planu ulicznego.");
+    }
+    await request("/plans/accept", {
+      method: "POST",
+      token,
+      body: { planKey: streetPlan.key, approachId: "secure" },
+    });
 
     const depositAmount = 12345;
     const depositedBank = await request("/bank/deposit", {
@@ -478,6 +502,15 @@ async function main() {
       method: "POST",
       token,
     });
+
+    const readyPlan = await request("/plans", { token });
+    if (!readyPlan?.board?.active?.ready) {
+      throw new Error("Plan nie rozpoznal napadu i wplaty wykonanych po przyjeciu.");
+    }
+    const claimedPlan = await request("/plans/claim", { method: "POST", token, body: {} });
+    if (claimedPlan?.result?.reward?.cash !== 450 || claimedPlan?.user?.sessionPlans?.claims?.length !== 1) {
+      throw new Error("Final planu nie zapisal pojedynczej nagrody.");
+    }
 
     await request(`/heists/${starterHeist.id}/execute`, {
       method: "POST",
@@ -583,6 +616,20 @@ async function main() {
       throw new Error("Gang focus nie przelaczyl sie na Neon.");
     }
 
+    await request("/contacts/class", { method: "POST", token, body: { classId: "broker" } });
+    const cityEventView = await request("/city-event", { token });
+    const cityEventResponse = await request("/city-event/respond", {
+      method: "POST",
+      token,
+      body: { choiceId: "broker" },
+    });
+    assert.equal(cityEventResponse.result.eventKey, cityEventView.event.key);
+    assert.equal(cityEventResponse.user.cityDirector.claims.filter((entry) => entry.key === cityEventView.event.key).length, 1);
+    const contactGang = await request("/contacts/execute", { method: "POST", token, body: { districtId: "neon", methodId: "broker", mode: "quiet", slot: Math.floor(Date.now() / CONTACT_SLOT_MS) } });
+    assert.equal(contactGang.user.contacts.completed, 1);
+    assert.equal(contactGang.user.gang.jobProgress.contactOrders, 1);
+    assert.ok(contactGang.user.gang.jobBoard.some((job) => job.id === "contact-network"));
+
     const gangTribute = await request("/gang/tribute", {
       method: "POST",
       token,
@@ -637,7 +684,7 @@ async function main() {
     await request("/player/restaurant/eat", {
       method: "POST",
       token,
-      body: { itemId: "energybox" },
+      body: { itemId: "burger" },
     });
 
     const gangRaidPreview = await request("/gang/pvp/preview", {
@@ -870,27 +917,16 @@ async function main() {
       body: { supplyId: "packaging", quantity: 1 },
     });
 
-    const producedDesignerDrug = await request("/factories/produce", {
+    const beforeLockedRecipe = await request("/me", { token });
+    await expectRequestFailure("/factories/produce", {
       method: "POST",
       token,
       body: { drugId: "ecstasy" },
-    });
-
-    if (producedDesignerDrug?.result?.drugId !== "ecstasy") {
-      throw new Error("Produkcja Extasy nie zwrocila wyniku dla towaru z Designer Lab.");
-    }
-    if (Number(producedDesignerDrug?.user?.profile?.respect || 0) >= 50) {
-      throw new Error("Smoke test dla zsynchronizowanej produkcji potrzebuje szacunu ponizej starego progu Extasy.");
-    }
-    if (Number(producedDesignerDrug?.user?.profile?.jailUntil || 0) > Date.now()) {
-      const designerBribe = await request("/player/jail/bribe", {
-        method: "POST",
-        token,
-      });
-      if (Number(designerBribe?.user?.profile?.jailUntil || 0) > Date.now()) {
-        throw new Error("Bribe po produkcji z Designer Lab nie wypuscil gracza z celi.");
-      }
-    }
+    }, /Wymagany szacunek: 50/);
+    const afterLockedRecipe = await request("/me", { token });
+    assert.equal(afterLockedRecipe.user.profile.energy, beforeLockedRecipe.user.profile.energy, "locked recipe cannot spend energy");
+    assert.deepEqual(afterLockedRecipe.user.supplies, beforeLockedRecipe.user.supplies, "locked recipe cannot spend supplies");
+    assert.deepEqual(afterLockedRecipe.user.drugInventory, beforeLockedRecipe.user.drugInventory, "locked recipe cannot create stock");
 
     await request("/player/profile/avatar", {
       method: "POST",
@@ -914,7 +950,7 @@ async function main() {
 
     const adminLogin = await request("/auth/login", {
       method: "POST",
-      body: { login: "czincza11", password: "1234" },
+      body: { login: "czincza11", password: ADMIN_TEST_PASSWORD },
     });
 
     const adminToken = adminLogin?.token;
@@ -1038,9 +1074,33 @@ async function main() {
       throw new Error("Drugi zaproszony gracz nie dolaczyl do gangu.");
     }
 
+    await request("/contacts/class", { method: "POST", token: invitedUserLogin.token, body: { classId: "host" } });
+    await request("/contacts/class", { method: "POST", token: noEmailRegisterTwo.token, body: { classId: "enforcer" } });
+    for (const [memberToken, methodId] of [[invitedUserLogin.token, "host"], [noEmailRegisterTwo.token, "enforcer"]]) {
+      await request("/contacts/execute", { method: "POST", token: memberToken, body: { methodId, districtId: "neon", mode: "quiet", slot: Math.floor(Date.now() / CONTACT_SLOT_MS) } });
+    }
+    const completedTeam = (await request("/me", { token })).user.gang;
+    assert.ok(completedTeam.contactNetwork.rewardedAt > 0);
+    assert.equal(completedTeam.jobProgress.contactTeamwork, 3);
+    for (const memberToken of [invitedUserLogin.token, noEmailRegisterTwo.token]) {
+      const member = (await request("/me", { token: memberToken })).user;
+      assert.equal(member.gang.vault, completedTeam.vault);
+      assert.deepEqual(member.gang.contactNetwork, completedTeam.contactNetwork);
+    }
+    await expectRequestFailure("/gang/identity", { method: "POST", token: invitedUserLogin.token, body: { id: "street" } }, /boss/i);
+    await expectRequestFailure("/gang/identity", { method: "POST", token, body: { id: "noir" } }, /żetonów/i);
+
     const postJoinGangState = await request("/me", { token });
     if (Number(postJoinGangState?.user?.gang?.members || 0) < 3) {
       throw new Error("Boss nie widzi pelnego skladu po dolaczeniu ludzi do gangu.");
+    }
+
+    const sharedTribute = await request("/gang/tribute", { method: "POST", token, body: { amount: 100 } });
+    assert.equal(sharedTribute.user.profile.cash, postJoinGangState.user.profile.cash - 100);
+    assert.equal(sharedTribute.user.gang.vault, postJoinGangState.user.gang.vault + 100);
+    for (const memberToken of [token, invitedUserLogin.token, noEmailRegisterTwo.token]) {
+      const member = await request("/me", { token: memberToken });
+      assert.equal(member.user.gang.vault, sharedTribute.user.gang.vault, "all gang members must see the same committed vault after replay");
     }
 
     const trustedRoleResult = await request("/gang/members/role", {
@@ -1172,6 +1232,16 @@ async function main() {
       }
     }
 
+    // Production is energy-bounded now, so isolate the PvP cooldown scenario
+    // from all legitimate energy spending performed earlier in this smoke run.
+    await stopServer(server);
+    await grantArenaSmokeResources(dataDir, login, { energy: 20 });
+    server = startServer(dataDir);
+    await waitForHealth();
+    await request("/auth/login", { method: "POST", body: { login: noEmailLoginTwo, password } });
+    await delay(AUTH_LOGIN_DELAY_MS);
+    await request("/auth/login", { method: "POST", body: { login: noEmailLoginOne, password } });
+
     const attackResult = await request(`/social/players/${firstAttackTarget.id}/attack`, {
       method: "POST",
       token,
@@ -1206,6 +1276,12 @@ async function main() {
       },
       /na tego gracza odpalisz kolejny atak za|cooldown/i
     );
+
+    // The arena scenario has its own energy fixture; it must not rely on unlimited restaurant refills.
+    await stopServer(server);
+    await grantArenaSmokeResources(dataDir, login, { energy: 12 });
+    server = startServer(dataDir);
+    await waitForHealth();
 
     const startedArenaRun = await request("/fightclub/run/start", {
       method: "POST",
@@ -1394,27 +1470,28 @@ async function main() {
       throw new Error("Wejscie w obieg nie zwrocilo bonusu do kontaktu.");
     }
 
+    const smokeEscortId = "vip";
     const cornerEscortCountBefore = Number(
-      escortSearchResult?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.count || 0
+      escortSearchResult?.user?.escortsOwned?.find((entry) => entry.id === smokeEscortId)?.count || 0
     );
 
     const boughtEscort = await request("/escorts/buy", {
       method: "POST",
       token,
-      body: { escortId: "corner" },
+      body: { escortId: smokeEscortId },
     });
 
-    if (Number(boughtEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.count || 0) !== cornerEscortCountBefore + 1) {
+    if (Number(boughtEscort?.user?.escortsOwned?.find((entry) => entry.id === smokeEscortId)?.count || 0) !== cornerEscortCountBefore + 1) {
       throw new Error("Kupno eskorty online nie dodalo kontaktu.");
     }
 
     const assignedEscort = await request("/escorts/assign", {
       method: "POST",
       token,
-      body: { escortId: "corner", districtId: "oldtown" },
+      body: { escortId: smokeEscortId, districtId: "oldtown" },
     });
 
-    if (Number(assignedEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.routes?.oldtown || 0) <= 0) {
+    if (Number(assignedEscort?.user?.escortsOwned?.find((entry) => entry.id === smokeEscortId)?.routes?.oldtown || 0) <= 0) {
       throw new Error("Wystawienie eskorty na ulice nie zapisalo trasy.");
     }
 
@@ -1431,17 +1508,17 @@ async function main() {
     const pulledEscort = await request("/escorts/pull", {
       method: "POST",
       token,
-      body: { escortId: "corner", districtId: "oldtown" },
+      body: { escortId: smokeEscortId, districtId: "oldtown" },
     });
 
-    if (Number(pulledEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.routes?.oldtown || 0) !== 0) {
+    if (Number(pulledEscort?.user?.escortsOwned?.find((entry) => entry.id === smokeEscortId)?.routes?.oldtown || 0) !== 0) {
       throw new Error("Sciagniecie eskorty z ulicy nie wyczyscilo trasy.");
     }
 
     const soldEscort = await request("/escorts/sell", {
       method: "POST",
       token,
-      body: { escortId: "corner" },
+      body: { escortId: smokeEscortId },
     });
 
     if (Number(soldEscort?.user?.escortsOwned?.find((entry) => entry.id === "corner")?.count || 0) !== cornerEscortCountBefore) {
@@ -1516,6 +1593,8 @@ async function main() {
       throw new Error("Stash klubu nie przyjal towaru po stronie backendu.");
     }
 
+    const ownerBeforeEntry = (await request("/me", { token })).user;
+    const guestBeforeEntry = (await request("/me", { token: rivalRegister.token })).user;
     const guestClubEntry = await request("/clubs/visit", {
       method: "POST",
       token: rivalRegister.token,
@@ -1525,6 +1604,10 @@ async function main() {
     if (Number(guestClubEntry?.result?.entryFeePaid || 0) !== 80) {
       throw new Error("Wejscie do klubu nie pobralo ustawionej wejsciowki.");
     }
+    const ownerAfterEntry = (await request("/me", { token })).user;
+    const guestAfterEntry = (await request("/me", { token: rivalRegister.token })).user;
+    assert.equal(guestAfterEntry.profile.cash, guestBeforeEntry.profile.cash - 80, "guest is charged once including replay");
+    assert.equal(ownerAfterEntry.club.pendingEntryRevenue, ownerBeforeEntry.club.pendingEntryRevenue + 80, "owner receives the matching fee once");
 
     const clubConsume = await request("/clubs/stash/consume", {
       method: "POST",
@@ -2010,6 +2093,8 @@ async function main() {
       clubReport: clubNight.result.payout,
       clubSafe: collectedClubSafe.result.amount,
       operation: executedOperation.result.success ? "ok-success" : "ok-failed",
+      cityDirector: cityEventView.event.id,
+      sessionPlans: "ok",
       prisonChat: "ok",
       criticalCare: "ok",
       clientStateAuthority: "ok",

@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "../bootstrapEnv.js";
 import Datastore from "@seald-io/nedb";
 import { createDealerInventory, normalizeDealerInventory } from "../../../shared/socialGameplay.js";
 import { logError, logInfo } from "../utils/logger.js";
+import { readWorldDocument, saveWorldDocument } from "./gameDatabase.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,19 +34,12 @@ async function getWorldStateDb() {
   try {
     await worldStateDb.loadDatabaseAsync();
   } catch (error) {
-    const corruptPath = path.join(
-      dataDir,
-      `world-state.db.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`
-    );
     logError("persistence", "world-state-db-load-failed", {
       worldStateDbPath,
-      corruptPath,
       reason: error?.message || "unknown",
     });
-    await fs.rename(worldStateDbPath, corruptPath);
-    await fs.writeFile(worldStateDbPath, "", "utf8");
-    worldStateDb = new Datastore({ filename: worldStateDbPath });
-    await worldStateDb.loadDatabaseAsync();
+    worldStateDb = undefined;
+    throw new Error("World database could not be loaded. Original file preserved; restore a verified backup before restarting.", { cause: error });
   }
   await worldStateDb.ensureIndexAsync({ fieldName: "_id", unique: true });
   return worldStateDb;
@@ -80,7 +75,8 @@ async function ensureWorldStateDoc() {
 
 export async function initWorldStateStore() {
   await getWorldStateDb();
-  await ensureWorldStateDoc();
+  const legacy = await ensureWorldStateDoc();
+  if (!await readWorldDocument(WORLD_STATE_ID)) await saveWorldDocument(WORLD_STATE_ID, legacy);
   logInfo("persistence", "world-state-ready", {
     worldStateDbPath,
     dataDir,
@@ -88,27 +84,16 @@ export async function initWorldStateStore() {
 }
 
 export async function getWorldState() {
-  return ensureWorldStateDoc();
+  const saved = await readWorldDocument(WORLD_STATE_ID);
+  return saved?.value || ensureWorldStateDoc();
 }
 
 export async function saveDealerInventory(dealerInventory) {
-  const db = await getWorldStateDb();
-  const current = await ensureWorldStateDoc();
+  const saved = await readWorldDocument(WORLD_STATE_ID);
+  const current = saved?.value || await ensureWorldStateDoc();
   const updatedAt = new Date().toISOString();
   const safeDealerInventory = normalizeDealerInventory(dealerInventory);
-  await db.updateAsync(
-    { _id: WORLD_STATE_ID },
-    {
-      $set: {
-        dealerInventory: safeDealerInventory,
-        updatedAt,
-      },
-      $setOnInsert: {
-        createdAt: current.createdAt || updatedAt,
-      },
-    },
-    { upsert: true }
-  );
+  await saveWorldDocument(WORLD_STATE_ID, { ...current, dealerInventory: safeDealerInventory, updatedAt }, saved?.revision || 0);
   return {
     ...current,
     dealerInventory: safeDealerInventory,

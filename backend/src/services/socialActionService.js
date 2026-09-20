@@ -27,6 +27,7 @@ import {
   normalizeDealerInventory,
   normalizeClubState,
 } from "../../../shared/socialGameplay.js";
+import { getCityEventAt, getDealerCityEventPricing } from "../../../shared/cityDirector.js";
 import { applyCriticalCareDamage, assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
@@ -114,7 +115,7 @@ function ensureEscortOwnedEntry(player, escort) {
   return created;
 }
 
-export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quantity = 1) {
+export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quantity = 1, now = Date.now()) {
   ensurePlayerSocialState(player);
   const safeDealerInventory = normalizeDealerInventory(dealerInventory);
   const drug = findDrugById(drugId);
@@ -128,7 +129,9 @@ export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quan
   if (Number(safeDealerInventory?.[drug.id] || 0) < safeQuantity) {
     fail(`Diler nie ma tyle ${drug.name} na stanie.`);
   }
-  const totalPrice = Number(drug.streetPrice || 0) * safeQuantity;
+  const eventPricing = getDealerCityEventPricing(getCityEventAt(now), drug.id);
+  const unitPrice = Math.max(1, Math.ceil(Number(drug.streetPrice || 0) * eventPricing.buyMultiplier));
+  const totalPrice = unitPrice * safeQuantity;
   if (Number(player.profile?.cash || 0) < totalPrice) {
     fail(`Brakuje $${totalPrice} na ${drug.name} x${safeQuantity}.`);
   }
@@ -141,14 +144,15 @@ export function buyDrugFromDealerForPlayer(player, dealerInventory, drugId, quan
   return {
     drug,
     quantity: safeQuantity,
-    price: Number(drug.streetPrice || 0),
+    price: unitPrice,
     totalPrice,
     dealerInventory: safeDealerInventory,
+    cityEventKey: eventPricing.eventKey,
     logMessage: `Kupiles od dilera: ${drug.name} x${safeQuantity} za $${totalPrice}.`,
   };
 }
 
-export function sellDrugToDealerForPlayer(player, dealerInventory, drugId, quantity = 1) {
+export function sellDrugToDealerForPlayer(player, dealerInventory, drugId, quantity = 1, now = Date.now()) {
   ensurePlayerSocialState(player);
   const safeDealerInventory = normalizeDealerInventory(dealerInventory);
   const drug = findDrugById(drugId);
@@ -160,7 +164,8 @@ export function sellDrugToDealerForPlayer(player, dealerInventory, drugId, quant
     fail(`Nie masz tyle ${drug.name} do sprzedania.`);
   }
 
-  const payoutPerUnit = getDealerPayoutForDrug(drug);
+  const eventPricing = getDealerCityEventPricing(getCityEventAt(now), drug.id);
+  const payoutPerUnit = Math.max(1, Math.floor(getDealerPayoutForDrug(drug) * eventPricing.sellMultiplier));
   const payout = payoutPerUnit * safeQuantity;
   const producedUnitsSold = consumeProducedDrugStock(player, drug.id, safeQuantity);
   player.profile.cash = Number(player.profile.cash || 0) + payout;
@@ -177,6 +182,7 @@ export function sellDrugToDealerForPlayer(player, dealerInventory, drugId, quant
     payoutPerUnit,
     payout,
     dealerInventory: safeDealerInventory,
+    cityEventKey: eventPricing.eventKey,
     logMessage: `Sprzedales dilerowi ${drug.name} x${safeQuantity} za $${payout}.`,
   };
 }

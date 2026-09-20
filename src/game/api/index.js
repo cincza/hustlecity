@@ -188,6 +188,10 @@ export async function playHighRiskOnline(token, bet) {
   });
 }
 
+export async function playRouletteOnline(token, bet, choice) {
+  return request("/casino/roulette", { method: "POST", token, body: { bet, choice } });
+}
+
 export async function startBlackjackOnline(token, bet) {
   return request("/casino/blackjack/start", {
     method: "POST",
@@ -405,6 +409,52 @@ export async function deleteAdminPlayerAccountOnline(token, login) {
     method: "POST",
     token,
     body: { login },
+  });
+}
+
+export async function fetchAdminPlayersOnline(token, query = "") {
+  const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+  return request(`/admin/players${suffix}`, { token });
+}
+
+export async function fetchAdminPlayerOnline(token, targetUserId) {
+  return request(`/admin/players/${encodeURIComponent(targetUserId)}`, { token });
+}
+
+export async function fetchAdminAuditOnline(token, targetUserId = "") {
+  const suffix = targetUserId ? `?targetId=${encodeURIComponent(targetUserId)}` : "";
+  return request(`/admin/audit${suffix}`, { token });
+}
+
+export async function adjustAdminPlayerOnline(token, targetUserId, field, value, reason = "") {
+  return request(`/admin/players/${encodeURIComponent(targetUserId)}/adjust`, {
+    method: "POST",
+    token,
+    body: { field, value, reason },
+  });
+}
+
+export async function resetAdminPlayerOnline(token, targetUserId, reason = "") {
+  return request(`/admin/players/${encodeURIComponent(targetUserId)}/reset`, {
+    method: "POST",
+    token,
+    body: { reason },
+  });
+}
+
+export async function repairAdminPlayerOnline(token, targetUserId, system, reason = "") {
+  return request(`/admin/players/${encodeURIComponent(targetUserId)}/repair`, {
+    method: "POST",
+    token,
+    body: { system, reason },
+  });
+}
+
+export async function setAdminPlayerBanOnline(token, targetUserId, banned, reason = "") {
+  return request(`/admin/players/${encodeURIComponent(targetUserId)}/ban`, {
+    method: "POST",
+    token,
+    body: { banned, reason },
   });
 }
 
@@ -720,6 +770,10 @@ export async function startOperationOnline(token, operationId) {
   });
 }
 
+export async function cancelOperationOnline(token) {
+  return request("/operations/cancel", { method: "POST", token });
+}
+
 export async function advanceOperationOnline(token, choiceId) {
   return request("/operations/advance", {
     method: "POST",
@@ -733,4 +787,32 @@ export async function executeOperationPlanOnline(token) {
     method: "POST",
     token,
   });
+}
+
+export async function resolveOperationOnline(token, responseId) {
+  return request("/operations/resolve", {
+    method: "POST",
+    token,
+    body: { responseId },
+  });
+}
+
+export async function respondToRivalOnline(token, choiceId) {
+  return request("/rivals/respond", {
+    method: "POST",
+    token,
+    body: { choiceId },
+  });
+}
+
+export async function startEmpireProjectOnline(token, projectId) {
+  return request("/empire-projects/start", { method: "POST", token, body: { projectId } });
+}
+
+export async function finalizeEmpireProjectOnline(token, choiceId) {
+  return request("/empire-projects/finalize", { method: "POST", token, body: { choiceId } });
+}
+
+export async function runEmpireDirectiveOnline(token, projectId, districtId) {
+  return request("/empire-projects/directive", { method: "POST", token, body: { projectId, districtId } });
 }

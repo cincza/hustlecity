@@ -31,6 +31,7 @@ import {
   syncGangProtectedClub,
 } from "../../../shared/gangProjects.js";
 import { applyDrugConsumptionToPlayer } from "./socialActionService.js";
+import { getCityEventAt, getCityEventEffects } from "../../../shared/cityDirector.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -464,6 +465,8 @@ export function settleClubPassiveReportForPlayer(player, now = Date.now(), { for
       player.city,
       resolveClubDistrictId(player, player.club.sourceId)
     );
+    const cityEvent = getCityEventAt(now);
+    const cityEventEffects = getCityEventEffects(cityEvent, district.id, player?.contacts?.classId);
     const protector = getClubProtectorState(player, district.id);
     const plan = getClubNightPlan(player.club.nightPlanId);
     const venueProfile = getClubVenueProfile(
@@ -485,11 +488,11 @@ export function settleClubPassiveReportForPlayer(player, now = Date.now(), { for
     const trafficFactor = Number(district?.pressureState?.trafficMultiplier || 1);
     const activeTraffic = Math.max(
       0,
-      Number(player.club.traffic || 0) * trafficFactor +
+      (Number(player.club.traffic || 0) * trafficFactor +
         cycleGuests * 0.85 +
         cycleGuestConsumes * 0.55 +
         Number(venueProfile.stashSupport || 0) * 1.45 +
-        (protector.active ? 0.85 + Number(protector.effects.clubSecurity || 0) * 0.18 : 0)
+        (protector.active ? 0.85 + Number(protector.effects.clubSecurity || 0) * 0.18 : 0)) * Number(cityEventEffects?.clubTraffic || 1)
     );
     const demandBudget =
       totalUnits > 0
@@ -523,7 +526,7 @@ export function settleClubPassiveReportForPlayer(player, now = Date.now(), { for
     const grossLocalRevenue = Math.max(0, grossDrugIncome + cycleEntryRevenue);
     const payoutBeforeIncident = Math.max(
       0,
-      Math.floor(grossDrugIncome * 0.74 + cycleEntryRevenue * 0.82)
+      Math.floor((grossDrugIncome * 0.74 + cycleEntryRevenue * 0.82) * Number(cityEventEffects?.clubPayout || 1))
     );
     const previousClubPressure = Number(player.club.policePressure || 0);
     const previousDistrictPressure = Number(district.pressure || 0);
@@ -571,7 +574,7 @@ export function settleClubPassiveReportForPlayer(player, now = Date.now(), { for
       Number(player.club.policePressure || 0) +
         Math.max(0, activeTraffic * 0.68 + soldUnits * 0.72 + cycleEntryRevenue / 380) *
           (1 - Number(protector.effects.pressureMitigation || 0)) +
-        (incidentTriggered ? 4.2 : 1.7),
+        (incidentTriggered ? 4.2 : 1.7) * Number(cityEventEffects?.clubPressure || 1),
       0,
       100
     );
@@ -663,6 +666,8 @@ export function settleClubPassiveReportForPlayer(player, now = Date.now(), { for
       protectorGangName: protector.gangName,
       reportAt: now,
       entryFee: Number(player.club.entryFee || 0),
+      cityEventKey: cityEventEffects ? cityEvent.key : null,
+      cityEventTitle: cityEventEffects ? cityEvent.title : null,
     };
     player.club.lastReportSummary = latestSummary;
     player.club.lastNightSummary = {

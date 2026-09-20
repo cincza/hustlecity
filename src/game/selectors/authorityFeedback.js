@@ -9,7 +9,7 @@ export function getCasinoGameConfig(meta, gameId, fallback = {}) {
   const maxBet = Number.isFinite(Number(limits?.maxBet))
     ? Math.max(minBet, Number(limits.maxBet))
     : Math.max(minBet, Number(fallback.maxBet || minBet));
-  const cooldownRemainingMs = Math.max(0, Math.round(Number(meta?.cooldownRemainingSeconds || 0) * 1000));
+  const cooldownRemainingMs = Math.max(0, meta?.cooldownUntil != null ? Number(meta.cooldownUntil) - Date.now() : Math.round(Number(meta?.cooldownRemainingSeconds || 0) * 1000));
   const dailyLoss = Math.max(0, Number(meta?.dailyLoss || 0));
   const dailyLossCap = Math.max(0, Number(meta?.dailyLossCap || 0));
 

@@ -421,7 +421,6 @@ export function startGangHeistForGang(gangEntries, actorUserId, now = Date.now()
     if (!player.timers || typeof player.timers !== "object") {
       player.timers = {};
     }
-    player.timers.energyUpdatedAt = now;
 
     if (success) {
       const progression = applyXpProgression(

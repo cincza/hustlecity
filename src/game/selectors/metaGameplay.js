@@ -17,20 +17,20 @@ export function getDistrictEffectLines(districtSummary, { gangEffects = {}, focu
 
   const pressureState = districtSummary.pressureState;
   const lines = [
-    `Klub: ruch ${formatMultiplier(pressureState.trafficMultiplier)}.`,
-    `Operacje: prep ${formatMultiplier(pressureState.prepCostMultiplier)} | leak ${formatMultiplier(pressureState.leakMultiplier)} | heat ${formatMultiplier(pressureState.heistHeatMultiplier)}.`,
+    `Klub: ruch gości ${formatMultiplier(pressureState.trafficMultiplier)}.`,
+    `Operacje: przygotowanie ${formatMultiplier(pressureState.prepCostMultiplier)} | przeciek ${formatMultiplier(pressureState.leakMultiplier)} | Heat ${formatMultiplier(pressureState.heistHeatMultiplier)}.`,
   ];
 
   const modifiers = [];
   if (Number(pressureState.successPenalty || 0) > 0) {
-    modifiers.push(`wejscie ${formatSignedPercent(-pressureState.successPenalty)}`);
+    modifiers.push(`powodzenie ${formatSignedPercent(-pressureState.successPenalty)}`);
   }
   if (focused && Number(gangEffects.influenceGain || 0) > 0) {
-    modifiers.push(`fokus +${Math.round(Number(gangEffects.influenceGain || 0) * 100)}% influence`);
+    modifiers.push(`front gangu +${Math.round(Number(gangEffects.influenceGain || 0) * 100)}% wpływów`);
   }
 
   if (modifiers.length) {
-    lines.push(`Meta: ${modifiers.join(" | ")}.`);
+    lines.push(`Sytuacja: ${modifiers.join(" | ")}.`);
   }
 
   return lines;
@@ -43,18 +43,18 @@ export function getDistrictAlertText(districtSummary) {
 
   switch (districtSummary.pressureState.id) {
     case "lockdown":
-      return "Lockdown dusi ruch, podbija przecieki i zamyka grubsze roboty.";
+      return "Pełna blokada dusi ruch, podbija przecieki i zamyka grubsze roboty.";
     case "crackdown":
-      return "Crackdown podnosi heat i robi brudny slad po kazdej akcji.";
+      return "Obława podnosi Heat i zostawia brudny ślad po każdej akcji.";
     case "watched":
-      return "Dzielnica jest pod okiem. Koszty i przecieki zaczynaja rosnac.";
+      return "Dzielnica jest pod okiem. Koszty i ryzyko przecieku zaczynają rosnąć.";
     default:
       return focusedText(districtSummary);
   }
 }
 
 function focusedText(districtSummary) {
-  return districtSummary?.focused ? "To jest aktualny fokus. Tu najlatwiej przepchnac wspolny puls gangu." : null;
+  return districtSummary?.focused ? "To jest główny front. Tutaj gang najszybciej buduje wspólne wpływy." : null;
 }
 
 export function getOperationPreviewDetails({
@@ -84,10 +84,10 @@ export function getOperationPreviewDetails({
   return {
     preview,
     lines: [
-      `Wejscie ${formatPercent(preview.successChance)} | Przeciek ${formatPercent(preview.leakChance)}.`,
-      `Lup x${Number(preview.rewardMultiplier || 1).toFixed(2)} | Heat +${preview.heatGain}.`,
+      `Powodzenie ${formatPercent(preview.successChance)} | Przeciek ${formatPercent(preview.leakChance)}.`,
+      `Łup x${Number(preview.rewardMultiplier || 1).toFixed(2)} | Heat +${preview.heatGain}.`,
       districtSummary.pressureState?.id === "lockdown"
-        ? "Dzielnica siedzi w lockdownie. Tej roboty nie odpalisz, dopoki nie zejdzie presja."
+        ? "Dzielnica jest całkowicie zablokowana. Ta robota poczeka, aż policyjny nacisk osłabnie."
         : `${districtSummary.name}: ${districtSummary.pressureLabel}, ${districtSummary.bonusLabel.toLowerCase()}.`,
     ],
   };
@@ -99,16 +99,16 @@ export function getOperationChoiceImpactLines(choice) {
   }
 
   const primary = [];
-  if (choice.successDelta) primary.push(`wejscie ${formatSignedPercent(choice.successDelta)}`);
+  if (choice.successDelta) primary.push(`powodzenie ${formatSignedPercent(choice.successDelta)}`);
   if (choice.leakDelta) primary.push(`przeciek ${formatSignedPercent(choice.leakDelta)}`);
-  if (choice.retentionDelta) primary.push(`lup ${formatSignedPercent(choice.retentionDelta)}`);
+  if (choice.retentionDelta) primary.push(`łup ${formatSignedPercent(choice.retentionDelta)}`);
 
   const secondary = [];
   if (choice.cashCost) secondary.push(`koszt $${Math.round(Number(choice.cashCost || 0))}`);
-  if (choice.heatDelta) secondary.push(`heat ${choice.heatDelta > 0 ? "+" : ""}${choice.heatDelta}`);
+  if (choice.heatDelta) secondary.push(`Heat ${choice.heatDelta > 0 ? "+" : ""}${choice.heatDelta}`);
 
   return [
-    primary.length ? primary.join(" | ") : "Bez grubego ruchu na liczbach.",
+    primary.length ? primary.join(" | ") : "Bez dużej zmiany ryzyka i łupu.",
     secondary.length ? secondary.join(" | ") : choice.summary,
   ];
 }
@@ -118,25 +118,25 @@ export function getGangEffectLines(gangEffects = {}, focusDistrictSummary = null
 
   const clubEffects = [];
   if (gangEffects.clubSecurity) clubEffects.push(`ochrona klubu +${gangEffects.clubSecurity}`);
-  if (gangEffects.clubThreatMitigation) clubEffects.push(`zagrozenie ${formatSignedPercent(-gangEffects.clubThreatMitigation)}`);
+  if (gangEffects.clubThreatMitigation) clubEffects.push(`zagrożenie ${formatSignedPercent(-gangEffects.clubThreatMitigation)}`);
   if (clubEffects.length) lines.push(`Klub: ${clubEffects.join(" | ")}.`);
 
   const operationEffects = [];
-  if (gangEffects.operationSuccess) operationEffects.push(`wejscie ${formatSignedPercent(gangEffects.operationSuccess)}`);
+  if (gangEffects.operationSuccess) operationEffects.push(`powodzenie ${formatSignedPercent(gangEffects.operationSuccess)}`);
   if (gangEffects.operationLeakReduction) operationEffects.push(`przeciek ${formatSignedPercent(-gangEffects.operationLeakReduction)}`);
-  if (gangEffects.operationRetention) operationEffects.push(`lup ${formatSignedPercent(gangEffects.operationRetention)}`);
+  if (gangEffects.operationRetention) operationEffects.push(`łup ${formatSignedPercent(gangEffects.operationRetention)}`);
   if (operationEffects.length) lines.push(`Operacje: ${operationEffects.join(" | ")}.`);
 
   const cityEffects = [];
-  if (gangEffects.pressureMitigation) cityEffects.push(`pressure ${formatSignedPercent(-gangEffects.pressureMitigation)}`);
-  if (gangEffects.influenceGain) cityEffects.push(`influence +${Math.round(Number(gangEffects.influenceGain || 0) * 100)}% w fokusie`);
-  if (focusDistrictSummary?.name) cityEffects.push(`fokus: ${focusDistrictSummary.name}`);
+  if (gangEffects.pressureMitigation) cityEffects.push(`presja ${formatSignedPercent(-gangEffects.pressureMitigation)}`);
+  if (gangEffects.influenceGain) cityEffects.push(`wpływy +${Math.round(Number(gangEffects.influenceGain || 0) * 100)}% na głównym froncie`);
+  if (focusDistrictSummary?.name) cityEffects.push(`front: ${focusDistrictSummary.name}`);
   if (cityEffects.length) lines.push(`Miasto: ${cityEffects.join(" | ")}.`);
 
   const recoveryEffects = [];
-  if (gangEffects.heatRelief) recoveryEffects.push(`heat -${gangEffects.heatRelief}`);
+  if (gangEffects.heatRelief) recoveryEffects.push(`Heat -${gangEffects.heatRelief}`);
   if (gangEffects.hpRelief) recoveryEffects.push(`HP +${gangEffects.hpRelief}`);
-  if (recoveryEffects.length) lines.push(`Safehouse: ${recoveryEffects.join(" | ")}.`);
+  if (recoveryEffects.length) lines.push(`Kryjówka: ${recoveryEffects.join(" | ")}.`);
 
   return lines;
 }
@@ -148,7 +148,7 @@ export function getGangProjectLevelLine(project, level = 0) {
   const source = current || next;
 
   if (!source?.effect) {
-    return "Brak dalszych poziomow.";
+    return "Brak dalszych poziomów.";
   }
 
   const parts = [];
@@ -159,28 +159,28 @@ export function getGangProjectLevelLine(project, level = 0) {
         parts.push(`ochrona klubu +${value}`);
         break;
       case "clubThreatMitigation":
-        parts.push(`zagrozenie ${formatSignedPercent(-value)}`);
+        parts.push(`zagrożenie ${formatSignedPercent(-value)}`);
         break;
       case "pressureMitigation":
-        parts.push(`pressure ${formatSignedPercent(-value)}`);
+        parts.push(`presja ${formatSignedPercent(-value)}`);
         break;
       case "operationLeakReduction":
         parts.push(`przeciek ${formatSignedPercent(-value)}`);
         break;
       case "operationSuccess":
-        parts.push(`wejscie ${formatSignedPercent(value)}`);
+        parts.push(`powodzenie ${formatSignedPercent(value)}`);
         break;
       case "operationRetention":
-        parts.push(`lup ${formatSignedPercent(value)}`);
+        parts.push(`łup ${formatSignedPercent(value)}`);
         break;
       case "heatRelief":
-        parts.push(`heat -${value}`);
+        parts.push(`Heat -${value}`);
         break;
       case "hpRelief":
         parts.push(`HP +${value}`);
         break;
       case "influenceGain":
-        parts.push(`influence +${Math.round(Number(value || 0) * 100)}%`);
+        parts.push(`wpływy +${Math.round(Number(value || 0) * 100)}%`);
         break;
       default:
         break;
@@ -188,10 +188,10 @@ export function getGangProjectLevelLine(project, level = 0) {
   });
 
   if (!parts.length) {
-    return "Efekt projektu czeka na nastepny etap.";
+    return "Efekt projektu czeka na następny etap.";
   }
 
-  return `${current ? "Aktywnie" : "Nastepny"}: ${parts.join(" | ")}.`;
+  return `${current ? "Aktywnie" : "Następny poziom"}: ${parts.join(" | ")}.`;
 }
 
 export function getDrugBatchEconomy(drug, suppliers, getDealerPayout) {
@@ -210,11 +210,11 @@ export function getDrugBatchEconomy(drug, suppliers, getDealerPayout) {
     Math.floor(Number(drug?.streetPrice || 0) * 0.22 * 0.86) * Number(drug?.batchSize || 0)
   );
 
-  let recommendation = "Dealer daje bezpieczny cashout, a klub potrzebuje ruchu, zeby ten towar naprawde odpalic.";
+  let recommendation = "Diler daje pewną gotówkę. Klub potrzebuje ruchu, ale może wycisnąć z towaru więcej.";
   if (estimatedClubGross > dealerCashout * 1.12) {
-    recommendation = "Ten towar robi lepszy wynik przy nocach klubu, jesli lokal ma ruch i nie siedzi pod presja.";
+    recommendation = "Ten towar zarobi więcej podczas klubowej nocy, jeśli lokal ma ruch i nie siedzi pod presją.";
   } else if (dealerMargin <= 0) {
-    recommendation = "Na szybkim cashoucie towar jest cienki. Lepiej nie pchac go slepo do dilera.";
+    recommendation = "Szybka sprzedaż prawie nic nie zostawia. Lepiej nie oddawać tej partii dilerowi w ciemno.";
   }
 
   return {

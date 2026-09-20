@@ -1,3 +1,11 @@
+import { isInvalidSession } from "./shared/http.js";
+import ContactsScreen from "./src/screens/ContactsScreen";
+import PremiumPanel from "./src/components/PremiumPanel";
+import { GANG_IDENTITIES } from "./shared/premium.js";
+import { getBusinessPurchaseCost } from "./shared/empire.js";
+import { getRestaurantQuote } from "./shared/restaurant.js";
+import { getSoloHeistOdds as calculateSoloHeistOdds } from "./shared/heists.js";
+import { normalizeMarketPayload, advanceOnlineDisplay } from "./shared/clientSnapshots.js";
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { useRef } from "react";
 import {
@@ -50,6 +58,11 @@ import {
   equipContractLoadoutOnline,
   executeContractOnline,
   executeOperationPlanOnline,
+  resolveOperationOnline,
+  respondToRivalOnline,
+  startEmpireProjectOnline,
+  finalizeEmpireProjectOnline,
+  runEmpireDirectiveOnline,
   executeHeistOnline,
   executeGangPvpOnline,
   fetchFriendListOnline,
@@ -81,6 +94,7 @@ import {
   openGangHeistLobbyOnline,
   placeBountyOnline,
   playHighRiskOnline,
+  playRouletteOnline,
   performClubActionOnline,
   playSlotOnline,
   previewGangPvpOnline,
@@ -103,6 +117,7 @@ import {
   updateGangMemberRoleOnline,
   updateGangSettingsOnline,
   startOperationOnline,
+  cancelOperationOnline,
   startBlackjackOnline,
   startFightClubRunOnline,
   standBlackjackOnline,
@@ -138,7 +153,9 @@ import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { CityScreen } from "./src/screens/CityScreen";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ProfileMenuScreen } from "./src/screens/ProfileMenuScreen";
+import { AdminScreen } from "./src/screens/AdminScreen";
 import { HeistsScreen } from "./src/screens/HeistsScreen";
+import { OperationsScreen } from "./src/screens/OperationsScreen";
 import { FightClubScreen } from "./src/screens/FightClubScreen";
 import { PrisonSection } from "./src/components/PrisonSection";
 import { HeroPanel } from "./src/components/GameScreenPrimitives";
@@ -153,16 +170,20 @@ import { getBusinessIncomePerMinute, getBusinessUpgradeCost, getBusinessUpgradeP
 import { getCasinoGameConfig, getGangRaidPreviewLines } from "./src/game/selectors/authorityFeedback";
 import {
   getContractAssetEffectLine,
+  getContractFrontHint,
   getContractLoadoutSummaryLines,
   getContractPreviewLines,
 } from "./src/game/selectors/contractSelectors";
 import { getDistrictEffectLines, getGangEffectLines, getGangProjectLevelLine } from "./src/game/selectors/metaGameplay";
+import { USE_NATIVE_DRIVER, createShadowStyle } from "./src/utils/uiEffects";
 import {
   FACTORIES,
   SUPPLIERS,
   createSupplyCounterMap,
+  getDrugProductionEnergyCost,
   getDrugPoliceProfile as getSharedDrugPoliceProfile,
   getDrugProductionRespectRequirement,
+  isBusinessUpgradeMaxed,
   normalizeBusinessCollections,
   normalizeBusinessUpgrades,
   normalizeBusinessesOwned,
@@ -239,6 +260,12 @@ import {
   OPERATION_STAGE_ORDER,
 } from "./shared/operations.js";
 import { getTaskBoard as getSharedTaskBoard } from "./shared/tasks.js";
+import { getStarterJourney } from "./shared/taskGuidance.js";
+import { StarterJourney } from "./src/components/StarterJourney";
+import { getCareer } from "./shared/career.js";
+import { CareerPanel } from "./src/components/CareerPanel";
+import { MobileSectionNav } from "./src/components/MobileSectionNav";
+import { rouletteOutcome } from "./shared/roulette.js";
 import {
   CLUB_ESCORT_SEARCH_COST,
   CLUB_NIGHT_PLANS,
@@ -302,39 +329,44 @@ const AVATAR_OPTIONS = [
   { id: "boss", name: "Boss", sigil: "$$", colors: ["#5a4b1f", "#171308"], image: AVATAR_ART.boss },
 ];
 
-const TAB_SIGILS = {
-  start: "¦",
-  city: "?",
-  heists: "?",
-  empire: "?",
-  market: "?",
-  gang: "?",
-  profile: "?",
-  dashboard: "¦",
-  districts: "D",
-  solo: "?",
-  fightclub: "?",
-  cell: "?",
-  tasks: "?",
-  bank: "$",
-  gym: "?",
-  restaurant: "?",
-  hospital: "+",
-  businesses: "?",
-  factories: "?",
-  supply: "?",
-  overview: "¦",
-  heistsGang: "?",
-  members: "?",
-  chat: "?",
-  actions: "?",
-  summary: "?",
-  rank: "?",
-  security: "?",
-  log: "?",
-  street: "?",
-  drugs: "?",
-  boosts: "?",
+const TAB_ICONS = {
+  "casino": "dice-multiple-outline",
+  "start": "view-dashboard-outline",
+  "city": "city-variant-outline",
+  "heists": "lock-open-variant-outline",
+  "empire": "office-building-outline",
+  "market": "storefront-outline",
+  "gang": "account-group-outline",
+  "profile": "account-outline",
+  "dashboard": "view-dashboard-outline",
+  "districts": "map-marker-outline",
+  "solo": "lock-open-variant-outline",
+  "fightclub": "boxing-glove",
+  "cell": "lock-outline",
+  "tasks": "clipboard-check-outline",
+  "bank": "bank-outline",
+  "gym": "dumbbell",
+  "restaurant": "food-outline",
+  "hospital": "hospital-box-outline",
+  "businesses": "office-building-outline",
+  "factories": "factory",
+  "supply": "truck-outline",
+  "overview": "view-dashboard-outline",
+  "heistsGang": "account-group-outline",
+  "members": "account-multiple-outline",
+  "chat": "message-outline",
+  "actions": "flash-outline",
+  "summary": "account-details-outline",
+  "rank": "podium",
+  "security": "shield-check-outline",
+  "log": "text-box-outline",
+  "street": "package-variant",
+  "drugs": "flask-outline",
+  "boosts": "lightning-bolt-outline",
+  "items": "pistol",
+  "cars": "car-outline",
+  "contracts": "file-document-outline"
+  ,"admin": "shield-account-outline"
 };
 
 const CHARACTER_ARCHETYPES = [
@@ -553,10 +585,12 @@ const TAB_DEFINITIONS = [
     label: "Miasto",
     sections: [
       { id: "bank", label: "Bank", title: "Bank" },
+      { id: "casino", label: "Kasyno", title: "Kasyno" },
       { id: "hospital", label: "Szpital", title: "Szpital" },
       { id: "restaurant", label: "Restauracja", title: "Restauracja" },
       { id: "gym", label: "Silownia", title: "Silownia" },
       { id: "tasks", label: "Misje", title: "Zadania" },
+      { id: "contacts", label: "Kontakty", title: "Kontakty miasta" },
       { id: "districts", label: "Dzielnice", title: "Dzielnice" },
     ],
   },
@@ -566,6 +600,7 @@ const TAB_DEFINITIONS = [
     sections: [
       { id: "solo", label: "Skoki", title: "Skoki" },
       { id: "contracts", label: "Kontrakty", title: "Kontrakty" },
+      { id: "operations", label: "Operacje", title: "Sieć operacji" },
       { id: "fightclub", label: "Arena", title: "Arena / Fightclub" },
       { id: "prison", label: "Cela", title: "Wiezienie" },
     ],
@@ -575,6 +610,7 @@ const TAB_DEFINITIONS = [
     id: "market",
     label: "Rynek",
     sections: [
+      { id: "street", label: "Towary", title: "Rynek towarów" },
       { id: "drugs", label: "Diler", title: "Diler" },
       { id: "items", label: "Itemy", title: "Itemy" },
       { id: "cars", label: "Auta", title: "Auta" },
@@ -584,13 +620,14 @@ const TAB_DEFINITIONS = [
   { id: "gang", label: "Gang", sections: [{ id: "overview", label: "Gang", title: "Gang" }, { id: "heists", label: "Napady", title: "Napady gangu" }, { id: "members", label: "Sklad", title: "Czlonkowie" }, { id: "chat", label: "Chat", title: "Chat gangu" }, { id: "ops", label: "Akcje", title: "Operacje" }] },
   {
     id: "profile",
-    label: "Postac",
+    label: "Postać",
     sections: [
       { id: "summary", label: "Profil", title: "Profil" },
       { id: "progress", label: "Ranga", title: "Szacun" },
       { id: "loadout", label: "Ekwipunek", title: "Ekwipunek" },
       { id: "protection", label: "Ochrona", title: "Ochrona" },
       { id: "log", label: "Log", title: "Log wydarzen" },
+      { id: "admin", label: "Admin", title: "Panel administratora", adminOnly: true },
       { id: "utilities", label: "Narzedzia", title: "Narzedzia", hidden: true },
       { id: "community", label: "Kontakt", title: "Spolecznosc", hidden: true },
       { id: "casino", label: "Kasyno", title: "Kasyno", hidden: true },
@@ -617,7 +654,7 @@ DEFAULT_SECTIONS.city = "bank";
 
 const createInitialCasinoState = () => ({
   slotBet: "200",
-  slotDisplay: ["MASK", "CASH", "CROWN"],
+  slotDisplay: ["7", "BAR", "CHERRY"],
   slotResult: null,
   slotSpinning: false,
   rouletteChoice: "red",
@@ -768,6 +805,15 @@ const INITIAL = {
   },
   contractBoard: getActiveContractBoard(Date.now()),
   arena: normalizeArenaState(),
+  contacts: null,
+  cityEvent: null,
+  cityDirector: { claims: [] },
+  sessionPlans: { version: 1, active: null, claims: [], dismissed: [] },
+  planBoard: { active: null, proposals: [] },
+  rivals: { active: null, history: [], seenTriggers: [] },
+  rivalView: { active: null, history: [] },
+  empireProjects: { version: 1, active: null, completed: {}, history: [], directiveCooldownUntil: 0 },
+  empireProjectsView: { active: null, projects: [], completedCount: 0, directives: [] },
   tasksClaimed: [],
   regenRemainder: 0,
   hpRegenRemainder: 0,
@@ -955,6 +1001,7 @@ const normalizeGangMemberEntry = (entry, index = 0) => ({
 
 const normalizeGangDirectoryEntry = (entry, index = 0) => ({
   id: entry?.id || `gang-sync-${index}`,
+  identity: entry?.identity || null,
   name: entry?.name || "Gang",
   boss: entry?.boss || "Boss",
   bossUserId: entry?.bossUserId || null,
@@ -985,6 +1032,10 @@ const normalizeGangDirectoryEntry = (entry, index = 0) => ({
       ? { ...entry.weeklyProgress }
       : {},
   weeklyGoalClaimedAt: Number.isFinite(entry?.weeklyGoalClaimedAt) ? entry.weeklyGoalClaimedAt : null,
+  directorResponse:
+    entry?.directorResponse && typeof entry.directorResponse === "object" && !Array.isArray(entry.directorResponse)
+      ? { ...entry.directorResponse }
+      : null,
   jobBoard: Array.isArray(entry?.jobBoard) ? entry.jobBoard.map((job) => ({ ...job })) : [],
   jobProgress:
     entry?.jobProgress && typeof entry.jobProgress === "object" && !Array.isArray(entry.jobProgress)
@@ -1041,6 +1092,10 @@ const applyGangDirectoryState = (gangState, liveGang) => {
         : gangState.weeklyProgress,
     weeklyGoalClaimedAt:
       liveGang.weeklyGoalClaimedAt ?? gangState.weeklyGoalClaimedAt ?? null,
+    directorResponse:
+      liveGang.directorResponse && typeof liveGang.directorResponse === "object"
+        ? { ...liveGang.directorResponse }
+        : gangState.directorResponse,
     jobBoard:
       Array.isArray(liveGang.jobBoard) && liveGang.jobBoard.length
         ? liveGang.jobBoard.map((entry) => ({ ...entry }))
@@ -1149,36 +1204,7 @@ function nowTimeLabel() {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-function normalizeMarketPayload(payload, fallbackMarket, fallbackState, fallbackMeta) {
-  if (!payload) {
-    return {
-      dealerInventory: null,
-      market: fallbackMarket,
-      marketState: fallbackState,
-      marketMeta: fallbackMeta,
-    };
-  }
 
-  const nextMarketState =
-    (payload.marketState && !Array.isArray(payload.marketState) ? payload.marketState : null) ||
-    (payload.supply && !Array.isArray(payload.supply) ? payload.supply : null) ||
-    fallbackState;
-
-  return {
-    dealerInventory:
-      payload.dealerInventory && typeof payload.dealerInventory === "object" && !Array.isArray(payload.dealerInventory)
-        ? payload.dealerInventory
-        : null,
-    market: payload.prices || payload.market || fallbackMarket,
-    marketState: nextMarketState,
-    marketMeta: {
-      refreshedAt: payload.refreshedAt || fallbackMeta?.refreshedAt || null,
-      sellRate: payload.sellRate ?? fallbackMeta?.sellRate ?? 0.85,
-      npcFallbackMarkup: payload.npcFallbackMarkup ?? fallbackMeta?.npcFallbackMarkup ?? 1.16,
-      orderRules: payload.orderRules || fallbackMeta?.orderRules || null,
-    },
-  };
-}
 
 function normalizeContractBoardSnapshot(payload, fallbackHistory = []) {
   const fallbackBoard = getActiveContractBoard(Date.now());
@@ -1303,6 +1329,7 @@ function getGangProfileByName(game, gangName) {
   if (game.gang.joined && game.gang.name === gangName) {
     return {
       id: "self-gang",
+      identity: game.gang.identity,
       name: game.gang.name,
       boss: game.gang.membersList.find((member) => member.role === "Boss")?.name || game.player.name,
       bossUserId: null,
@@ -1538,22 +1565,8 @@ function syncClubRuntimeState(club, now = Date.now()) {
   };
 }
 
-function getSoloHeistOdds(player, effectivePlayer, gang, heist, activeBoosts = []) {
-  const arenaModifiers = getArenaActionModifiers(activeBoosts, "heist");
-  const playerPower = effectivePlayer.attack * 1.25 + effectivePlayer.defense * 0.85 + effectivePlayer.dexterity * 1.5 + player.respect * 0.45;
-  const heistDifficulty = heist.respect * 1.75 + heist.energy * 4 + heist.risk * 55;
-  const chance = clamp(
-    0.42 +
-      (playerPower - heistDifficulty) / 115 +
-      gang.members * 0.0025 +
-      Number(arenaModifiers.heistSuccessBonus || 0) -
-      player.heat * 0.0025,
-    0.05,
-    0.92
-  );
-  const jailChance = clamp(heist.risk * 0.8 + player.heat * 0.005 - effectivePlayer.defense * 0.006 - effectivePlayer.dexterity * 0.004, 0.08, 0.68);
-
-  return { chance, jailChance };
+function getSoloHeistOdds(player, _effectivePlayer, _gang, heist, activeBoosts = []) {
+  return calculateSoloHeistOdds(player, heist, activeBoosts);
 }
 
 function ProgressBar({ progress }) {
@@ -1766,18 +1779,42 @@ function getPlayerAvatarVisual(playerEntry) {
 }
 
 function getExplicitNoticeTone(message) {
-  if (/zlapany|cela|wiezieni|wtopa|spalony|nie wyszedl|przegral|nalot|przedawk/i.test(message)) {
-    return "failure";
-  }
+  if (isFailureNoticeMessage(message)) return "failure";
+  if (isSuccessNoticeMessage(message)) return "success";
   return "warning";
 }
 
+function isFailureNoticeMessage(message) {
+  return /zlapany|cela|wiezieni|wtopa|spalony|nie wyszedl|przegral|nalot|przedawk|obrywasz/i.test(message || "");
+}
+
+function isSuccessNoticeMessage(message) {
+  return /udany|zgarniasz|wpada|wygrywasz|zarobiles|odbierasz|zgarnac|rozkladasz|kupion|kupiles|zjedzone|wplacono|wyplacono|odebrano zadanie|zakladasz gang|wrzuciles do skarbca|zaplacono|trening zaliczony|nagroda/i.test(message || "");
+}
+
+function getSuccessNoticeTitle(message, cashDelta = 0) {
+  if (/gang|ekip/i.test(message) && /zaklad|rusza/i.test(message)) return "GANG GOTOWY";
+  if (/wplacono|wyplacono|bank|skarbiec/i.test(message)) return "KASA W RUCHU";
+  if (/zadanie|nagrod/i.test(message)) return "NAGRODA";
+  if (/trening/i.test(message)) return "TRENING ZALICZONY";
+  if (/kupion|kupiles|zjedzone|karnet|zaplacono/i.test(message) || cashDelta < 0) return "ZALATWIONE";
+  if (cashDelta > 0) return "ZAROBILES";
+  return "SIADLO";
+}
+
+function getFailureNoticeTitle(message) {
+  if (/zlapany|cela|wiezieni/i.test(message)) return "ZLAPANY";
+  if (/napad|robota|akcja/i.test(message)) return "AKCJA NIE SIADLA";
+  if (/nalot/i.test(message)) return "NALOT";
+  return "WSTRZAS";
+}
+
 function getExplicitNoticeTitle(message, tone) {
+  if (tone === "success") {
+    return getSuccessNoticeTitle(message);
+  }
   if (tone === "failure") {
-    if (/zlapany|cela|wiezieni/i.test(message)) return "ZLAPANY";
-    if (/napad|robota|akcja/i.test(message)) return "AKCJA NIE SIADLA";
-    if (/nalot/i.test(message)) return "NALOT";
-    return "WSTRZAS";
+    return getFailureNoticeTitle(message);
   }
   if (/heat|gliny|polic/i.test(message)) return "HEAT WZRASTA";
   if (/ryzyko|uwaga|ostroz/i.test(message)) return "RYZYKO";
@@ -1794,34 +1831,31 @@ function inferFeedbackNotice(message, deltas = {}) {
   let tone = "warning";
   let title = "AKCJA";
 
-  if (/udany|zgarniasz|wpada|wygrywasz|zarobiles|odbierasz|zgarnac|rozkladasz/i.test(normalized) || cashDelta > 0) {
-    tone = "success";
-  }
-  if (/zlapany|cela|wiezieni|wtopa|spalony|nie wyszedl|przegral|nalot|przedawk|obrywasz/i.test(normalized) || hpDelta < 0) {
+  if (isFailureNoticeMessage(normalized) || hpDelta < 0) {
     tone = "failure";
-  }
-  if (tone !== "failure" && (/heat|gliny|polic|ryzyko|ostroz/i.test(normalized) || heatDelta > 0)) {
+  } else if (isSuccessNoticeMessage(normalized) || /przej[eę]ta produkcja/i.test(normalized) || cashDelta > 0) {
+    tone = "success";
+  } else if (/heat|gliny|polic|ryzyko|ostroz/i.test(normalized) || heatDelta > 0) {
     tone = "warning";
   }
 
   if (tone === "success") {
-    if (/napad|robota|akcja/i.test(normalized)) title = "UDANY NAPAD";
-    else if (cashDelta > 0) title = "ZAROBILES";
-    else if (/odbierasz|zgarnac/i.test(normalized)) title = "ODBIERASZ HAJS";
-    else title = "SIADLO";
+    if (/przej[eę]ta produkcja|kupion|kupi[lł]e[sś]/i.test(normalized)) title = "ZAKUP UDANY";
+    else if (/napad|robota|akcja/i.test(normalized)) title = "UDANY NAPAD";
+    else title = getSuccessNoticeTitle(normalized, cashDelta);
   } else if (tone === "failure") {
-    if (/zlapany|cela|wiezieni/i.test(normalized)) title = "ZLAPANY";
-    else if (/napad|robota|akcja/i.test(normalized)) title = "NAPAD SPALONY";
-    else if (/nalot/i.test(normalized)) title = "NALOT";
-    else title = "WSTRZAS";
+    if (/napad|robota|akcja/i.test(normalized)) title = "NAPAD SPALONY";
+    else title = getFailureNoticeTitle(normalized);
   } else if (heatDelta > 0 || /heat|gliny|polic/i.test(normalized)) {
     title = "HEAT WZRASTA";
   } else {
-    title = "RYZYKO";
+    title = /ryzyko|uwaga|ostroz/i.test(normalized) ? "RYZYKO" : "AKCJA";
   }
 
-  if (cashDelta > 0) changeParts.push(`Zarobiles ${formatMoney(cashDelta)}`);
-  if (cashDelta < 0) changeParts.push(`Strata ${formatMoney(Math.abs(cashDelta))}`);
+  if (!/\$|zł/.test(normalized)) {
+    if (cashDelta > 0) changeParts.push(`Zarobiłeś ${formatMoney(cashDelta)}`);
+    if (cashDelta < 0) changeParts.push(`${tone === "failure" ? "Strata" : "Koszt"} ${formatMoney(Math.abs(cashDelta))}`);
+  }
   if (hpDelta > 0) changeParts.push(`HP +${hpDelta}`);
   if (hpDelta < 0) changeParts.push(`HP -${Math.abs(hpDelta)}`);
   if (heatDelta > 0) changeParts.push(`Heat +${heatDelta}`);
@@ -1916,6 +1950,8 @@ function AppRuntime() {
   const [apiStatus, setApiStatus] = useState("offline");
   const gameMode = getGameMode({ sessionToken, apiStatus });
   const [authReady, setAuthReady] = useState(false);
+  const [sessionRetryKey, setSessionRetryKey] = useState(0);
+  const [sessionReconnectPending, setSessionReconnectPending] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [startupError, setStartupError] = useState("");
@@ -1976,11 +2012,12 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   }, [game.player.avatarCustomUri]);
 
   const activeTab = TAB_DEFINITIONS.find((entry) => entry.id === tab) ?? TAB_DEFINITIONS[0];
-  const requestedSectionId = sectionByTab[tab] || activeTab.sections[0].id;
+  const allowedSections = activeTab.sections.filter((entry) => !entry.adminOnly || game.player.isAdmin);
+  const requestedSectionId = sectionByTab[tab] || allowedSections[0].id;
   const activeSection =
-    activeTab.sections.find((entry) => entry.id === requestedSectionId) || activeTab.sections[0];
+    allowedSections.find((entry) => entry.id === requestedSectionId) || allowedSections[0];
   const activeSectionId = activeSection.id;
-  const visibleSections = activeTab.sections.filter((entry) => !entry.hidden);
+  const visibleSections = allowedSections.filter((entry) => !entry.hidden);
   sessionTokenRef.current = sessionToken;
   gameSnapshotRef.current = game;
   uiSnapshotRef.current = { tab, activeSectionId };
@@ -2013,6 +2050,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   const currentClubVenue = useMemo(() => getCurrentClubVenue(game), [game]);
   const insideOwnClub = useMemo(() => isInsideOwnClub(game), [game]);
   const currentClubProfile = useMemo(() => getClubVenueProfile(game, currentClubVenue), [game, currentClubVenue]);
+  const hasOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
   const selectedWorldPlayer = useMemo(
     () => game.online?.roster.find((player) => player.id === game.online.selectedPlayerId) || null,
     [game.online]
@@ -2126,7 +2164,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     [game, gameMode]
   );
   const activeTaskStates = taskBoard.visibleTasks;
+  const starterJourney = useMemo(() => getStarterJourney(game, { mode: gameMode }), [game, gameMode]);
+  const career = useMemo(() => getCareer(game, { mode: gameMode }), [game, gameMode]);
   const topTask =
+    taskBoard.claimableTasks[0] ||
     activeTaskStates.find((task) => !task.onlineDisabled) ||
     activeTaskStates[0] ||
     null;
@@ -2196,7 +2237,6 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }),
     [game.player.isAdmin, game.player.adminGrantPresets, game.player.adminRespectPresets]
   );
-  const hasOnlineAuthority = Boolean(sessionToken && apiStatus === "online");
   const contractState = useMemo(() => normalizeContractState(game.contracts), [game.contracts]);
   const contractBoard = useMemo(() => {
     const normalizedBoard = normalizeContractBoardSnapshot(game.contractBoard, contractState.history);
@@ -2235,7 +2275,12 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   const getContractPreviewLinesForContract = (contract) => {
     const preview = getContractPreviewForContract(contract);
     const districtSummary = districtSummaries.find((entry) => entry.id === contract?.districtId) || null;
-    return getContractPreviewLines({ contract, preview, districtSummary });
+    return getContractPreviewLines({ contract, preview, contractState, districtSummary });
+  };
+  const getContractFrontHintForContract = (contract) => {
+    const preview = getContractPreviewForContract(contract);
+    const districtSummary = districtSummaries.find((entry) => entry.id === contract?.districtId) || null;
+    return getContractFrontHint({ contract, preview, contractState, districtSummary });
   };
 
   const mergeServerUser = (serverUser, marketPayload) => {
@@ -2259,6 +2304,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       : null;
 
     setGame((prev) => {
+      if (serverUser.id === prev.player.id && Number(serverUser.stateRevision || 0) < Number(prev.stateRevision || 0)) return prev;
       const nextClubState =
         serverUser?.club && typeof serverUser.club === "object"
           ? normalizeClubState({
@@ -2298,6 +2344,37 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
       return ({
       ...prev,
+      stateRevision: Number(serverUser.stateRevision || 0),
+      contacts: serverUser.contacts || null,
+      cityEvent: serverUser.cityEvent || prev.cityEvent,
+      cityDirector:
+        serverUser?.cityDirector && typeof serverUser.cityDirector === "object"
+          ? serverUser.cityDirector
+          : prev.cityDirector,
+      sessionPlans:
+        serverUser?.sessionPlans && typeof serverUser.sessionPlans === "object"
+          ? serverUser.sessionPlans
+          : prev.sessionPlans,
+      planBoard:
+        serverUser?.planBoard && typeof serverUser.planBoard === "object"
+          ? serverUser.planBoard
+          : prev.planBoard,
+      rivals:
+        serverUser?.rivals && typeof serverUser.rivals === "object"
+          ? serverUser.rivals
+          : prev.rivals,
+      rivalView:
+        serverUser?.rivalView && typeof serverUser.rivalView === "object"
+          ? serverUser.rivalView
+          : prev.rivalView,
+      empireProjects:
+        serverUser?.empireProjects && typeof serverUser.empireProjects === "object"
+          ? serverUser.empireProjects
+          : prev.empireProjects,
+      empireProjectsView:
+        serverUser?.empireProjectsView && typeof serverUser.empireProjectsView === "object"
+          ? serverUser.empireProjectsView
+          : prev.empireProjectsView,
       player: {
         ...prev.player,
         id:
@@ -2305,6 +2382,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
             ? serverUser.id.trim()
             : prev.player.id,
         name: safeProfile.name || prev.player.name,
+        restaurant: { ...(safeProfile.restaurant || {}) },
+        stamina: Number.isFinite(safeProfile.stamina) ? safeProfile.stamina : prev.player.stamina,
         username:
           typeof serverUser?.username === "string" && serverUser.username.trim()
             ? serverUser.username.trim()
@@ -2478,6 +2557,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setGame((prev) => ({
       ...prev,
       ...normalizeMarketPayload(marketSnapshot, prev.market, prev.marketState, prev.marketMeta),
+      cityEvent: marketSnapshot?.cityEvent || prev.cityEvent,
       dealerInventory:
         marketSnapshot?.dealerInventory && typeof marketSnapshot.dealerInventory === "object"
           ? { ...prev.dealerInventory, ...marketSnapshot.dealerInventory }
@@ -2490,7 +2570,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     const meta = await fetchCasinoMeta(token);
     setCasinoState((prev) => ({
       ...prev,
-      backendMeta: meta,
+      backendMeta: { ...meta, cooldownUntil: Date.now() + Number(meta.cooldownRemainingSeconds || 0) * 1000 },
       blackjack: meta?.blackjackSession
         ? {
             ...prev.blackjack,
@@ -2653,12 +2733,13 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         throw new Error("Brak poprawnego tokena sesji.");
       }
 
-    setSessionToken(token);
-    setApiStatus("online");
       const me = await fetchMe(token);
       if (!me?.user?.profile) {
         throw new Error("Backend nie zwrocil profilu gracza.");
       }
+      setSessionToken(token);
+      setApiStatus("online");
+      setSessionReconnectPending(false);
         mergeServerUser(me.user, {
           prices: me.market,
           products: me.marketState,
@@ -2671,7 +2752,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         const casinoMeta = await fetchCasinoMeta(token);
         setCasinoState((prev) => ({
           ...prev,
-          backendMeta: casinoMeta || null,
+          backendMeta: casinoMeta ? { ...casinoMeta, cooldownUntil: Date.now() + Number(casinoMeta.cooldownRemainingSeconds || 0) * 1000 } : null,
           blackjack: casinoMeta?.blackjackSession
             ? {
                 ...prev.blackjack,
@@ -2753,43 +2834,39 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }
   };
 
-  // TODO: TO_MIGRATE_TO_SERVER - passive accrual, local market refresh, escort loss events and fallback energy regen
   useEffect(() => {
     let cancelled = false;
-
     async function bootApi() {
+      setAuthReady(false);
       try {
         const storedToken = await getStoredAuthToken();
         if (cancelled) return;
         if (!storedToken) {
           setAuthReady(true);
           setApiStatus("offline");
+          setSessionReconnectPending(false);
           setStartupError("");
           return;
         }
-
         await hydrateAuthenticatedSession(storedToken);
         if (cancelled) return;
         setAuthReady(true);
         setStartupError("");
-      } catch (_error) {
-        if (!cancelled) {
-          try {
-            await clearStoredAuthToken();
-          } catch (_storageError) {}
-          setSessionToken(null);
-          setApiStatus("offline");
-          setAuthReady(true);
-          setStartupError(_error?.message || "Nie udalo sie odpalic zapisanej sesji.");
+      } catch (error) {
+        if (cancelled) return;
+        if (isInvalidSession(error)) {
+          try { await clearStoredAuthToken(); } catch (_storageError) {}
         }
+        setSessionToken(null);
+        setApiStatus("offline");
+        setSessionReconnectPending(!isInvalidSession(error));
+        setAuthReady(true);
+        setStartupError(isInvalidSession(error) ? "Sesja wygasła. Zaloguj się ponownie." : error.message || "Nie można teraz wczytać gry.");
       }
     }
-
     bootApi();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [sessionRetryKey]);
 
   useEffect(() => {
     if (!sessionToken || apiStatus !== "online") {
@@ -2879,6 +2956,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         const now = Date.now();
         const elapsedSeconds = Math.floor((now - prev.lastTick) / 1000);
         if (elapsedSeconds < 5) return prev;
+        if (isOnlineAuthority) return advanceOnlineDisplay(prev, now);
 
         const remainingBoosts = prev.activeBoosts.filter((boost) => boost.expiresAt > now);
         const expiredBoosts = prev.activeBoosts.filter((boost) => boost.expiresAt <= now);
@@ -3033,12 +3111,12 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       Animated.timing(noticeOpacity, {
         toValue: 1,
         duration: 180,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
       Animated.timing(noticeTranslateY, {
         toValue: 0,
         duration: 220,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ]);
 
@@ -3046,12 +3124,12 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       Animated.timing(noticeOpacity, {
         toValue: 0,
         duration: 180,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
       Animated.timing(noticeTranslateY, {
         toValue: -10,
         duration: 180,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ]);
 
@@ -3060,7 +3138,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       hide.start(({ finished }) => {
         if (finished) setNotice(null);
       });
-    }, 2900);
+    }, Math.min(10000, Math.max(4500, (notice.message?.length || 0) * 45)));
 
     return () => {
       clearTimeout(timer);
@@ -3070,7 +3148,13 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   }, [notice]);
 
   useEffect(() => {
+    const feedbackBootstrapReady = authReady && (!sessionToken || didHydrateSessionRef.current);
     const previousGame = previousGameRef.current;
+    if (!feedbackBootstrapReady) {
+      previousGameRef.current = game;
+      return;
+    }
+
     if (!didHydrateFeedbackRef.current) {
       previousGameRef.current = game;
       didHydrateFeedbackRef.current = true;
@@ -3108,13 +3192,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     });
 
     previousGameRef.current = game;
-  }, [game]);
+  }, [authReady, game, sessionToken]);
 
   const pushLog = (message) => {
     setGame((prev) => ({ ...prev, log: [message, ...prev.log].slice(0, 16) }));
-    const tone = /brakuje|nie masz|za ma(lo|ly)|zablokowane|potrzebujesz|najpierw|nie ma|tylko|brak/i.test(message)
-      ? getExplicitNoticeTone(message)
-      : "warning";
+    const tone = getExplicitNoticeTone(message);
 
     showExplicitNotice({
       tone,
@@ -3507,13 +3589,13 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       try {
         const result = await buyMealOnline(sessionToken, meal.id);
         const nextEnergy = Number(result?.user?.profile?.energy ?? previousEnergy);
-        const energyGain = Math.max(0, nextEnergy - previousEnergy);
+        const energyGain = Number(result?.result?.energyGain ?? Math.max(0, nextEnergy - previousEnergy));
         mergeServerUser(result.user);
         const summary = {
           id: Date.now(),
           mealId: meal.id,
           mealName: meal.name,
-          price: meal.price,
+          price: Number(result?.result?.cost ?? meal.price),
           energyGain,
           energyAfter: nextEnergy,
         };
@@ -3527,30 +3609,32 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         return false;
       }
     }
-    if (game.player.cash < meal.price) {
-      pushLog(`Brakuje kasy na ${meal.name}.`);
+    const quote = getRestaurantQuote(game.player, meal);
+    if (quote.error) {
+      pushLog(quote.error);
       return false;
     }
-    const nextEnergy = clamp(game.player.energy + meal.energy, 0, game.player.maxEnergy);
+    const nextEnergy = game.player.energy + quote.energyGain;
     const energyGain = Math.max(0, nextEnergy - game.player.energy);
     setGame((prev) => ({
       ...prev,
       player: {
         ...prev.player,
-        cash: prev.player.cash - meal.price,
-        energy: clamp(prev.player.energy + meal.energy, 0, prev.player.maxEnergy),
+        cash: prev.player.cash - quote.cost,
+        energy: prev.player.energy + quote.energyGain,
+        restaurant: { windowStartedAt: quote.allowance.windowStartedAt, energyUsed: quote.allowance.used + quote.energyGain },
       },
       stats: {
         ...prev.stats,
         mealsEaten: Number(prev.stats?.mealsEaten || 0) + 1,
       },
-      log: [`Zjedzone: ${meal.name}. Energia +${meal.energy}.`, ...prev.log].slice(0, 16),
+      log: [`Zjedzone: ${meal.name}. Energia +${quote.energyGain}.`, ...prev.log].slice(0, 16),
     }));
     const summary = {
       id: Date.now(),
       mealId: meal.id,
       mealName: meal.name,
-      price: meal.price,
+      price: quote.cost,
       energyGain,
       energyAfter: nextEnergy,
     };
@@ -4481,7 +4565,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }
     if (!requireOfflineDemoAuthority("Kupowanie biznesow")) return;
     if (game.player.respect < business.respect) return pushLog(`Masz za niski szacunek. Wymagany szacunek: ${business.respect}.`);
-    if (game.player.cash < business.cost) return pushLog(`Za malo gotowki na ${business.name}.`);
+    if (game.player.cash < getBusinessPurchaseCost(game, business)) return pushLog(`Za malo gotowki na ${business.name}.`);
 
     setGame((prev) => {
       const owned = prev.businessesOwned.find((entry) => entry.id === business.id);
@@ -4491,7 +4575,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
       return {
         ...prev,
-        player: { ...prev.player, cash: prev.player.cash - business.cost, rank: getRankTitle(prev.player.respect) },
+        player: { ...prev.player, cash: prev.player.cash - getBusinessPurchaseCost(prev, business), rank: getRankTitle(prev.player.respect) },
         gang: { ...prev.gang, influence: prev.gang.influence + 2, territory: prev.gang.territory + (business.kind === "imperium" ? 1 : 0) },
         businessesOwned,
         log: [`Kupiono ${business.name}. Imperium zaczyna drukowac pieniadz.`, ...prev.log].slice(0, 16),
@@ -4513,6 +4597,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     }
     const owned = game.businessesOwned.find((entry) => entry.id === business.id);
     if (!owned?.count) return pushLog("Najpierw musisz miec ten biznes.");
+    if (isBusinessUpgradeMaxed(game, business.id, safePath)) return pushLog("Ta ścieżka ma już maksymalny poziom.");
     const cost = getBusinessUpgradeCost(game, business, safePath);
     if (game.player.cash < cost) return pushLog(`Brakuje ${formatMoney(cost)} na upgrade ${business.name}.`);
 
@@ -5309,8 +5394,13 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       return { ok: false };
     }
     const productionRespectRequirement = getDrugProductionRespectRequirement(drug);
+    const productionEnergyCost = getDrugProductionEnergyCost(drug);
     if (game.player.respect < productionRespectRequirement) {
       pushLog(`Masz za niski szacunek. Wymagany szacunek: ${productionRespectRequirement}.`);
+      return { ok: false };
+    }
+    if (game.player.energy < productionEnergyCost) {
+      pushLog(`Potrzebujesz ${productionEnergyCost} EN na tę partię.`);
       return { ok: false };
     }
 
@@ -5341,6 +5431,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       };
 
       for (let index = 0; index < safeQuantity; index += 1) {
+        if (Number(nextState.player.energy || 0) < productionEnergyCost) break;
         const hasSupplies = Object.entries(drug.supplies).every(
           ([supplyId, amount]) => Number(nextState.supplies?.[supplyId] || 0) >= Number(amount || 0)
         );
@@ -5356,6 +5447,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         const bustedNow = Math.random() < bustChance;
         const jailSeconds =
           bustedNow && drug.unlockRespect >= 30 && Math.random() < bustChance * 0.42 ? randomBetween(180, 420) : 0;
+
+        nextState.player.energy = Math.max(0, Number(nextState.player.energy || 0) - productionEnergyCost);
 
         Object.entries(drug.supplies).forEach(([supplyId, amount]) => {
           nextState.supplies[supplyId] = Math.max(0, Number(nextState.supplies?.[supplyId] || 0) - Number(amount || 0));
@@ -6194,8 +6287,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     try {
       const result = await startOperationOnline(sessionToken, operationId);
       mergeServerUser(result.user);
+      return result.result;
     } catch (error) {
       pushLog(error.message);
+      throw error;
     }
   };
 
@@ -6205,8 +6300,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     try {
       const result = await advanceOperationOnline(sessionToken, choiceId);
       mergeServerUser(result.user);
+      return result.result;
     } catch (error) {
       pushLog(error.message);
+      throw error;
     }
   };
 
@@ -6217,14 +6314,92 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       const result = await executeOperationPlanOnline(sessionToken);
       mergeServerUser(result.user);
       showExplicitNotice({
-        tone: result?.result?.success ? "success" : "warning",
-        title: result?.result?.success ? "OPERACJA DOMKNIETA" : "OPERACJA SPALONA",
+        tone: result?.result?.pendingComplication ? "warning" : result?.result?.success ? "success" : "warning",
+        title: result?.result?.pendingComplication ? "KOMPLIKACJA" : result?.result?.success ? "OPERACJA DOMKNIETA" : "OPERACJA SPALONA",
         message: result?.result?.logMessage || "Operacja rozliczona.",
         deltas: null,
       });
+      return result.result;
     } catch (error) {
       pushLog(error.message);
+      throw error;
     }
+  };
+
+  const resolveOperation = async (responseId) => {
+    if (!canDoCriticalAction("Operacje")) return;
+    if (!sessionToken) return pushLog("Operacje w tej wersji sa liczone po stronie backendu.");
+    try {
+      const result = await resolveOperationOnline(sessionToken, responseId);
+      mergeServerUser(result.user);
+      showExplicitNotice({
+        tone: result?.result?.success ? "success" : result?.result?.partial ? "warning" : "warning",
+        title: result?.result?.success ? "OPERACJA DOMKNIĘTA" : result?.result?.partial ? "CZĘŚCIOWY SUKCES" : result?.result?.outcome === "retreat" ? "TAKTYCZNY ODWRÓT" : "OPERACJA SPALONA",
+        message: result?.result?.logMessage || "Operacja rozliczona.",
+        deltas: null,
+      });
+      return result.result;
+    } catch (error) {
+      pushLog(error.message);
+      throw error;
+    }
+  };
+
+  const respondToRival = async (choiceId) => {
+    if (!canDoCriticalAction("Konflikty")) return;
+    if (!sessionToken) return pushLog("Konflikty są rozliczane po stronie backendu.");
+    try {
+      const result = await respondToRivalOnline(sessionToken, choiceId);
+      mergeServerUser(result.user);
+      showExplicitNotice({
+        tone: result?.result?.resolved && result?.result?.success !== false ? "success" : "warning",
+        title: result?.result?.escalated ? "KONFLIKT ESKALUJE" : result?.result?.success === false ? "KOSZTOWNY FINAŁ" : "KONFLIKT ZAMKNIĘTY",
+        message: result?.result?.message || "Odpowiedź została zapisana.",
+        deltas: null,
+      });
+      return result.result;
+    } catch (error) {
+      pushLog(error.message);
+      throw error;
+    }
+  };
+
+  const startEmpireProjectAction = async (projectId) => {
+    if (!sessionToken) return pushLog("Przedsięwzięcia Imperium są rozliczane po stronie backendu.");
+    try {
+      const response = await startEmpireProjectOnline(sessionToken, projectId);
+      mergeServerUser(response.user);
+      showExplicitNotice({ tone: "success", title: "PRZEDSIĘWZIĘCIE URUCHOMIONE", message: response.result?.message, deltas: null });
+      return response.result;
+    } catch (error) { pushLog(error.message); throw error; }
+  };
+
+  const finalizeEmpireProjectAction = async (choiceId) => {
+    if (!sessionToken) return pushLog("Przedsięwzięcia Imperium są rozliczane po stronie backendu.");
+    try {
+      const response = await finalizeEmpireProjectOnline(sessionToken, choiceId);
+      mergeServerUser(response.user);
+      const isCityHeadquarters = response.result?.completion?.projectId === "city-headquarters";
+      showExplicitNotice({ tone: "success", title: isCityHeadquarters ? "MIASTO MA NOWE CENTRUM" : "ZNAK IMPERIUM ZDOBYTY", message: response.result?.message, deltas: null });
+      return response.result;
+    } catch (error) { pushLog(error.message); throw error; }
+  };
+
+  const runEmpireDirectiveAction = async (projectId, districtId) => {
+    if (!sessionToken) return pushLog("Dyrektywy Imperium są rozliczane po stronie backendu.");
+    try {
+      const response = await runEmpireDirectiveOnline(sessionToken, projectId, districtId);
+      mergeServerUser(response.user);
+      showExplicitNotice({ tone: "success", title: "DYREKTYWA WYKONANA", message: response.result?.message, deltas: null });
+      return response.result;
+    } catch (error) { pushLog(error.message); throw error; }
+  };
+
+  const cancelOperation = async () => {
+    if (!sessionToken) throw new Error("Połącz się z serwerem.");
+    const result = await cancelOperationOnline(sessionToken);
+    mergeServerUser(result.user);
+    return result.result;
   };
 
   const sendPrisonMessage = async () => {
@@ -6612,9 +6787,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       try {
         const result = await claimTaskOnline(sessionToken, task.id);
         mergeServerUser(result.user);
+        showExplicitNotice({ tone: "success", title: "NAGRODA ODEBRANA", message: `${task.title}: ${formatMoney(result.result?.rewardCash || 0)}${result.result?.rewardXp ? ` + ${result.result.rewardXp} XP` : ""}. Kolejny ruch czeka w misjach.` });
         return result?.result || true;
       } catch (error) {
         pushLog(error.message);
+        showExplicitNotice({ tone: "warning", title: "NAGRODA CZEKA", message: error.message });
         return false;
       }
     }
@@ -7225,7 +7402,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     return pool[randomBetween(0, pool.length - 1)];
   };
 
-  const animateRouletteResult = (selectedChoice, outcomeColor, onFinish) => {
+  const animateRouletteResult = (selectedChoice, outcomeColor, onFinish, settledNumber) => {
     let ticks = 0;
     const interval = setInterval(() => {
       ticks += 1;
@@ -7234,11 +7411,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
       if (ticks >= 18) {
         clearInterval(interval);
-        const result = getRouletteNumberForColor(outcomeColor);
+        const result = settledNumber ?? getRouletteNumberForColor(outcomeColor);
         setCasinoState((prev) => ({
           ...prev,
           rouletteSpinning: false,
-          rouletteDisplay: String(result).padStart(2, "0"),
+          rouletteDisplay: String(result),
           rouletteResult: { number: result, color: outcomeColor, selectedChoice },
           rouletteHistory: [{ number: result, color: outcomeColor }, ...prev.rouletteHistory].slice(0, 8),
         }));
@@ -7248,15 +7425,15 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   };
 
   const SLOT_SYMBOL_SETS = {
-    jackpot: ["CROWN", "CROWN", "CROWN"],
-    triple: ["MASK", "MASK", "MASK"],
-    double: ["CASH", "CASH", "BAR"],
-    single: ["CASH", "BAR", "DICE"],
-    miss: ["MASK", "DICE", "SKULL"],
+    jackpot: ["7", "7", "7"],
+    triple: ["BAR", "BAR", "BAR"],
+    double: ["CHERRY", "CHERRY", "BAR"],
+    single: ["CHERRY", "LEMON", "BAR"],
+    miss: ["LEMON", "BAR", "SKULL"],
   };
 
   const animateSlotResult = (symbols, onFinish) => {
-    const pool = ["MASK", "CASH", "BAR", "DICE", "SKULL", "CROWN"];
+    const pool = ["7", "BAR", "CHERRY", "LEMON"];
     let ticks = 0;
     const interval = setInterval(() => {
       ticks += 1;
@@ -7422,8 +7599,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   const spinRoulette = async () => {
     if (!canDoStreetAction("Kasyno nie wpuszcza ludzi w kajdankach.")) return;
     if (casinoState.rouletteSpinning) return;
-    const highRiskConfig = getCasinoGameConfig(casinoState.backendMeta, "highRisk", {
-      minBet: 50,
+    const highRiskConfig = getCasinoGameConfig(casinoState.backendMeta, "roulette", {
+      minBet: 100,
       maxBet: 15000,
     });
     const bet = Number(casinoState.rouletteBet || 0);
@@ -7448,19 +7625,15 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       }));
 
       try {
-        const result = await playHighRiskOnline(sessionToken, bet);
-        const outcomeColor = result.win
-          ? selectedChoice
-          : selectedChoice === "green"
-            ? (Math.random() < 0.5 ? "red" : "black")
-            : (Math.random() < 0.1 ? "green" : selectedChoice === "red" ? "black" : "red");
+        const result = await playRouletteOnline(sessionToken, bet, selectedChoice);
+        const outcomeColor = result.color;
 
         animateRouletteResult(selectedChoice, outcomeColor, () => {
           mergeServerUser(result.user);
           setCasinoState((prev) => ({
             ...prev,
             serverGame: {
-              mode: "highRisk",
+              mode: "roulette",
               win: result.win,
               stake: result.stake,
               totalReturn: result.totalReturn,
@@ -7468,7 +7641,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
             },
           }));
           refreshCasinoState(sessionToken).catch(() => {});
-        });
+        }, result.number);
         return;
       } catch (error) {
         setCasinoState((prev) => ({ ...prev, rouletteSpinning: false }));
@@ -7489,11 +7662,11 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
     const selectedChoice = casinoState.rouletteChoice;
     const result = randomBetween(0, 36);
-    const color = result === 0 ? "green" : result % 2 === 0 ? "black" : "red";
+    const color = rouletteOutcome(result, selectedChoice, bet).color;
     const won = selectedChoice === color;
     animateRouletteResult(selectedChoice, color, () => {
       if (won) {
-        const payout = color === "green" ? bet * 14 : bet * 2.1;
+        const payout = rouletteOutcome(result, selectedChoice, bet).totalReturn;
         setGame((prev) => ({
           ...prev,
           player: { ...prev.player, cash: prev.player.cash + payout },
@@ -7503,7 +7676,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       } else {
         pushLog(`Ruletka: ${color.toUpperCase()} ${result}. Stol zabral Twoj hajs.`);
       }
-    });
+      setCasinoState((prev) => ({ ...prev, serverGame: { mode: "roulette", ...rouletteOutcome(result, selectedChoice, bet) } }));
+    }, result);
   };
 
   const drawCard = () => {
@@ -8047,7 +8221,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         <SectionCard title="Profil gangu" subtitle="Boss, sklad, skarbiec i ruchy ekipy.">
           <HeroPanel
             eyebrow={selectedGangProfile.self ? "Twoj gang" : "Profil gangu"}
-            title={selectedGangProfile.name}
+            title={`${GANG_IDENTITIES.find((item) => item.id === selectedGangProfile.identity?.selected)?.mark || "◆"} ${selectedGangProfile.name}`}
             summary={selectedGangProfile.description}
             tone={selectedGangProfile.self ? "gold" : "danger"}
             pills={[
@@ -8208,6 +8382,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       ) : null}
       {!selectedGangProfile ? (
         <>
+          {game.gang.joined && <PremiumPanel game={game} token={sessionToken} onUser={mergeServerUser} gangOnly />}
           <HeroPanel
             eyebrow="Gang"
             title={game.gang.joined ? game.gang.name : "Wejdz do ekipy albo zaloz swoja"}
@@ -8345,7 +8520,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                         <View style={styles.entityHead}>
                           <EntityBadge visual={getGangVisual(gang.name)} />
                           <View style={styles.flexOne}>
-                            <Text style={styles.listCardTitle}>{gang.name}</Text>
+                            <Text style={[styles.listCardTitle, { color: GANG_IDENTITIES.find((item) => item.id === gang.identity?.selected)?.color || "#b7becb" }]}>{GANG_IDENTITIES.find((item) => item.id === gang.identity?.selected)?.mark || "◆"} {gang.name}</Text>
                             <Text style={styles.listCardMeta}>Boss {gang.boss} • Ludzie {gang.members} • Wejscie {gang.inviteRespectMin} RES • Wplywy {gang.influence}</Text>
                           </View>
                         </View>
@@ -9337,6 +9512,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     section: activeSectionId,
     apiStatus,
     game: projectedScreenGame,
+    token: sessionToken,
+    onUser: mergeServerUser,
     styles,
     SceneArtwork,
     SectionCard,
@@ -9410,6 +9587,9 @@ const [rankingCategory, setRankingCategory] = useState("respect");
   };
 
   const hubScreenProps = {
+    game,
+    token: sessionToken,
+    onUser: mergeServerUser,
     styles,
     SceneArtwork,
     SectionCard,
@@ -9428,12 +9608,15 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     hottestDistrictSummary,
     nextHeistTierLabel: nextHeistTier ? `${nextHeistTier.title} przy ${nextHeistTier.unlockRespect} RES` : "Masz wszystkie tiery",
     actions: {
+      collectBusinessIncome,
+      prepareBank: (amount) => { setBankAmountDraft(String(amount)); openQuickAction("bank"); },
       openSection: setActiveSection,
       openQuickAction,
       logout: handleLogout,
     },
   };
   const casinoScreenProps = {
+    cash: game.player.cash,
     apiStatus,
     casinoState,
     styles,
@@ -9515,6 +9698,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     },
     actions: {
       collectBusinessIncome,
+      openSection: setActiveSection,
       collectEscortIncome,
       buyBusiness,
       upgradeBusiness,
@@ -9538,6 +9722,9 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       sellDrugToDealer,
       consumeDrugFromClub,
       moveDrugToClub,
+      startEmpireProject: startEmpireProjectAction,
+      finalizeEmpireProject: finalizeEmpireProjectAction,
+      runEmpireDirective: runEmpireDirectiveAction,
     },
   };
 
@@ -9601,6 +9788,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     contractHistory,
     contractLoadoutSummaryLines,
     getContractPreviewForContract,
+    getContractFrontHintForContract,
     getContractPreviewLinesForContract,
     availableOperations,
     activeOperation,
@@ -9612,6 +9800,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     onStartOperation: startOperation,
     onAdvanceOperation: advanceOperation,
     onExecuteOperation: executeOperationPlan,
+    onResolveOperation: resolveOperation,
+    onRespondRival: respondToRival,
     onBlockedByCriticalCare: showCriticalCareBlockedNotice,
     onOpenHospital: () => setActiveSection("city", "hospital"),
     sceneBackgrounds: SCENE_BACKGROUNDS,
@@ -9674,10 +9864,15 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       case "profile:restaurant":
       case "profile:hospital":
         return <CityScreen {...cityScreenProps} section={activeSectionId === "dashboard" ? "districts" : activeSectionId} />;
+      case "city:contacts":
+        return <ContactsScreen game={game} token={sessionToken} onUser={mergeServerUser} />;
       case "profile:casino":
+      case "city:casino":
         return <CasinoScreen {...casinoScreenProps} />;
       case "heists:solo":
         return <HeistsScreen {...heistsScreenProps} section="solo" />;
+      case "heists:operations":
+        return <OperationsScreen {...heistsScreenProps} online={Boolean(sessionToken && apiStatus === "online")} onCancelOperation={cancelOperation} onOpenSection={setActiveSection} />;
       case "heists:contracts":
         return <HeistsScreen {...heistsScreenProps} section="contracts" />;
       case "heists:fightclub":
@@ -9693,7 +9888,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       case "empire:club":
         return <EmpireScreen section="club" {...empireScreenBaseProps} />;
       case "market:street":
-        return <MarketScreen section="drugs" {...marketScreenBaseProps} />;
+        return <MarketScreen section="street" {...marketScreenBaseProps} />;
       case "market:drugs":
         return <MarketScreen section="drugs" {...marketScreenBaseProps} />;
       case "market:items":
@@ -9736,6 +9931,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         return <ProfileMenuScreen section="community" {...profileMenuScreenProps} />;
       case "profile:log":
         return <ProfileScreen section="log" {...profileScreenBaseProps} />;
+      case "profile:admin":
+        return game.player.isAdmin ? <AdminScreen token={sessionToken} styles={styles} SectionCard={SectionCard} formatMoney={formatMoney} /> : <ProfileScreen section="summary" {...profileScreenBaseProps} />;
       default:
         return renderSoloHeists();
     }
@@ -9766,6 +9963,22 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     );
   }
 
+  if (sessionReconnectPending) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ExpoStatusBar style="light" />
+        <View style={styles.loadingScreen}>
+          <Text style={styles.loadingTitle}>Wracamy do miasta</Text>
+          <Text style={styles.loadingText}>{startupError}</Text>
+          <Text style={styles.loadingText}>Twoja sesja jest zapisana. Połącz ponownie, aby wczytać aktualny postęp.</Text>
+          <Pressable accessibilityRole="button" onPress={() => setSessionRetryKey((value) => value + 1)} style={[styles.inlineButton, { alignSelf: "center", marginTop: 16 }]}>
+            <Text style={styles.inlineButtonText}>Połącz ponownie</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!sessionToken) {
     return (
       <AuthScreen
@@ -9775,6 +9988,10 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         onRegister={handleAuthRegister}
       />
     );
+  }
+
+  if (!game.contacts?.classId && !game.player.isAdmin) {
+    return <SafeAreaView style={styles.safeArea}><ContactsScreen game={game} token={sessionToken} onUser={(user) => { mergeServerUser(user); setActiveSection("city", "contacts"); }} initial /></SafeAreaView>;
   }
 
   return (
@@ -9809,6 +10026,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
             {notice && !isPhone ? (
               <Animated.View
+                accessibilityLiveRegion="polite"
+                accessibilityRole="alert"
                 style={[
                   styles.noticeBanner,
                   notice.tone === "success"
@@ -9863,10 +10082,24 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               </Animated.View>
             ) : null}
 
-              <View style={styles.tabBarShell}>
+            {isPhone ? (
+              <View style={styles.phoneNavigation} accessibilityRole="tablist">
+                {[{ id: "start", label: "Start" }, ...TAB_DEFINITIONS].map((item) => {
+                  const selected = item.id === "start" ? isHubActive : !isHubActive && tab === item.id;
+                  return (
+                    <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{ selected }}
+                      onPress={() => { if (item.id === "start") setIsHubActive(true); else { setTab(item.id); setIsHubActive(false); } }}
+                      style={[styles.phoneNavItem, selected && styles.tabButtonClassicActive]}>
+                      <MaterialCommunityIcons name={TAB_ICONS[item.id] || "circle-outline"} size={19} color={selected ? "#f0c24d" : "#b7bfce"} />
+                      <Text style={[styles.tabButtonClassicText, selected && styles.tabButtonClassicTextActive]}>{item.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : <View style={styles.tabBarShell}>
                 <Pressable onPress={() => setIsHubActive(true)} style={[styles.tabButtonClassic, isHubActive && styles.tabButtonClassicActive, styles.tabButtonHub]}>
                   <View style={styles.tabButtonClassicInner}>
-                    <Text style={[styles.tabButtonClassicIcon, isHubActive && styles.tabButtonClassicIconActive]}>{TAB_SIGILS.start}</Text>
+                    <MaterialCommunityIcons name={TAB_ICONS.start} size={18} color={isHubActive ? "#f0c24d" : "#949bab"} />
                     <Text style={[styles.tabButtonClassicText, isHubActive && styles.tabButtonClassicTextActive]}>Start</Text>
                   </View>
                 </Pressable>
@@ -9886,27 +10119,16 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                     style={[styles.tabButtonClassic, !isHubActive && tab === item.id && styles.tabButtonClassicActive]}
                     >
                       <View style={styles.tabButtonClassicInner}>
-                        <Text style={[styles.tabButtonClassicIcon, !isHubActive && tab === item.id && styles.tabButtonClassicIconActive]}>{TAB_SIGILS[item.id]}</Text>
+                        <MaterialCommunityIcons name={TAB_ICONS[item.id] || "circle-outline"} size={18} color={!isHubActive && tab === item.id ? "#f0c24d" : "#949bab"} />
                         <Text style={[styles.tabButtonClassicText, !isHubActive && tab === item.id && styles.tabButtonClassicTextActive]}>{item.label}</Text>
                       </View>
                     </Pressable>
                   ))}
                 </ScrollView>
-            </View>
+            </View>}
 
             {!isHubActive && isPhone && visibleSections.length > 1 ? (
-              <View style={styles.mobileTopSectionRail}>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mobileTopSectionRailContent}>
-                    {visibleSections.map((item) => (
-                      <Pressable key={item.id} onPress={() => setActiveSection(tab, item.id)} style={[styles.mobileTopSectionChip, activeSectionId === item.id && styles.mobileTopSectionChipActive]}>
-                        <View style={styles.mobileTopSectionInner}>
-                          <Text style={[styles.mobileTopSectionIcon, activeSectionId === item.id && styles.mobileTopSectionIconActive]}>{TAB_SIGILS[item.id] || "•"}</Text>
-                          <Text style={[styles.mobileTopSectionText, activeSectionId === item.id && styles.mobileTopSectionTextActive]}>{item.label}</Text>
-                        </View>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-              </View>
+              <MobileSectionNav key={tab} items={visibleSections} activeId={activeSectionId} onSelect={(id) => setActiveSection(tab, id)} icons={TAB_ICONS} styles={styles} />
             ) : null}
 
             <View style={[styles.mainBoard, isCompact && styles.mainBoardCompact]}>
@@ -9928,10 +10150,27 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                 {isPhone ? (
                   <></>
                 ) : null}
-                <View style={styles.contentHeaderBar}>
+                {isHubActive || !["bank", "restaurant", "casino"].includes(activeSectionId) ? <View style={styles.contentHeaderBar}>
                   <Text style={styles.contentHeaderLabel}>{isHubActive ? "Start" : activeSection.title}</Text>
                   <Text style={styles.contentHeaderSub}>{isHubActive ? "Hub gry" : "Hustle City"}</Text>
-                </View>
+                </View> : null}
+                {starterJourney.finished && (isHubActive || activeSectionId === "tasks") ? (
+                  <CareerPanel career={career} onNavigate={setActiveSection} onClaim={claimTask} formatMoney={formatMoney}
+                    recovery={criticalCareStatus.active ? { tab: "city", section: "hospital", label: "Wróć do zdrowia", hint: "Cele i nagrody pozostają zapisane. Najpierw sprawdź leczenie." } : inJail(game.player) ? { tab: "heists", section: "prison", label: "Sprawdź wyjście", hint: "Wrócisz do celu po opuszczeniu aresztu." } : null} />
+                ) : (!starterJourney.finished && (isHubActive || activeSectionId === "tasks")) ? (
+                  <StarterJourney
+                    journey={starterJourney}
+                    onNavigate={setActiveSection}
+                    onClaim={claimTask}
+                    formatMoney={formatMoney}
+                    nextUnlock={nextHeistTier ? `${nextHeistTier.title} przy ${nextHeistTier.unlockRespect} RES` : null}
+                    recovery={criticalCareStatus.active
+                      ? { tab: "city", section: "hospital", label: "Sprawdź leczenie", hint: "Najpierw wróć do zdrowia. Postęp misji i gotowe nagrody pozostają zapisane." }
+                      : inJail(game.player)
+                        ? { tab: "heists", section: "prison", label: "Sprawdź wyjście z celi", hint: "Jesteś w areszcie. Sprawdź czas do wyjścia; po powrocie dokończysz swój krok." }
+                        : null}
+                  />
+                ) : null}
                 {activeSectionContent}
               </View>
 
@@ -9962,6 +10201,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         {renderQuickActionContent()}
       </QuickActionModal>
       <ResultModal
+        transient={!quickActionModal && !/areszt|krytycz|awans|zlapany|złapany|szacunek rośnie/i.test(`${notice?.title || ""} ${notice?.message || ""}`)}
         visible={Boolean(notice && isPhone && (!quickActionModal || notice?.allowWhileQuickAction))}
         tone={notice?.tone === "failure" ? "failure" : notice?.tone === "success" ? "success" : "warning"}
         title={notice?.title || "INFO"}
@@ -9998,11 +10238,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#050505",
     borderWidth: 1,
     borderColor: "#272727",
-    shadowColor: "#000000",
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 20 },
-    elevation: 20,
+    ...createShadowStyle({
+      color: "#000000",
+      opacity: 0.45,
+      radius: 24,
+      offsetY: 20,
+      elevation: 20,
+    }),
   },
   topStrip: { minHeight: 126, borderBottomWidth: 1, borderBottomColor: "#343434", overflow: "hidden" },
   topStripVisual: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0 },
@@ -10068,8 +10310,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   mastheadImagePhone: { minHeight: 228 },
-  mastheadImageInner: { resizeMode: "cover" },
-  mastheadImageInnerPhone: { resizeMode: "contain" },
   mastheadOverlay: { minHeight: 252, justifyContent: "flex-end" },
   mastheadHeroCopy: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 18, gap: 8, maxWidth: 560 },
   mastheadEyebrow: { color: "#f4c86a", fontSize: 11, fontWeight: "900", textTransform: "uppercase", letterSpacing: 1.4 },
@@ -10089,6 +10329,8 @@ const styles = StyleSheet.create({
   noticeDeltaChipWarning: { backgroundColor: "rgba(115,83,22,0.28)", borderColor: "rgba(227,182,77,0.48)" },
   noticeDeltaText: { color: "#f7f2ea", fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
   tabBarShell: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#292c33", backgroundColor: "#07080b" },
+  phoneNavigation: { flexDirection: "row", flexWrap: "wrap", gap: 6, padding: 8, borderBottomWidth: 1, borderColor: "#292c33" },
+  phoneNavItem: { flexBasis: "22%", flexGrow: 1, minHeight: 54, paddingVertical: 7, gap: 4, alignItems: "center", justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#2f333b", backgroundColor: "#101216" },
   tabBarClassic: { flex: 1, backgroundColor: "#07080b", maxHeight: 70 },
   tabBarClassicContent: { paddingHorizontal: 10, paddingVertical: 10, gap: 10, alignItems: "center" },
   tabButtonClassic: { minWidth: 108, height: 50, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", borderRadius: 18, borderWidth: 1, borderColor: "#2f333b", backgroundColor: "#101216" },
@@ -10356,7 +10598,23 @@ const styles = StyleSheet.create({
   blackjackLabel: { color: "#f4d37e", fontWeight: "800", marginBottom: 8 },
   blackjackTotal: { color: "#f1efe8", fontWeight: "700", marginTop: 10 },
   cardFan: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  playingCard: { width: 68, height: 96, borderRadius: 8, backgroundColor: "#f7f1e7", borderWidth: 1, borderColor: "#d6cbb8", padding: 8, justifyContent: "space-between", shadowColor: "#000000", shadowOpacity: 0.25, shadowOffset: { width: 0, height: 6 }, shadowRadius: 8, elevation: 4 },
+  playingCard: {
+    width: 68,
+    height: 96,
+    borderRadius: 8,
+    backgroundColor: "#f7f1e7",
+    borderWidth: 1,
+    borderColor: "#d6cbb8",
+    padding: 8,
+    justifyContent: "space-between",
+    ...createShadowStyle({
+      color: "#000000",
+      opacity: 0.25,
+      radius: 8,
+      offsetY: 6,
+      elevation: 4,
+    }),
+  },
   playingCardBack: { backgroundColor: "#5b3529", borderColor: "#8d6747", alignItems: "center", justifyContent: "center" },
   playingCardBackText: { color: "#f4d37e", fontWeight: "900", fontSize: 18 },
   playingCardRank: { color: "#1f1f1f", fontWeight: "900", fontSize: 22 },
@@ -10367,7 +10625,3 @@ const styles = StyleSheet.create({
   flexOne: { flex: 1 },
   alignEnd: { alignItems: "flex-end", justifyContent: "center", gap: 6 },
 });
-
-
-
-

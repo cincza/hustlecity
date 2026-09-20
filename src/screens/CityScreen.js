@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
+import { getOperationCondition } from "../../shared/operations.js";
 import { getDistrictAlertText, getDistrictEffectLines } from "../game/selectors/metaGameplay";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 import { BankTransferPanel } from "../components/BankTransferPanel";
@@ -8,6 +10,7 @@ import { GymSection } from "../components/GymSection";
 import { HospitalSection } from "../components/HospitalSection";
 import { MissionPlaceholderTile, MissionTile } from "../components/MissionTile";
 import { RestaurantSection } from "../components/RestaurantSection";
+import CityEventPanel from "../components/CityEventPanel";
 
 const MAX_GYM_BATCH = 10;
 
@@ -24,6 +27,8 @@ export function CityScreen({
   section,
   apiStatus,
   game,
+  token,
+  onUser,
   styles,
   SceneArtwork,
   SectionCard,
@@ -151,7 +156,7 @@ export function CityScreen({
           <Text style={styles.listCardReward}>{formatMoney(totalBusinessIncome)}/min</Text>
         </View>
         <StatLine label="Do odbioru" value={`${formatAccruedMoney(businessCash)} / ${formatMoney(businessCollectionCap)}`} visual={systemVisuals.cash} />
-        <StatLine label="Cap 24h za" value={formatLongDuration(businessCapEta)} />
+        <StatLine label="Cap pasywny za" value={formatLongDuration(businessCapEta)} />
         <StatLine label="Ostatni odbior" value={formatCollectionStamp(game.collections?.businessCollectedAt)} />
         <ActionTile
           title="Odbierz biznesy"
@@ -174,7 +179,7 @@ export function CityScreen({
           <Text style={styles.listCardReward}>{formatMoney(totalEscortIncome)}/min</Text>
         </View>
         <StatLine label="Do odbioru" value={`${formatAccruedMoney(escortCash)} / ${formatMoney(escortCollectionCap)}`} visual={systemVisuals.street} />
-        <StatLine label="Cap 24h za" value={formatLongDuration(escortCapEta)} />
+        <StatLine label="Cap pasywny za" value={formatLongDuration(escortCapEta)} />
         <StatLine label="Ostatni odbior" value={formatCollectionStamp(game.collections?.escortCollectedAt)} />
         <ActionTile
           title="Odbierz ulice"
@@ -195,22 +200,23 @@ export function CityScreen({
         })
       : [];
     const districtHeroTitle = criticalCareActive
-      ? "Miasto zyje dalej bez Ciebie"
+      ? "Miasto żyje dalej bez Ciebie"
       : focusDistrictSummary?.name
-        ? `${focusDistrictSummary.name} jest teraz glownym frontem`
-        : "Dzielnice trzymaja tempo miasta";
+        ? `${focusDistrictSummary.name} jest teraz głównym frontem`
+        : "Dzielnice trzymają tempo miasta";
     const districtHeroSummary = criticalCareActive
-      ? `Jestes na ${activeCriticalCareMode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ostrej akcji"}, ale dalej widzisz gdzie gang powinien cisnac influence i gdzie robi sie za goraco.`
-      : "To nie jest drugi dashboard. Tutaj sprawdzasz tylko walke o teren: fokus gangu, presje policji i realny wplyw dzielnic na klub, operacje i cale zaplecze.";
+      ? `Jesteś na ${activeCriticalCareMode?.label || "intensywnej terapii"} po ${criticalCareStatus?.source || "ostrej akcji"}, ale nadal widzisz, gdzie ekipa powinna naciskać i gdzie robi się za gorąco.`
+      : "Tu liczy się walka o teren: kierunek działań gangu, presja policji i wpływ dzielnic na klub, operacje oraz całe zaplecze.";
     return (
       <>
         <SceneArtwork
           eyebrow="Dzielnice"
           title="Fronty miasta"
-          lines={["Tutaj widzisz, gdzie naciskac influence i gdzie trzeba odpuscic presje."]}
+          lines={["Widzisz, gdzie budować wpływy i gdzie trzeba przeczekać policyjny nacisk."]}
           accent={["#23180f", "#0f1014", "#050505"]}
           source={sceneBackgrounds.city}
         />
+        <CityEventPanel game={game} token={token} onUser={onUser} />
         <HeroPanel
           eyebrow={criticalCareActive ? "Stan krytyczny" : criticalCareProtected ? "Powrot do gry" : "Dzielnice"}
           title={districtHeroTitle}
@@ -248,7 +254,24 @@ export function CityScreen({
           ]}
         />
 
-        <SectionCard title="Fronty miasta" subtitle="Tu nie ma juz drugiego dashboardu. Jest tylko walka o teren i to, co realnie zmienia gre.">
+        {Object.keys(game.empireProjects?.completed || {}).length ? (
+          <SectionCard title="Znaki Imperium" subtitle="Te osiągnięcia są częścią publicznej historii miasta. Nie dają ukrytego mnożnika siły ani dochodu.">
+            {Object.values(game.empireProjects.completed).map((completion) => (
+              <View key={completion.projectId} style={styles.listCard}>
+                <View style={styles.listCardHeader}>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.listCardTitle}>{completion.projectName || completion.projectId}</Text>
+                    <Text style={styles.listCardMeta}>Droga: {completion.choiceName || completion.choiceId} · ukończono {new Date(completion.completedAt).toLocaleDateString("pl-PL")}</Text>
+                  </View>
+                  <Tag text="DZIEDZICTWO" />
+                </View>
+              </View>
+            ))}
+            <Pressable accessibilityRole="button" onPress={() => actions.openSection("empire", "businesses")} style={styles.inlineButton}><Text style={styles.inlineButtonText}>Otwórz Przedsięwzięcia Imperium</Text></Pressable>
+          </SectionCard>
+        ) : null}
+
+        <SectionCard title="Fronty miasta" subtitle="Każda dzielnica ma własny rytm, ludzi i cenę błędu. Tu wybierasz, gdzie twoja ekipa zostawia ślad.">
           <View style={styles.mobileStatusGrid}>
             <View style={styles.mobileStatusCard}>
               <Text style={styles.mobileStatusLabel}>Fokus gangu</Text>
@@ -263,13 +286,15 @@ export function CityScreen({
           </View>
           {Array.isArray(districtSummaries)
             ? districtSummaries.map((district) => (
-                <View key={district.id} style={styles.listCard}>
+                <View key={district.id} style={[styles.listCard, { borderTopWidth: 3, borderTopColor: district.accent || "#b79862" }]}>
                   <View style={styles.listCardHeader}>
-                  <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{district.name}</Text>
+                  <View style={[styles.flexOne, { flexDirection: "row", alignItems: "center", gap: 10 }]}>
+                      <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: `${district.accent || "#b79862"}1F` }}><MaterialCommunityIcons name={district.icon || "map-marker-outline"} size={22} color={district.accent || "#b79862"} /></View>
+                      <View style={styles.flexOne}><Text style={[styles.listCardTitle, { color: district.accent || undefined }]}>{district.name}</Text>
                       <Text style={styles.listCardMeta}>
                         {district.controlLabel} | Presja: {district.pressureLabel} | {district.bonusLabel}
                       </Text>
+                      </View>
                     </View>
                     {game.gang?.joined ? (
                       <Pressable
@@ -282,7 +307,11 @@ export function CityScreen({
                       </Pressable>
                     ) : null}
                   </View>
+                  <Text style={[styles.listCardTitle, { fontSize: 14 }]}>{district.signature}</Text>
+                  <Text style={styles.listCardMeta}>{district.streetLine}</Text>
                   <Text style={styles.listCardMeta}>{district.note}</Text>
+                  <Text style={styles.listCardMeta}>Warunki operacji: {getOperationCondition(district.id).label}. {getOperationCondition(district.id).summary}</Text>
+                  <Pressable accessibilityRole="button" onPress={() => actions.openSection("heists", "operations")} style={styles.inlineButton}><Text style={styles.inlineButtonText}>Zaplanuj operację</Text></Pressable>
                   {getDistrictEffectLines(district, {
                     focused: game.gang?.focusDistrictId === district.id,
                     gangEffects,
@@ -299,23 +328,23 @@ export function CityScreen({
             : null}
         </SectionCard>
 
-        <SectionCard title="Co to zmienia" subtitle="Krotko: dlaczego dzielnice w ogole obchodza Cie w praktyce.">
+        <SectionCard title="Co to zmienia" subtitle="Każdy front odbija się na twoich interesach, operacjach i ekipie.">
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Klub</Text>
-              <Text style={styles.mobileOverviewValueSmall}>Traffic, pressure i incydenty leca z dzielnicy.</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Ruch gości, policyjny nacisk i incydenty zależą od dzielnicy.</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Operacje</Text>
-              <Text style={styles.mobileOverviewValueSmall}>Hot zone podbija leak, prep i ryzyko.</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Gorąca strefa podnosi koszt przygotowań, ryzyko i szansę przecieku.</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Fabryki</Text>
-              <Text style={styles.mobileOverviewValueSmall}>Goraca dzielnica cisnie presje i robi przypal.</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Gorąca dzielnica zwiększa nacisk i ryzyko nalotu.</Text>
             </View>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Gang</Text>
-              <Text style={styles.mobileOverviewValueSmall}>Fokus daje bonus do influence i pcha teren pod ekipe.</Text>
+              <Text style={styles.mobileOverviewValueSmall}>Wybrany front pomaga ekipie szybciej budować lokalne wpływy.</Text>
             </View>
           </View>
         </SectionCard>
@@ -345,6 +374,7 @@ export function CityScreen({
                   task={task}
                   formatMoney={formatMoney}
                   onClaim={actions.claimTask}
+                  onNavigate={actions.openSection}
                 />
               ))}
             </View>
@@ -369,6 +399,7 @@ export function CityScreen({
                 task={task}
                 formatMoney={formatMoney}
                 onClaim={actions.claimTask}
+                onNavigate={actions.openSection}
               />
             ))}
             {placeholderTasks.map((slot) => (
@@ -424,6 +455,7 @@ export function CityScreen({
         formatMoney={formatMoney}
         energy={game.player.energy}
         maxEnergy={game.player.maxEnergy}
+        player={game.player}
         onEat={actions.handleEat}
       />
     );

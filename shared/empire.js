@@ -16,6 +16,8 @@ export const BUSINESSES = [
   { id: "tower", name: "Siec lokali premium", respect: 30, cost: 420000, incomePerHour: 10500, incomePerMinute: 175, kind: "imperium" },
 ];
 
+export const BUSINESS_UPGRADE_MAX_LEVEL = 8;
+
 export const SUPPLIERS = [
   { id: "tobacco", name: "Tyton i filtry", unit: "karton", price: 55 },
   { id: "grain", name: "Zboze i zacier", unit: "worek", price: 60 },
@@ -111,8 +113,8 @@ export function normalizeBusinessUpgrades(upgrades) {
       .map(([businessId, value]) => [
         businessId,
         {
-          speedLevel: Math.max(0, Math.floor(Number(value?.speedLevel || 0))),
-          cashLevel: Math.max(0, Math.floor(Number(value?.cashLevel || 0))),
+          speedLevel: Math.min(BUSINESS_UPGRADE_MAX_LEVEL, Math.max(0, Math.floor(Number(value?.speedLevel || 0)))),
+          cashLevel: Math.min(BUSINESS_UPGRADE_MAX_LEVEL, Math.max(0, Math.floor(Number(value?.cashLevel || 0)))),
         },
       ])
   );
@@ -159,10 +161,12 @@ export function normalizeBusinessCollections(collections) {
 export function getBusinessUpgradeState(state, businessId) {
   const upgrades = state?.businessUpgrades || {};
   const current = upgrades?.[businessId] || {};
+  const speedLevel = Math.min(BUSINESS_UPGRADE_MAX_LEVEL, Math.max(0, Math.floor(Number(current.speedLevel || 0))));
+  const cashLevel = Math.min(BUSINESS_UPGRADE_MAX_LEVEL, Math.max(0, Math.floor(Number(current.cashLevel || 0))));
   return {
-    speedLevel: Number(current.speedLevel || 0),
-    cashLevel: Number(current.cashLevel || 0),
-    totalLevel: Number(current.speedLevel || 0) + Number(current.cashLevel || 0),
+    speedLevel,
+    cashLevel,
+    totalLevel: speedLevel + cashLevel,
   };
 }
 
@@ -178,7 +182,19 @@ export function getBusinessUpgradeCost(state, business, path) {
   const safePath = path === "speed" ? "speed" : "cash";
   const upgrade = getBusinessUpgradeState(state, business?.id);
   const level = safePath === "speed" ? upgrade.speedLevel : upgrade.cashLevel;
-  return Math.round(Number(business?.cost || 0) * (0.45 + level * 0.2));
+  const count = Math.max(1, Number(state?.businessesOwned?.find((entry) => entry.id === business.id)?.count || 1));
+  return Math.round(Number(business?.cost || 0) * (0.45 + level * 0.2) * count);
+}
+
+export function isBusinessUpgradeMaxed(state, businessId, path) {
+  const safePath = path === "speed" ? "speed" : "cash";
+  const upgrade = getBusinessUpgradeState(state, businessId);
+  return Number(safePath === "speed" ? upgrade.speedLevel : upgrade.cashLevel) >= BUSINESS_UPGRADE_MAX_LEVEL;
+}
+
+export function getBusinessPurchaseCost(state, business) {
+  const count = Math.max(0, Number(state?.businessesOwned?.find((entry) => entry.id === business.id)?.count || 0));
+  return Math.round(Number(business?.cost || 0) * (1 + count * 0.5));
 }
 
 export function getBusinessUpgradePreview(state, business, count = 1) {
@@ -213,6 +229,8 @@ export function getBusinessUpgradePreview(state, business, count = 1) {
     cashCost,
     nextSpeedIncome: getBusinessEffectiveIncomePerMinute(speedState, business, count),
     nextCashIncome: getBusinessEffectiveIncomePerMinute(cashState, business, count),
+    speedMaxed: isBusinessUpgradeMaxed(state, business.id, "speed"),
+    cashMaxed: isBusinessUpgradeMaxed(state, business.id, "cash"),
   };
 }
 
@@ -256,10 +274,18 @@ export function getFactoryRisk(factory) {
 export function getDrugProductionRespectRequirement(drug) {
   const safeDrug = drug || {};
   const factory = findFactoryById(safeDrug.factoryId);
-  if (factory) {
-    return Math.max(0, Math.floor(Number(factory.respect || 0)));
-  }
-  return Math.max(0, Math.floor(Number(safeDrug.unlockRespect || 0)));
+  return Math.max(
+    0,
+    Math.floor(Number(factory?.respect || 0)),
+    Math.floor(Number(safeDrug.unlockRespect || 0))
+  );
+}
+
+export function getDrugProductionEnergyCost(drug) {
+  const requiredRespect = getDrugProductionRespectRequirement(drug);
+  if (requiredRespect > 30) return 3;
+  if (requiredRespect > 12) return 2;
+  return 1;
 }
 
 export function getDrugBatchSupplyCost(drug, suppliers = SUPPLIERS) {

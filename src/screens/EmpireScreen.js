@@ -1,4 +1,5 @@
 import React from "react";
+import { getBusinessPurchaseCost, getDrugProductionEnergyCost, getDrugProductionRespectRequirement } from "../../shared/empire.js";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getFactoryDistrictId } from "../../shared/districts.js";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
@@ -103,36 +104,28 @@ export function EmpireScreen({
   const [businessPane, setBusinessPane] = React.useState("owned");
   const totalOwnedBusinessCount = ownedBusinesses.reduce((sum, business) => sum + Number(business.count || 0), 0);
   const totalCollectableCash = businessCollectableCash + escortCollectableCash;
-  const bestBusinessUpgrade = ownedBusinesses.reduce((best, business) => {
-    const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, business.count);
-    if (!preview) return best;
-
-    const speedGain = Math.max(0, Number(preview.nextSpeedIncome || 0) - Number(preview.currentIncome || 0));
-    const cashGain = Math.max(0, Number(preview.nextCashIncome || 0) - Number(preview.currentIncome || 0));
-    const speedCandidate = {
-      business,
-      path: "speed",
-      cost: Number(preview.speedCost || 0),
-      gain: speedGain,
-      label: "Szybszy obrot",
-    };
-    const cashCandidate = {
-      business,
-      path: "cash",
-      cost: Number(preview.cashCost || 0),
-      gain: cashGain,
-      label: "Grubsza koperta",
-    };
-    const candidate = speedCandidate.cost <= cashCandidate.cost ? speedCandidate : cashCandidate;
-    if (!best) return candidate;
-    if (candidate.cost < best.cost) return candidate;
-    if (candidate.cost === best.cost && candidate.gain > best.gain) return candidate;
-    return best;
-  }, null);
-  const ownedFactoryCount = factories.filter((factory) => helpers.hasFactory(safeGame, factory.id)).length;
   const [factoryPane, setFactoryPane] = React.useState("owned");
   const [managedFactoryId, setManagedFactoryId] = React.useState(null);
   const [buyFactoryDetailsId, setBuyFactoryDetailsId] = React.useState(null);
+  const [pendingEmpireAction, setPendingEmpireAction] = React.useState(null);
+  const empireActionLock = React.useRef(false);
+  const pendingFactory = React.useRef(null);
+  const runEmpireAction = async (key, action) => {
+    if (empireActionLock.current) return;
+    empireActionLock.current = true;
+    setPendingEmpireAction(key);
+    try { return await action(); }
+    finally { empireActionLock.current = false; setPendingEmpireAction(null); }
+  };
+  React.useEffect(() => {
+    const id = pendingFactory.current;
+    if (id && helpers.hasFactory(safeGame, id)) {
+      setFactoryPane("owned");
+      setManagedFactoryId(id);
+      setBuyFactoryDetailsId(null);
+      pendingFactory.current = null;
+    }
+  }, [safeGame.factoriesOwned]);
   const [selectedSupplyId, setSelectedSupplyId] = React.useState(() => suppliers?.[0]?.id || null);
   const getUpgradeState = (businessId) => helpers.getBusinessUpgradeState?.(safeGame, businessId) || { speedLevel: 0, cashLevel: 0, totalLevel: 0 };
   const getBusinessMinuteIncome = (business, count = 1) => {
@@ -150,7 +143,7 @@ export function EmpireScreen({
   const nextFactoryUnlock = factoryMilestones.find((entry) => safeGame.player.respect < entry.respect) || null;
   const ownedFactories = factories.filter((factory) => helpers.hasFactory(safeGame, factory.id));
   const buyableFactories = factories.filter(
-    (factory) => safeGame.player.respect >= factory.respect && !helpers.hasFactory(safeGame, factory.id)
+    (factory) => !helpers.hasFactory(safeGame, factory.id)
   );
   const getFactoryDrugs = (factoryId) => drugs.filter((drug) => drug.factoryId === factoryId);
   const getDrugRecipeState = (drug) => {
@@ -280,6 +273,10 @@ export function EmpireScreen({
     (drug) => Number(currentClubVenue?.stash?.[drug.id] || 0) > 0
   );
   const gangEffects = getGangProjectEffects(safeGame.gang);
+  const empireProjectOrder = safeGame.empireProjectsView?.projects || [];
+  const activeEmpireStage = safeGame.empireProjectsView?.active
+    ? Math.max(1, empireProjectOrder.findIndex((entry) => entry.id === safeGame.empireProjectsView.active.project.id) + 1)
+    : 0;
   const districtSummaryById = Object.fromEntries(
     (Array.isArray(districtSummaries) ? districtSummaries : []).map((district) => [district.id, district])
   );
@@ -485,20 +482,21 @@ export function EmpireScreen({
     setClubEntryFeeDraft(String(Math.max(0, Number(currentClubVenue?.entryFee ?? safeGame.club?.entryFee ?? 0))));
   }, [currentClubVenue?.id, currentClubVenue?.entryFee, safeGame.club?.entryFee]);
 
-  const handleCollectAllIncome = async () => {
+  const handleCollectAllIncome = () => runEmpireAction("collect", async () => {
     if (businessCollectableCash > 0) {
       await Promise.resolve(actions.collectBusinessIncome?.());
     }
     if (escortCollectableCash > 0) {
       await Promise.resolve(actions.collectEscortIncome?.());
     }
-  };
+  });
 
   const renderCollectionsPanel = (title = "Odbior", subtitle = "Sejfy i szybki zjazd hajsu bez dlugiego scrolla.") => (
     <SectionCard title={title} subtitle={subtitle}>
       <Pressable
         onPress={handleCollectAllIncome}
-        disabled={totalCollectableCash <= 0}
+        accessibilityRole="button"
+        disabled={totalCollectableCash <= 0 || Boolean(pendingEmpireAction)}
         style={[
           styles.inlineButton,
           {
@@ -518,7 +516,7 @@ export function EmpireScreen({
             { color: totalCollectableCash > 0 ? "#1f1507" : "#a3a7ad", fontSize: 13, fontWeight: "900" },
           ]}
         >
-          {totalCollectableCash > 0 ? `Odbierz wszystko ${formatMoney(totalCollectableCash)}` : "Odbierz wszystko"}
+          {pendingEmpireAction === "collect" ? "Odbieranie…" : totalCollectableCash > 0 ? `Odbierz wszystko ${formatMoney(totalCollectableCash)}` : "Odbierz wszystko"}
         </Text>
       </Pressable>
 
@@ -570,14 +568,15 @@ export function EmpireScreen({
 
   if (section === "businesses") {
     const businessTabs = [
+      { id: "projects", label: "Imperium" },
       { id: "owned", label: "Twoje" },
       { id: "buy", label: "Kup" },
-      { id: "collections", label: "Odbior" },
+      { id: "collections", label: "Odbiór" },
     ];
 
     return (
       <>
-        <SectionCard title="Biznesy" subtitle="Kupno, upgrade i odbiory bez drugiego dashboardu.">
+        <SectionCard title="Biznesy" subtitle="Twoje lokale, inwestycje i odbiór dochodu.">
           <View style={styles.mobileOverviewGrid}>
             <View style={styles.mobileOverviewCard}>
               <Text style={styles.mobileOverviewLabel}>Lokale</Text>
@@ -602,6 +601,8 @@ export function EmpireScreen({
                 <Pressable
                   key={tabEntry.id}
                   onPress={() => setBusinessPane(tabEntry.id)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
                   style={[styles.planChip, active && styles.planChipActive]}
                 >
                   <Text style={[styles.planChipText, active && styles.planChipTextActive]}>{tabEntry.label}</Text>
@@ -611,61 +612,115 @@ export function EmpireScreen({
           </View>
         </SectionCard>
 
-        {businessPane === "owned" ? (
+        {businessPane === "projects" ? (
           <>
-            <SectionCard title="Zaplecze" subtitle="Stan lokali, skrytka i najblizszy sensowny ruch.">
-              <View style={styles.listCard}>
-                <View style={styles.listCardHeader}>
-                  <View style={styles.entityHead}>
-                    <EntityBadge visual={businessVisuals.tower} />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>Twoje zaplecze</Text>
-                      <Text style={styles.listCardMeta}>
-                        {totalOwnedBusinessCount ? `${totalOwnedBusinessCount} lokali robi ${formatMoney(totalBusinessIncome)}/min.` : "Najpierw stawiasz pierwszy lokal, potem dokrecasz tempo."}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.listCardReward}>{formatMoney(totalBusinessIncome)}/min</Text>
+            <SectionCard title="Przedsięwzięcia Imperium" subtitle="Cztery znaki, które zmieniają twoje nazwisko w część miasta. Każdy wymaga kapitału, dowodu działania i trwałej decyzji.">
+              <View style={styles.mobileOverviewGrid}>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Znaki Imperium</Text>
+                  <Text style={styles.mobileOverviewValue}>{safeGame.empireProjectsView?.completedCount || 0}/4</Text>
+                  <Text style={styles.listCardMeta}>Każdy znak zostaje w historii miasta.</Text>
                 </View>
-                <View style={styles.mobileOverviewGrid}>
-                  <View style={styles.mobileOverviewCard}>
-                    <Text style={styles.mobileOverviewLabel}>Skrytka</Text>
-                    <Text style={styles.mobileOverviewValueSmall}>{formatAccruedMoney(businessCash)}</Text>
-                    <Text style={styles.listCardMeta}>Cap za {formatLongDuration(businessCapEta)}</Text>
-                  </View>
-                  <View style={styles.mobileOverviewCard}>
-                    <Text style={styles.mobileOverviewLabel}>Do kupienia</Text>
-                    <Text style={styles.mobileOverviewValue}>{availableBusinesses.length}</Text>
-                    <Text style={styles.listCardMeta}>
-                      {nextBusinessUnlock ? `Nastepny unlock ${nextBusinessUnlock.respect} RES` : "Pelna lista odblokowana"}
-                    </Text>
-                  </View>
-                  <View style={styles.mobileOverviewCard}>
-                    <Text style={styles.mobileOverviewLabel}>Kluczowy upgrade</Text>
-                    <Text style={styles.mobileOverviewValueSmall}>
-                      {bestBusinessUpgrade ? formatMoney(bestBusinessUpgrade.cost) : "Brak"}
-                    </Text>
-                    <Text style={styles.listCardMeta}>
-                      {bestBusinessUpgrade ? `${bestBusinessUpgrade.business.name} | ${bestBusinessUpgrade.label}` : "Kup pierwszy biznes, zeby ruszyc upgrade."}
-                    </Text>
-                  </View>
+                <View style={styles.mobileOverviewCard}>
+                  <Text style={styles.mobileOverviewLabel}>Obecny etap</Text>
+                  <Text style={styles.mobileOverviewValue}>{activeEmpireStage ? `${activeEmpireStage}/4` : "—"}</Text>
+                  <Text style={styles.listCardMeta}>{activeEmpireStage === 4 ? "Centrala. Finał twojej drogi przez miasto." : "Jedno przedsięwzięcie naraz. Jeden ślad do zostawienia."}</Text>
                 </View>
-                {bestBusinessUpgrade ? (
-                  <View style={styles.listActionsRow}>
-                    <Pressable
-                      onPress={() => actions.upgradeBusiness(bestBusinessUpgrade.business, bestBusinessUpgrade.path)}
-                      style={styles.inlineButton}
-                    >
-                      <Text style={styles.inlineButtonText}>
-                        {bestBusinessUpgrade.label} {formatMoney(bestBusinessUpgrade.cost)}
-                      </Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+              </View>
+              <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 4, now: safeGame.empireProjectsView?.completedCount || 0 }} style={{ flexDirection: "row", gap: 6, marginTop: 12 }}>
+                {[1, 2, 3, 4].map((stage) => <View key={stage} style={{ flex: 1, height: stage === 4 ? 7 : 5, borderRadius: 999, backgroundColor: stage <= (safeGame.empireProjectsView?.completedCount || 0) ? "#d5ad55" : activeEmpireStage === stage ? "#8d6a30" : "#303237", borderWidth: activeEmpireStage === stage ? 1 : 0, borderColor: "#f0cb75" }} />)}
               </View>
             </SectionCard>
 
-            <SectionCard title="Twoje lokale" subtitle="Ikona, dochod, status i szybki upgrade.">
+            {safeGame.empireProjectsView?.active ? (
+              <SectionCard title={`${activeEmpireStage === 4 ? "FINAŁ" : `ETAP ${activeEmpireStage}/4`} · ${safeGame.empireProjectsView.active.project.name}`} subtitle={safeGame.empireProjectsView.active.project.summary}>
+                {activeEmpireStage === 4 ? <View style={[styles.listCard, { borderColor: "#c5943c", backgroundColor: "#1d1810" }]}><Text style={styles.listCardTitle}>Centrala nie jest kolejną inwestycją</Text><Text style={styles.listCardMeta}>To moment, w którym wcześniejsze projekty, Skarbiec miasta i wpływy trzech dzielnic składają się w jedno dziedzictwo.</Text></View> : null}
+                <View style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flexOne}>
+                      <Text style={styles.listCardTitle}>Miasto czeka na dowód</Text>
+                      <Text style={styles.listCardMeta}>Kapitał otworzył drzwi. Teraz wykonaj ruchy, które pokażą, że potrafisz utrzymać ten układ.</Text>
+                    </View>
+                    <Tag text={safeGame.empireProjectsView.active.proof.ready ? "GOTOWE" : "W TOKU"} warning={!safeGame.empireProjectsView.active.proof.ready} />
+                  </View>
+                  {safeGame.empireProjectsView.active.proof.steps.map((step) => (
+                    <Text key={step.label} style={styles.listCardMeta}>{step.done ? "✓" : "○"} {step.label}: {step.current}/{step.target}</Text>
+                  ))}
+                </View>
+                <Text style={styles.sectionSubtitle}>Finał należy do Ciebie</Text>
+                {safeGame.empireProjectsView.active.choices.map((choice) => {
+                  const blocked = choice.reasons.length > 0 || Boolean(pendingEmpireAction);
+                  return (
+                    <View key={choice.id} style={styles.listCard}>
+                      <Text style={styles.listCardTitle}>{choice.name}</Text>
+                      <Text style={styles.listCardMeta}>{choice.summary}</Text>
+                      <Text style={styles.listCardMeta}>{choice.reasons.length ? choice.reasons.join(" · ") : "Warunki spełnione. Ta decyzja jest trwałym wpisem w historii imperium."}</Text>
+                      <View style={styles.listActionsRow}>
+                        <Pressable disabled={blocked} onPress={() => runEmpireAction(`project-final-${choice.id}`, () => actions.finalizeEmpireProject(choice.id))} style={[styles.inlineButton, blocked && styles.tileDisabled]}>
+                          <Text style={styles.inlineButtonText}>{pendingEmpireAction === `project-final-${choice.id}` ? "Domykanie…" : "Wybierz finał"}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
+              </SectionCard>
+            ) : (
+              <SectionCard title="Wybierz następny duży ruch" subtitle="Drogi różnią się wymaganiami i finałem. Klasa pomaga w systemach składowych, ale żadnego projektu nie blokuje.">
+                {(safeGame.empireProjectsView?.projects || []).map((project, projectIndex) => {
+                  const blocked = project.completed || project.startReasons.length > 0 || Boolean(pendingEmpireAction);
+                  const capstone = project.id === "city-headquarters";
+                  return (
+                    <View key={project.id} style={[styles.listCard, capstone && { borderColor: "#b98736", backgroundColor: "#1c1710" }, project.completed && { opacity: 0.84 }]}>
+                      <View style={styles.listCardHeader}>
+                        <View style={styles.flexOne}>
+                          <Text style={[styles.mobileOverviewLabel, capstone && { color: "#e5bb64" }]}>{capstone ? "FINAŁ · DZIEDZICTWO" : `ETAP ${projectIndex + 1}/4`}</Text>
+                          <Text style={styles.listCardTitle}>{project.name}</Text>
+                          <Text style={styles.listCardMeta}>{project.summary}</Text>
+                        </View>
+                        <Tag text={project.completed ? "UKOŃCZONE" : `${formatMoney(project.funding)}`} warning={!project.completed} />
+                      </View>
+                      <Text style={styles.listCardMeta}>Wejście: {project.requirement}</Text>
+                      <Text style={styles.listCardMeta}>Dowód: {project.proof}</Text>
+                      <Text style={styles.listCardMeta}>Po projekcie: {project.directive.name} — {project.directive.summary}</Text>
+                      <Text style={styles.listCardMeta}>{project.completed ? `Finał: ${project.completed.choiceName}` : project.startReasons.length ? project.startReasons.join(" · ") : "Możesz rozpocząć. Finansowanie zostanie pobrane z gotówki."}</Text>
+                      {!project.completed ? (
+                        <View style={styles.listActionsRow}>
+                          <Pressable disabled={blocked} onPress={() => runEmpireAction(`project-start-${project.id}`, () => actions.startEmpireProject(project.id))} style={[styles.inlineButton, blocked && styles.tileDisabled]}>
+                          <Text style={styles.inlineButtonText}>{pendingEmpireAction === `project-start-${project.id}` ? "Uruchamianie…" : capstone ? "Rozpocznij finał" : "Rozpocznij przedsięwzięcie"}</Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </SectionCard>
+            )}
+
+            {(safeGame.empireProjectsView?.directives || []).length ? (
+              <SectionCard title="Sztab Imperium" subtitle="Ukończone przedsięwzięcia dają dostęp do kosztownych decyzji kryzysowych. Sztab może wykonać jedną dyrektywę co 20 godzin.">
+                {safeGame.empireProjectsView.directives.map((directive) => {
+                  const blocked = directive.reasons.length > 0 || Boolean(pendingEmpireAction);
+                  return (
+                    <View key={directive.projectId} style={styles.listCard}>
+                      <Text style={styles.listCardTitle}>{directive.name}</Text>
+                      <Text style={styles.listCardMeta}>{directive.summary}</Text>
+                      <Text style={styles.listCardMeta}>{directive.reasons.length ? directive.reasons.join(" · ") : "Sztab i zasoby są gotowe."}</Text>
+                      <View style={styles.listActionsRow}>
+                        <Pressable disabled={blocked} onPress={() => runEmpireAction(`directive-${directive.projectId}`, () => actions.runEmpireDirective(directive.projectId, safeGame.city?.focusDistrictId || directive.districtId))} style={[styles.inlineButton, blocked && styles.tileDisabled]}>
+                          <Text style={styles.inlineButtonText}>{pendingEmpireAction === `directive-${directive.projectId}` ? "Realizacja…" : "Wydaj dyrektywę"}</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
+              </SectionCard>
+            ) : null}
+          </>
+        ) : null}
+
+        {businessPane === "owned" ? (
+          <>
+            <SectionCard title="Twoje lokale" subtitle={totalOwnedBusinessCount ? `Skrytka: ${formatAccruedMoney(businessCash)} · Pełna za ${formatLongDuration(businessCapEta)}` : "Pierwszy lokal uruchomi stały dochód. Sprawdź zakładkę Kup."}>
               {ownedBusinesses.length ? (
                 ownedBusinesses.map((business) => {
                   const preview = helpers.getBusinessUpgradePreview?.(safeGame, business, business.count);
@@ -688,14 +743,16 @@ export function EmpireScreen({
                       {preview ? (
                         <>
                           <Text style={styles.listCardMeta}>
-                            Nastepny boost: tempo {formatMoney(preview.nextSpeedIncome)}/min albo cash {formatMoney(preview.nextCashIncome)}/min
+                            {preview.speedMaxed && preview.cashMaxed
+                              ? "Obie ścieżki rozwoju osiągnęły MAX."
+                              : `Następny boost: tempo ${preview.speedMaxed ? "MAX" : `${formatMoney(preview.nextSpeedIncome)}/min`} albo cash ${preview.cashMaxed ? "MAX" : `${formatMoney(preview.nextCashIncome)}/min`}`}
                           </Text>
                           <View style={styles.marketButtons}>
-                            <Pressable onPress={() => actions.upgradeBusiness(business, "speed")} style={styles.marketButton}>
-                              <Text style={styles.marketButtonText}>Tempo {formatMoney(preview.speedCost)}</Text>
+                            <Pressable disabled={preview.speedMaxed} onPress={() => actions.upgradeBusiness(business, "speed")} style={[styles.marketButton, preview.speedMaxed && styles.tileDisabled]}>
+                              <Text style={styles.marketButtonText}>{preview.speedMaxed ? "Tempo MAX" : `Tempo ${formatMoney(preview.speedCost)}`}</Text>
                             </Pressable>
-                            <Pressable onPress={() => actions.upgradeBusiness(business, "cash")} style={styles.marketButton}>
-                              <Text style={styles.marketButtonText}>Cash {formatMoney(preview.cashCost)}</Text>
+                            <Pressable disabled={preview.cashMaxed} onPress={() => actions.upgradeBusiness(business, "cash")} style={[styles.marketButton, preview.cashMaxed && styles.tileDisabled]}>
+                              <Text style={styles.marketButtonText}>{preview.cashMaxed ? "Cash MAX" : `Cash ${formatMoney(preview.cashCost)}`}</Text>
                             </Pressable>
                           </View>
                         </>
@@ -711,7 +768,7 @@ export function EmpireScreen({
         ) : null}
 
         {businessPane === "buy" ? (
-          <SectionCard title="Kup" subtitle="Szybki katalog lokali z ikonami, ceną i dochodem.">
+          <SectionCard title="Kup" subtitle="Każdy kolejny lokal tego samego typu kosztuje o 50% ceny bazowej więcej. Ulepszenia obejmują całą sieć i kosztują proporcjonalnie do liczby lokali.">
             {availableBusinesses.length ? (
               availableBusinesses.map((business) => (
                 <View key={`available-${business.id}`} style={styles.listCard}>
@@ -721,7 +778,7 @@ export function EmpireScreen({
                       <View style={styles.flexOne}>
                         <Text style={styles.listCardTitle}>{business.name}</Text>
                         <Text style={styles.listCardMeta}>
-                          {business.kind} | {getBusinessMinuteIncome(business)}/min | {formatMoney(business.cost)}
+                          {business.kind} | {getBusinessMinuteIncome(business)}/min | {formatMoney(getBusinessPurchaseCost(game, business))}
                         </Text>
                       </View>
                     </View>
@@ -750,7 +807,7 @@ export function EmpireScreen({
                         <View style={styles.flexOne}>
                           <Text style={styles.listCardTitle}>{business.name}</Text>
                           <Text style={styles.listCardMeta}>
-                            {getBusinessMinuteIncome(business)}/min | Koszt {formatMoney(business.cost)}
+                            {getBusinessMinuteIncome(business)}/min | Koszt {formatMoney(getBusinessPurchaseCost(game, business))}
                           </Text>
                         </View>
                       </View>
@@ -845,36 +902,15 @@ export function EmpireScreen({
 
     return (
       <>
-        <SectionCard title="Fabryki" subtitle="Front to decyzja. Klikasz dopiero po receptury i produkcje.">
-          <View style={styles.mobileOverviewGrid}>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Twoje fabryki</Text>
-              <Text style={styles.mobileOverviewValue}>{ownedFactoryCount}</Text>
-              <Text style={styles.listCardMeta}>Aktywne miejsca produkcji.</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Towar na stanie</Text>
-              <Text style={styles.mobileOverviewValue}>
-                {drugs.reduce((sum, drug) => sum + Number(safeGame.drugInventory?.[drug.id] || 0), 0)}
-              </Text>
-              <Text style={styles.listCardMeta}>Gotowe sztuki w inventory.</Text>
-            </View>
-            <View style={styles.mobileOverviewCard}>
-              <Text style={styles.mobileOverviewLabel}>Nastepny prog</Text>
-              <Text style={styles.mobileOverviewValueSmall}>
-                {nextFactoryUnlock ? `${nextFactoryUnlock.respect} RES` : "Pelna lista"}
-              </Text>
-              <Text style={styles.listCardMeta}>
-                {nextFactoryUnlock ? nextFactoryUnlock.unlocks.map((factory) => factory.name).join(", ") : "Masz odblokowane wszystkie fabryki."}
-              </Text>
-            </View>
-          </View>
+        <SectionCard title="Fabryki" subtitle="Własne zakłady i nowe inwestycje.">
           <View style={[styles.planChipRow, { marginTop: 12 }]}>
             {factoryTabs.map((tabEntry) => {
               const active = factoryPane === tabEntry.id;
               return (
                 <Pressable
                   key={tabEntry.id}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
                   onPress={() => setFactoryPane(tabEntry.id)}
                   style={[styles.planChip, active && styles.planChipActive]}
                 >
@@ -886,7 +922,7 @@ export function EmpireScreen({
         </SectionCard>
 
         {factoryPane === "owned" ? (
-          <SectionCard title="Twoje" subtitle="Masz tylko swoje zaklady. Reszta szczegolow dopiero po kliknieciu.">
+          <SectionCard title="Twoje" subtitle="Rozwiń zakład, aby sprawdzić receptury i uruchomić produkcję.">
             {ownedFactories.length ? (
               ownedFactories.map((factory) => {
                 const factoryDrugs = getFactoryDrugs(factory.id);
@@ -926,6 +962,10 @@ export function EmpireScreen({
                           const recipeState = getDrugRecipeState(drug);
                           const policeProfile = helpers.getDrugPoliceProfile(drug);
                           const batchEconomy = getDrugBatchEconomy(drug, suppliers, helpers.getDealerPayoutForDrug);
+                          const energyCost = getDrugProductionEnergyCost(drug);
+                          const respectRequirement = getDrugProductionRespectRequirement(drug);
+                          const lockedByRespect = safeGame.player.respect < respectRequirement;
+                          const missingEnergy = safeGame.player.energy < energyCost;
                           return (
                             <View key={`recipe-${factory.id}-${drug.id}`} style={styles.districtCard}>
                               <View style={styles.listCardHeader}>
@@ -938,7 +978,7 @@ export function EmpireScreen({
                                     </Text>
                                   </View>
                                 </View>
-                                <Tag text={recipeState.maxBatches > 0 ? "Gotowe" : "Braki"} success={recipeState.maxBatches > 0} warning={recipeState.maxBatches <= 0} />
+                                <Tag text={lockedByRespect ? `${respectRequirement} RES` : recipeState.maxBatches > 0 && !missingEnergy ? "Gotowe" : "Braki"} success={!lockedByRespect && recipeState.maxBatches > 0 && !missingEnergy} warning={lockedByRespect || recipeState.maxBatches <= 0 || missingEnergy} />
                               </View>
                               <Text style={styles.listCardMeta}>
                                 {recipeState.recipe
@@ -946,18 +986,25 @@ export function EmpireScreen({
                                   .join(" | ")}
                               </Text>
                               <Text style={styles.listCardMeta}>
-                                Ryzyko {Math.round(policeProfile.risk * 100)}% | Batch kosztuje {formatMoney(batchEconomy.batchCost)}
+                                Ryzyko {Math.round(policeProfile.risk * 100)}% | Koszt {energyCost} EN | Surowce: {formatMoney(batchEconomy.batchCost)}
                               </Text>
+                              <Text style={styles.listCardMeta}>Wartość u dilera: {formatMoney(batchEconomy.dealerCashout)} · Marża przed opłatami i ryzykiem: {formatMoney(batchEconomy.dealerMargin)}</Text>
+                              {recipeState.maxBatches <= 0 ? <Pressable accessibilityRole="button" onPress={() => actions.openSection("empire", "suppliers")} style={styles.inlineButton}><Text style={styles.inlineButtonText}>Uzupełnij surowce</Text></Pressable> : null}
+                              {recipeState.stock > 0 ? <Pressable accessibilityRole="button" onPress={() => actions.openSection("market", "drugs")} style={styles.inlineButton}><Text style={styles.inlineButtonText}>Sprzedaj u dilera</Text></Pressable> : null}
                               <View style={styles.marketButtons}>
                                 <Pressable
-                                  onPress={() => actions.produceDrug(drug)}
-                                  style={[styles.marketButton, recipeState.maxBatches <= 0 && styles.tileDisabled]}
+                                  accessibilityRole="button"
+                                  disabled={lockedByRespect || missingEnergy || recipeState.maxBatches <= 0 || Boolean(pendingEmpireAction)}
+                                  onPress={() => runEmpireAction(`produce-${drug.id}`, () => actions.produceDrug(drug))}
+                                  style={[styles.marketButton, (lockedByRespect || missingEnergy || recipeState.maxBatches <= 0) && styles.tileDisabled]}
                                 >
-                                  <Text style={styles.marketButtonText}>Produkuj</Text>
+                                  <Text style={styles.marketButtonText}>{pendingEmpireAction === `produce-${drug.id}` ? "Produkcja…" : "Produkuj"}</Text>
                                 </Pressable>
                                 <Pressable
-                                  onPress={() => actions.produceDrug(drug, { quantity: recipeState.maxBatches })}
-                                  style={[styles.marketButton, recipeState.maxBatches <= 1 && styles.tileDisabled]}
+                                  accessibilityRole="button"
+                                  disabled={lockedByRespect || missingEnergy || recipeState.maxBatches <= 1 || Boolean(pendingEmpireAction)}
+                                  onPress={() => runEmpireAction(`produce-${drug.id}`, () => actions.produceDrug(drug, { quantity: Math.min(recipeState.maxBatches, Math.floor(safeGame.player.energy / energyCost)) }))}
+                                  style={[styles.marketButton, (lockedByRespect || missingEnergy || recipeState.maxBatches <= 1) && styles.tileDisabled]}
                                 >
                                   <Text style={styles.marketButtonText}>Produkuj max</Text>
                                 </Pressable>
@@ -977,10 +1024,12 @@ export function EmpireScreen({
         ) : null}
 
         {factoryPane === "buy" ? (
-          <SectionCard title="Kup" subtitle="Szybki katalog fabryk z ikonami, cena i wejscie dopiero po kliknieciu.">
+          <SectionCard title="Kup" subtitle="Kupiony zakład trafia do zakładki Twoje.">
             {buyableFactories.length ? (
               buyableFactories.map((factory) => {
                 const expanded = buyFactoryDetailsId === factory.id;
+                const locked = safeGame.player.respect < factory.respect;
+                const missingCash = Math.max(0, factory.cost - safeGame.player.cash);
                 const factoryDrugs = getFactoryDrugs(factory.id);
                 const district = districtSummaryById[getFactoryDistrictId(factory.id)] || focusDistrictSummary;
                 return (
@@ -995,8 +1044,8 @@ export function EmpireScreen({
                           </Text>
                         </View>
                       </View>
-                      <Pressable onPress={() => actions.buyFactory(factory)} style={styles.inlineButton}>
-                        <Text style={styles.inlineButtonText}>Kup</Text>
+                      <Pressable accessibilityRole="button" disabled={locked || missingCash > 0 || Boolean(pendingEmpireAction)} onPress={() => runEmpireAction(`buy-${factory.id}`, async () => { pendingFactory.current = factory.id; await actions.buyFactory(factory); })} style={[styles.inlineButton, (locked || missingCash > 0 || Boolean(pendingEmpireAction)) && styles.tileDisabled]}>
+                        <Text style={styles.inlineButtonText}>{pendingEmpireAction === `buy-${factory.id}` ? "Kupowanie…" : locked ? `${factory.respect} RES` : "Kup"}</Text>
                       </Pressable>
                     </View>
                     <View style={styles.listActionsRow}>
@@ -1010,6 +1059,7 @@ export function EmpireScreen({
                     {expanded ? (
                       <View style={{ marginTop: 10, gap: 8 }}>
                         <Text style={styles.listCardMeta}>{factory.text}</Text>
+                        <Text style={styles.listCardMeta}>{locked ? `Wymagane ${factory.respect} RES. Masz ${safeGame.player.respect}.` : missingCash > 0 ? `Brakuje ${formatMoney(missingCash)} w gotówce.` : "Możesz kupić ten zakład."}</Text>
                         <Text style={styles.listCardMeta}>
                           Dzielnica: {district?.name || "-"} | {district?.pressureLabel || "Spokojnie"}
                         </Text>

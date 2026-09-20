@@ -77,6 +77,99 @@ export function buildAdminPublicState(isAdmin) {
   };
 }
 
+const ADMIN_EDIT_LIMITS = {
+  cash: [0, 1_000_000_000_000],
+  bank: [0, 1_000_000_000_000],
+  premiumTokens: [0, 1_000_000],
+  hp: [0, 1_000_000],
+  energy: [0, 1_000_000],
+  heat: [0, 100],
+};
+
+export function buildAdminPlayerSnapshot(userRecord) {
+  const player = userRecord?.playerData || {};
+  const profile = player.profile || {};
+  return {
+    id: userRecord?._id || player.id || null,
+    username: userRecord?.username || player.username || profile.name || "",
+    authDisabled: Boolean(userRecord?.authDisabled),
+    stateRevision: Number(player.stateRevision || 0),
+    classId: player.contacts?.classId || null,
+    respect: Number(profile.respect || 0),
+    level: Number(profile.level || profile.respect || 0),
+    cash: Number(profile.cash || 0),
+    bank: Number(profile.bank || 0),
+    premiumTokens: Number(profile.premiumTokens || 0),
+    hp: Number(profile.hp || 0),
+    maxHp: Number(profile.maxHp || 0),
+    energy: Number(profile.energy || 0),
+    maxEnergy: Number(profile.maxEnergy || 0),
+    heat: Number(profile.heat || 0),
+    gang: player.gang?.joined ? player.gang?.name || "Gang" : null,
+    activePlan: player.sessionPlans?.active?.key || null,
+    activeOperation: player.operations?.active?.id || null,
+    activeRival: player.rivals?.active?.id || null,
+  };
+}
+
+export function buildAdminPlayerDetail(userRecord) {
+  const player = userRecord?.playerData || {};
+  return {
+    ...buildAdminPlayerSnapshot(userRecord),
+    email: userRecord?.email || null,
+    createdAt: userRecord?.createdAt || null,
+    updatedAt: userRecord?.updatedAt || null,
+    profile: structuredClone(player.profile || {}),
+    stats: structuredClone(player.stats || {}),
+    classState: structuredClone(player.contacts || {}),
+    gangState: structuredClone(player.gang || {}),
+    inventory: structuredClone(player.inventory || {}),
+    drugInventory: structuredClone(player.drugInventory || {}),
+    businesses: structuredClone(player.businessesOwned || []),
+    factories: structuredClone(player.factoriesOwned || {}),
+    club: structuredClone(player.club || {}),
+    sessionPlans: structuredClone(player.sessionPlans || {}),
+    operations: structuredClone(player.operations || {}),
+    rivals: structuredClone(player.rivals || {}),
+    empireProjects: structuredClone(player.empireProjects || {}),
+  };
+}
+
+export function setAdminPlayerField(player, field, value) {
+  if (!ADMIN_EDIT_LIMITS[field]) throw Object.assign(new Error("Unsupported admin field"), { statusCode: 400 });
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw Object.assign(new Error("Value must be a whole number"), { statusCode: 400 });
+  const [minimum, hardMaximum] = ADMIN_EDIT_LIMITS[field];
+  const profile = ensurePlayerProfile(player);
+  const dynamicMaximum = field === "hp"
+    ? Math.max(minimum, Number(profile.maxHp || hardMaximum))
+    : field === "energy"
+      ? Math.max(minimum, Number(profile.maxEnergy || hardMaximum))
+      : hardMaximum;
+  if (parsed < minimum || parsed > dynamicMaximum) {
+    throw Object.assign(new Error(`${field} must be between ${minimum} and ${dynamicMaximum}`), { statusCode: 400 });
+  }
+  const previous = Number(profile[field] || 0);
+  profile[field] = parsed;
+  return { field, previous, value: parsed };
+}
+
+export function repairAdminPlayerState(player, system) {
+  if (system === "plan") {
+    const previous = player?.sessionPlans?.active || null;
+    if (!player.sessionPlans || typeof player.sessionPlans !== "object") player.sessionPlans = { version: 1, active: null, claims: [], dismissed: [] };
+    player.sessionPlans.active = null;
+    return { system, hadActiveState: Boolean(previous) };
+  }
+  if (system === "operation") {
+    const previous = player?.operations?.active || null;
+    if (!player.operations || typeof player.operations !== "object") player.operations = { version: 1, active: null, history: [] };
+    player.operations.active = null;
+    return { system, hadActiveState: Boolean(previous) };
+  }
+  throw Object.assign(new Error("System must be plan or operation"), { statusCode: 400 });
+}
+
 export function grantCashToPlayerByAdmin({
   actorPlayer,
   targetPlayer,

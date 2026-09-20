@@ -1,10 +1,8 @@
 import React, { useMemo, useRef, useState } from "react";
+import { getTaskDestination } from "../../shared/taskGuidance.js";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE, createShadowStyle } from "../utils/uiEffects";
 
 function getTilePalette(task) {
   if (task?.completed && !task?.onlineDisabled) {
@@ -57,17 +55,30 @@ function buildRewardText(task, formatMoney) {
   return parts.join("  ");
 }
 
-export function MissionTile({ task, formatMoney, onClaim }) {
+export function MissionTile({ task, formatMoney, onClaim, onNavigate }) {
   const pulse = useRef(new Animated.Value(1)).current;
   const flash = useRef(new Animated.Value(0)).current;
   const rewardLift = useRef(new Animated.Value(6)).current;
   const rewardOpacity = useRef(new Animated.Value(0)).current;
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [showReward, setShowReward] = useState(false);
   const palette = useMemo(() => getTilePalette(task), [task]);
   const rewardText = useMemo(() => buildRewardText(task, formatMoney), [task, formatMoney]);
+  const tileShadowStyle = useMemo(
+    () =>
+      createShadowStyle({
+        color: palette.glow,
+        opacity: 1,
+        radius: 24,
+        offsetY: 14,
+        elevation: 6,
+      }),
+    [palette.glow]
+  );
   const progressPercent = Math.max(0, Math.min(1, Number(task?.progressRatio || 0)));
   const claimable = Boolean(task?.completed && !task?.onlineDisabled);
+  const destination = getTaskDestination(task);
   const statusLabel = task?.onlineDisabled ? "Wstrzymane" : claimable ? "Gotowa" : "W toku";
 
   const nudgeTile = () => {
@@ -75,13 +86,13 @@ export function MissionTile({ task, formatMoney, onClaim }) {
       Animated.timing(pulse, {
         toValue: 0.985,
         duration: 70,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
       Animated.spring(pulse, {
         toValue: 1,
         friction: 5,
         tension: 150,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
     ]).start();
   };
@@ -96,49 +107,49 @@ export function MissionTile({ task, formatMoney, onClaim }) {
         Animated.timing(flash, {
           toValue: 1,
           duration: 120,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.timing(flash, {
           toValue: 0,
           duration: 220,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]),
       Animated.sequence([
         Animated.timing(rewardOpacity, {
           toValue: 1,
           duration: 120,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.timing(rewardOpacity, {
           toValue: 0,
           duration: 280,
           delay: 120,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]),
       Animated.timing(rewardLift, {
         toValue: -16,
         duration: 420,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_DRIVER,
       }),
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 0.97,
           duration: 80,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.spring(pulse, {
           toValue: 1.02,
           friction: 5,
           tension: 140,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.spring(pulse, {
           toValue: 1,
           friction: 5,
           tension: 120,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ]),
     ]).start(({ finished }) => {
@@ -149,32 +160,32 @@ export function MissionTile({ task, formatMoney, onClaim }) {
   };
 
   const handlePress = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
     if (!claimable) {
       nudgeTile();
+      if (destination) onNavigate?.(destination.tab, destination.section);
       return;
     }
 
     setBusy(true);
-    playClaimAnimation();
-    await wait(160);
+    busyRef.current = true;
 
     try {
       const result = await onClaim?.(task);
       if (result === false) {
-        setBusy(false);
         return;
       }
+      playClaimAnimation();
     } catch (_error) {
-      setBusy(false);
       return;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
-
-    setBusy(false);
   };
 
   return (
-    <Pressable onPress={handlePress} style={styles.tilePressable}>
+    <Pressable onPress={handlePress} disabled={busy || task.onlineDisabled} accessibilityRole="button" accessibilityLabel={`${task.title}. ${claimable ? "Odbierz nagrodę" : destination?.label || task.progressLabel}`} accessibilityState={{ disabled: busy || task.onlineDisabled, busy }} style={styles.tilePressable}>
       <Animated.View
         style={[
           styles.tileWrap,
@@ -184,13 +195,14 @@ export function MissionTile({ task, formatMoney, onClaim }) {
           },
         ]}
       >
-        <LinearGradient colors={palette.gradient} style={[styles.tile, { borderColor: palette.border, shadowColor: palette.glow }]}>
+        <LinearGradient colors={palette.gradient} style={[styles.tile, tileShadowStyle, { borderColor: palette.border }]}>
           <Animated.View style={[styles.flashLayer, { opacity: flash }]} />
           {showReward ? (
             <Animated.View
-              pointerEvents="none"
+              pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
               style={[
                 styles.rewardBurst,
+                WEB_POINTER_EVENTS_NONE_STYLE,
                 {
                   opacity: rewardOpacity,
                   transform: [{ translateY: rewardLift }],
@@ -211,20 +223,21 @@ export function MissionTile({ task, formatMoney, onClaim }) {
           <Text style={[styles.title, { color: palette.title }]} numberOfLines={2}>
             {task.title}
           </Text>
-          <Text style={[styles.description, { color: palette.text }]} numberOfLines={1}>
+          <Text style={[styles.description, { color: palette.text }]}>
             {task.description}
           </Text>
 
           <View style={styles.tileBottom}>
             <View style={[styles.progressTrack, { backgroundColor: palette.track }]}>
-              <View style={[styles.progressFill, { backgroundColor: palette.fill, width: `${Math.max(8, progressPercent * 100)}%` }]} />
+              <View style={[styles.progressFill, { backgroundColor: palette.fill, width: `${progressPercent * 100}%` }]} />
             </View>
             <View style={styles.progressRow}>
               <Text style={[styles.progressText, { color: palette.meta }]} numberOfLines={1}>
                 {task.onlineDisabled ? task.disabledReason : task.progressLabel}
               </Text>
-              {claimable ? <Text style={[styles.claimHint, { color: palette.reward }]}>Odbierz</Text> : null}
+              {claimable ? <Text style={[styles.claimHint, { color: palette.reward }]}>{busy ? "Odbieranie…" : "Odbierz"}</Text> : null}
             </View>
+            {!claimable && destination ? <Text style={[styles.claimHint, { color: palette.reward }]}>{destination.label} →</Text> : null}
           </View>
         </LinearGradient>
       </Animated.View>
@@ -262,10 +275,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     overflow: "hidden",
     gap: 9,
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    elevation: 6,
   },
   flashLayer: {
     ...StyleSheet.absoluteFillObject,

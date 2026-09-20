@@ -1,5 +1,5 @@
 import { WebSocketServer } from "ws";
-import { getBearerToken, verifyAuthToken } from "./middleware/auth.js";
+import { getBearerToken, verifyAuthToken, isSessionCurrent } from "./middleware/auth.js";
 import { logInfo, logWarn } from "./utils/logger.js";
 
 const REALTIME_EVENT_TYPE = "state.invalidate";
@@ -204,7 +204,7 @@ export function createRealtimeServer({ server, findUserById, path = "/realtime" 
     }
 
     const userRecord = await findUserById(payload.sub);
-    if (!userRecord?.playerData) {
+    if (!isSessionCurrent(payload, userRecord)) {
       rejectUpgrade(socket, 401, "User session not found");
       return;
     }

@@ -1,3 +1,4 @@
+import "../bootstrapEnv.js";
 import { logError, logInfo } from "../utils/logger.js";
 
 const VERBOSE_MUTATION_LOGS = process.env.VERBOSE_MUTATION_LOGS === "1";

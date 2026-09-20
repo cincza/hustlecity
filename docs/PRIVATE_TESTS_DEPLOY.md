@@ -4,9 +4,9 @@ Ten dokument zostaje jako skrot do aktualnych checklist.
 
 Aktualne zrodla prawdy:
 
-- backend Render: [RENDER_FIRST_DEPLOY.md](C:\Users\Adam\Documents\New project\docs\RENDER_FIRST_DEPLOY.md)
-- pierwszy build Expo preview: [EXPO_PREVIEW_FIRST_BUILD.md](C:\Users\Adam\Documents\New project\docs\EXPO_PREVIEW_FIRST_BUILD.md)
-- pelny flow backend + APK dla testerow: [RENDER_AND_EXPO_TESTER_FLOW.md](C:\Users\Adam\Documents\New project\docs\RENDER_AND_EXPO_TESTER_FLOW.md)
+- frontend i backend Render: [RENDER_FIRST_DEPLOY.md](RENDER_FIRST_DEPLOY.md)
+- pierwszy build Expo preview: [EXPO_PREVIEW_FIRST_BUILD.md](EXPO_PREVIEW_FIRST_BUILD.md)
+- pełny flow backend + APK dla testerów: [RENDER_AND_EXPO_TESTER_FLOW.md](RENDER_AND_EXPO_TESTER_FLOW.md)
 
 Najprostsza sciezka dla prywatnych testow:
 

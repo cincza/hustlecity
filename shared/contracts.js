@@ -549,6 +549,42 @@ export const CONTRACT_CATALOG = [
     recommendedStats: { attack: 22, defense: 20, dexterity: 26, charisma: 18 },
     tags: ["stealth", "escape", "combat"],
   },
+  {
+    id: "courier-switch", name: "Courier Switch", districtId: "oldtown", respect: 20, difficulty: 3,
+    summary: "Podmień przesyłkę w ruchu. Charisma otwiera drzwi, ale bez auta nie utrzymasz czystego odwrotu.", riskLabel: "Średnie",
+    entryCost: 2800, energyCost: 3, baseReward: [6500, 9800], baseSuccess: 0.21, baseHeat: 9, baseJailRisk: 0.2, xpGain: 18, hpLoss: [7, 13],
+    recommendedStats: { attack: 10, defense: 11, dexterity: 16, charisma: 18 }, tags: ["stealth", "escape", "cargo"],
+  },
+  {
+    id: "soundstage-decoy", name: "Soundstage Decoy", districtId: "neon", respect: 26, difficulty: 3,
+    summary: "Fałszywy plan zdjęciowy przykrywa wejście po elektronikę; ciężka broń tylko psuje legendę.", riskLabel: "Średnie-wysokie",
+    entryCost: 4100, energyCost: 3, baseReward: [9200, 14100], baseSuccess: 0.2, baseHeat: 12, baseJailRisk: 0.24, xpGain: 21, hpLoss: [8, 16],
+    recommendedStats: { attack: 11, defense: 12, dexterity: 19, charisma: 19 }, tags: ["stealth", "breach"],
+  },
+  {
+    id: "customs-ghost", name: "Customs Ghost", districtId: "harbor", respect: 30, difficulty: 4,
+    summary: "Przeprowadź oznaczony ładunek przez aktywną kontrolę. Liczy się kamuflaż, pojemność i droga ucieczki.", riskLabel: "Wysokie",
+    entryCost: 6100, energyCost: 4, baseReward: [13600, 20400], baseSuccess: 0.17, baseHeat: 16, baseJailRisk: 0.32, xpGain: 25, hpLoss: [11, 20],
+    recommendedStats: { attack: 14, defense: 16, dexterity: 21, charisma: 16 }, tags: ["cargo", "stealth", "escape"],
+  },
+  {
+    id: "archive-burn", name: "Archive Burn", districtId: "oldtown", respect: 34, difficulty: 4,
+    summary: "Usuń jeden segregator bez niszczenia reszty. Precyzja sprzętu wygrywa z czystą siłą.", riskLabel: "Wysokie",
+    entryCost: 7800, energyCost: 4, baseReward: [16400, 24600], baseSuccess: 0.16, baseHeat: 17, baseJailRisk: 0.31, xpGain: 27, hpLoss: [10, 19],
+    recommendedStats: { attack: 13, defense: 15, dexterity: 23, charisma: 17 }, tags: ["breach", "stealth"],
+  },
+  {
+    id: "rolling-vault", name: "Rolling Vault", districtId: "harbor", respect: 42, difficulty: 5,
+    summary: "Przejmij opancerzoną naczepę bez zatrzymywania konwoju. Pojemność i walka muszą działać razem.", riskLabel: "Bardzo wysokie",
+    entryCost: 12600, energyCost: 5, baseReward: [24600, 37200], baseSuccess: 0.13, baseHeat: 25, baseJailRisk: 0.4, xpGain: 32, hpLoss: [18, 29],
+    recommendedStats: { attack: 23, defense: 22, dexterity: 21, charisma: 12 }, tags: ["cargo", "combat", "escape"],
+  },
+  {
+    id: "mirror-suite", name: "Mirror Suite", districtId: "neon", respect: 48, difficulty: 5,
+    summary: "Wejdź do dwóch identycznych apartamentów i wynieś właściwy depozyt, zanim ochrona odkryje podmianę.", riskLabel: "Ekstremalne",
+    entryCost: 16200, energyCost: 5, baseReward: [31400, 46800], baseSuccess: 0.12, baseHeat: 27, baseJailRisk: 0.41, xpGain: 36, hpLoss: [17, 31],
+    recommendedStats: { attack: 19, defense: 20, dexterity: 25, charisma: 22 }, tags: ["stealth", "breach", "escape"],
+  },
 ];
 
 function normalizeOwnershipMap(value, catalog) {

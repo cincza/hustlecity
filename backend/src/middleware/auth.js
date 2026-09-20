@@ -1,3 +1,4 @@
+import "../bootstrapEnv.js";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = typeof process.env.JWT_SECRET === "string" ? process.env.JWT_SECRET.trim() : "";
@@ -17,6 +18,7 @@ export function signAuthToken(user) {
       sub: user._id,
       username: user.username,
       email: user.email || null,
+      authVersion: Number(user.authVersion || 0),
     },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
@@ -25,6 +27,11 @@ export function signAuthToken(user) {
 
 export function verifyAuthToken(token) {
   return jwt.verify(token, JWT_SECRET);
+}
+
+export function isSessionCurrent(payload, user) {
+  return Boolean(user?.playerData) && !user.authDisabled &&
+    Number(payload?.authVersion || 0) === Number(user.authVersion || 0);
 }
 
 export function createAuthMiddleware({
@@ -50,7 +57,7 @@ export function createAuthMiddleware({
       }
 
       const userRecord = await findUserById(payload.sub);
-      if (!userRecord?.playerData) {
+      if (!isSessionCurrent(payload, userRecord)) {
         res.status(401).json({ error: "User session not found" });
         return;
       }
@@ -69,7 +76,7 @@ export function createAuthMiddleware({
       req.player = userRecord.playerData;
       next();
     } catch (error) {
-      res.status(401).json({ error: error?.message || "Unauthorized" });
+      res.status(503).json({ error: "Nie można teraz wczytać profilu. Spróbuj ponownie." });
     }
   };
 }

@@ -19,6 +19,7 @@ export function HeistsScreen({
   criticalCareStatus,
   contractBoard,
   getContractPreviewForContract,
+  getContractFrontHintForContract,
   getContractPreviewLinesForContract,
   getSoloHeistOdds,
   onExecuteHeist,
@@ -123,7 +124,7 @@ export function HeistsScreen({
               ) : null}
             </View>
           ) : (
-            <Text style={contractStyles.helperText}>Kliknij karte po szczegoly. Na froncie masz tylko payout, szanse i wejscie.</Text>
+            <Text style={contractStyles.helperText}>Na froncie masz payout, szanse, wejscie i stan loadoutu. Rozwin karte po leak, heat i cele.</Text>
           )}
         </View>
 
@@ -132,6 +133,7 @@ export function HeistsScreen({
           {safeContracts.map((contract) => {
             const preview = getContractPreviewForContract(contract);
             const previewLines = getContractPreviewLinesForContract(contract);
+            const frontHint = typeof getContractFrontHintForContract === "function" ? getContractFrontHintForContract(contract) : null;
             const locked = game.player.respect < contract.respect;
             const expanded = expandedContractId === contract.id;
             const actionLabel = criticalCareActive ? criticalCareLockLabel : locked ? `RES ${contract.respect}` : "Odpal";
@@ -173,7 +175,12 @@ export function HeistsScreen({
                       <Text style={contractStyles.badgeLabel}>Wejscie</Text>
                       <Text style={contractStyles.badgeValue}>{formatMoney(contract.entryCost)}</Text>
                     </View>
+                    <View style={contractStyles.badge}>
+                      <Text style={contractStyles.badgeLabel}>Loadout</Text>
+                      <Text style={contractStyles.badgeValue}>{Math.round(Number(preview?.slotCoverage || 0) * 100)}%</Text>
+                    </View>
                   </View>
+                  {frontHint ? <Text style={contractStyles.cardInsight}>{frontHint}</Text> : null}
                 </Pressable>
 
                 {expanded ? (
@@ -273,7 +280,8 @@ export function HeistsScreen({
               xp={`${xpRange[0]} - ${xpRange[1]} XP`}
               chance={`${Math.round(odds.chance * 100)}%`}
               energy={`${heist.energy}`}
-              risk={`${Math.round(heist.risk * 100)}%`}
+              risk={`${(odds.arrestChance * 100).toFixed(1)}%`}
+              riskLabel="Areszt"
               lockedLabel={criticalCareActive ? criticalCareLockLabel : locked ? `RES ${heist.respect}` : "Wykonaj"}
               onPress={() => !locked && !criticalCareActive && onExecuteHeist(heist)}
               disabled={locked || criticalCareActive}
@@ -549,6 +557,12 @@ const contractStyles = StyleSheet.create({
     color: "#fff6ea",
     fontSize: 12,
     fontWeight: "900",
+  },
+  cardInsight: {
+    color: "#bca988",
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
   },
   expandedBlock: {
     gap: 8,

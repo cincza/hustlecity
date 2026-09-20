@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Animated, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE, createTextShadowStyle } from "../utils/uiEffects";
 
 const ICON_MAP = {
   bank: "bank-outline",
@@ -66,19 +67,19 @@ function StatBar({ icon, label, value, max, fillColor, accent, compact, feedback
 
     const animation = Animated.parallel([
       Animated.sequence([
-        Animated.timing(scale, { toValue: 1.03, duration: 110, useNativeDriver: true }),
-        Animated.spring(scale, { toValue: 1, friction: 5, tension: 110, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.03, duration: 110, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.spring(scale, { toValue: 1, friction: 5, tension: 110, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(glowOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
-        Animated.timing(glowOpacity, { toValue: 0, duration: 320, useNativeDriver: true }),
+        Animated.timing(glowOpacity, { toValue: 1, duration: 150, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.timing(glowOpacity, { toValue: 0, duration: 320, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(feedbackOpacity, { toValue: 1, duration: 120, useNativeDriver: true }),
+        Animated.timing(feedbackOpacity, { toValue: 1, duration: 120, useNativeDriver: USE_NATIVE_DRIVER }),
         Animated.delay(120),
-        Animated.timing(feedbackOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+        Animated.timing(feedbackOpacity, { toValue: 0, duration: 220, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
-      Animated.timing(feedbackLift, { toValue: -16, duration: 420, useNativeDriver: true }),
+      Animated.timing(feedbackLift, { toValue: -16, duration: 420, useNativeDriver: USE_NATIVE_DRIVER }),
     ]);
 
     animation.start();
@@ -86,14 +87,18 @@ function StatBar({ icon, label, value, max, fillColor, accent, compact, feedback
   }, [feedbackId, feedbackLift, feedbackOpacity, glowOpacity, scale]);
 
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
+    <Animated.View style={[compact && { flex: 1, minWidth: 0 }, { transform: [{ scale }] }]}>
       <View style={[styles.headerStatCard, compact && styles.headerStatCardCompact]}>
-        <Animated.View pointerEvents="none" style={[styles.headerStatGlow, { opacity: glowOpacity, backgroundColor: fillColor }]} />
+        <Animated.View
+          pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
+          style={[styles.headerStatGlow, WEB_POINTER_EVENTS_NONE_STYLE, { opacity: glowOpacity, backgroundColor: fillColor }]}
+        />
         {feedbackText ? (
           <Animated.View
-            pointerEvents="none"
+            pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
             style={[
               styles.headerStatFeedback,
+              WEB_POINTER_EVENTS_NONE_STYLE,
               {
                 opacity: feedbackOpacity,
                 transform: [{ translateY: feedbackLift }],
@@ -104,9 +109,9 @@ function StatBar({ icon, label, value, max, fillColor, accent, compact, feedback
           </Animated.View>
         ) : null}
         <View style={styles.headerStatMeta}>
-          <View style={[styles.headerStatIconWrap, { borderColor: accent }]}>
+          {!compact ? <View style={[styles.headerStatIconWrap, { borderColor: accent }]}>
             <IconChip icon={icon} accent={accent} size={compact ? 18 : 20} />
-          </View>
+          </View> : null}
           <View style={styles.headerStatTextWrap}>
             <Text style={[styles.headerBarLabel, compact && styles.headerBarLabelCompact]}>{label}</Text>
             <Text style={[styles.headerBarValue, compact && styles.headerBarValueCompact]}>{value}/{max}</Text>
@@ -122,11 +127,11 @@ function InfoCard({ icon, label, value, children, compact, style, auxIcon, auxLa
   return (
     <LinearGradient colors={["rgba(26,27,31,0.94)", "rgba(13,14,18,0.98)"]} style={[styles.infoCard, compact && styles.infoCardCompact, style]}>
       <View style={styles.infoCardInner}>
-        <LinearGradient colors={["#f2cb67", "#916217"]} style={styles.infoCardIconRing}>
+        {!compact ? <LinearGradient colors={["#f2cb67", "#916217"]} style={styles.infoCardIconRing}>
           <View style={styles.infoCardIconInner}>
             {icon === "xp" ? <Text style={styles.infoCardXpGlyph}>XP</Text> : <IconChip icon={icon} accent="#f0c24d" size={compact ? 20 : 22} />}
           </View>
-        </LinearGradient>
+        </LinearGradient> : null}
         <View style={styles.infoCardContent}>
           <Text style={[styles.headerBottomLabel, compact && styles.headerBottomLabelCompact]}>{label}</Text>
           {value ? <Text style={[styles.infoCardValue, compact && styles.infoCardValueCompact]} numberOfLines={1}>{value}</Text> : null}
@@ -164,7 +169,7 @@ export function GameHeader({
   formatCooldown,
 }) {
   const { width } = useWindowDimensions();
-  const compact = width <= 430;
+  const compact = width <= 600;
   const criticalCareActive = Boolean(criticalCareStatus?.active);
   const criticalCareProtected = Boolean(criticalCareStatus?.protected);
   const criticalCareTimer = formatCooldown
@@ -176,7 +181,12 @@ export function GameHeader({
     : null;
 
   return (
-    <ImageBackground source={PLAYER_HUD_BG} style={[styles.headerWrap, compact && styles.headerWrapCompact]} imageStyle={styles.headerBackgroundImage}>
+    <ImageBackground
+      source={PLAYER_HUD_BG}
+      resizeMode="stretch"
+      style={[styles.headerWrap, compact && styles.headerWrapCompact]}
+      imageStyle={styles.headerBackgroundImage}
+    >
       <View style={styles.headerTopRow}>
         <View style={styles.headerIdentityBlock}>
           <AvatarFrame activeAvatar={activeAvatar} compact={compact} />
@@ -226,7 +236,7 @@ export function GameHeader({
         </LinearGradient>
       ) : null}
 
-      <View style={styles.headerStatsColumn}>
+      <View style={[styles.headerStatsColumn, compact && styles.headerStatsRow]}>
         <StatBar icon="hp" label="HP" value={hp} max={maxHp} fillColor="#ff3659" accent="rgba(255,54,89,0.45)" compact={compact} />
         <StatBar
           icon="energy"
@@ -244,7 +254,7 @@ export function GameHeader({
       <View style={styles.headerBottomRow}>
         <InfoCard
           icon="cash"
-          label="GOTOWKA"
+          label="GOTÓWKA"
           value={cash}
           compact={compact}
           style={styles.headerCashCard}
@@ -252,7 +262,7 @@ export function GameHeader({
           auxLabel="Bank"
           auxValue={bank}
         />
-        <InfoCard icon="xp" label={`POSTEP DO SZACUNKU ${level + 1}`} compact={compact} style={styles.headerXpCard}>
+        <InfoCard icon="xp" label={`DO RES ${level + 1}`} compact={compact} style={styles.headerXpCard}>
           <Text style={[styles.headerXpValue, compact && styles.headerXpValueCompact]}>{xp} / {xpRequired}</Text>
           <ProgressBar value={Math.round((xpProgress || 0) * 100)} max={100} fillColor="#f0c24d" />
         </InfoCard>
@@ -263,9 +273,9 @@ export function GameHeader({
 
 export function QuickActionTile({ icon, image, title, onPress }) {
   return (
-    <Pressable onPress={onPress} style={styles.quickTile}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={title} style={styles.quickTile}>
       {image ? (
-        <ImageBackground source={image} style={styles.quickTileFull} imageStyle={styles.quickTileFullImage}>
+        <ImageBackground source={image} resizeMode="cover" style={styles.quickTileFull} imageStyle={styles.quickTileFullImage}>
           <LinearGradient colors={["rgba(0,0,0,0.04)", "rgba(0,0,0,0.22)", "rgba(0,0,0,0.72)"]} style={styles.quickTileOverlay}>
             <Text style={styles.quickTileTitle}>{title}</Text>
           </LinearGradient>
@@ -327,7 +337,7 @@ export function HeistTabs({ tabs, selected, onSelect }) {
   );
 }
 
-export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel, onPress, disabled, onDisabledPress }) {
+export function HeistCard({ title, reward, xp, chance, energy, risk, riskLabel = "Ryzyko", lockedLabel, onPress, disabled, onDisabledPress }) {
   const handlePress = disabled ? onDisabledPress : onPress;
   return (
     <LinearGradient colors={["#17191e", "#0f1014"]} style={[styles.heistCard, disabled && styles.heistCardDisabled]}>
@@ -336,13 +346,13 @@ export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel
           <Text style={styles.heistCardTitle}>{title}</Text>
           <Text style={styles.heistReward}>{reward}</Text>
         </View>
-        <Pressable disabled={!handlePress} onPress={handlePress} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
+        <Pressable disabled={!handlePress} onPress={handlePress} accessibilityRole="button" accessibilityLabel={`${title}: ${lockedLabel || "Wykonaj"}`} accessibilityState={{ disabled: !handlePress }} style={[styles.heistActionButton, disabled && styles.heistActionButtonDisabled]}>
           <Text style={[styles.heistActionText, disabled && styles.heistActionTextDisabled]}>{lockedLabel || "Wykonaj"}</Text>
         </Pressable>
       </View>
       <View style={styles.heistInfoRow}>
         <View style={styles.heistInfoChip}>
-          <Text style={styles.heistInfoLabel}>Ryzyko</Text>
+          <Text style={styles.heistInfoLabel}>{riskLabel}</Text>
           <Text style={styles.heistInfoText}>{risk}</Text>
         </View>
         <View style={styles.heistInfoChip}>
@@ -366,15 +376,39 @@ export function HeistCard({ title, reward, xp, chance, energy, risk, lockedLabel
   );
 }
 
-export function ResultModal({ visible, tone = "warning", title, message, onClose }) {
+export function ResultModal({ visible, tone = "warning", title, message, onClose, transient = false }) {
+  const signal = tone === "success"
+    ? { icon: "check-bold", label: "ROZLICZONE", color: "#65d391", background: "#173323" }
+    : tone === "failure"
+      ? { icon: "close-thick", label: "KONSEKWENCJA", color: "#ef8090", background: "#3a1920" }
+      : { icon: "alert-outline", label: "SYTUACJA", color: "#efc260", background: "#352a14" };
+  if (transient) {
+    if (!visible) return null;
+    return (
+      <View pointerEvents="box-none" style={styles.toastPlacement}>
+        <View accessibilityLiveRegion="polite" accessibilityRole="alert" style={[styles.toastCard, tone === "success" && styles.resultModalSuccess, tone === "failure" && styles.resultModalFailure]}>
+          <View style={[styles.resultSignal, { backgroundColor: signal.background, borderColor: signal.color }]}><MaterialCommunityIcons name={signal.icon} size={18} color={signal.color} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.toastTitle, { color: signal.color }]}>{signal.label} · {title}</Text>
+            <Text style={styles.toastMessage}>{message}</Text>
+          </View>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Zamknij powiadomienie" style={styles.toastClose}>
+            <MaterialCommunityIcons name="close" size={20} color="#fff6ea" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={[styles.resultModal, tone === "success" && styles.resultModalSuccess, tone === "failure" && styles.resultModalFailure]}>
+        <View accessibilityViewIsModal accessibilityLiveRegion="assertive" style={[styles.resultModal, tone === "success" && styles.resultModalSuccess, tone === "failure" && styles.resultModalFailure]}>
+          <View style={[styles.resultSignalLarge, { backgroundColor: signal.background, borderColor: signal.color }]}><MaterialCommunityIcons name={signal.icon} size={28} color={signal.color} /></View>
+          <Text style={[styles.resultSignalLabel, { color: signal.color }]}>{signal.label}</Text>
           <Text style={styles.resultModalTitle}>{title}</Text>
           <Text style={styles.resultModalMessage}>{message}</Text>
-          <Pressable onPress={onClose} style={styles.resultModalButton}>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Zamknij wynik" style={styles.resultModalButton}>
             <Text style={styles.resultModalButtonText}>OK</Text>
           </Pressable>
         </View>
@@ -407,11 +441,11 @@ export function QuickActionModal({ visible, title, children, onClose }) {
 const styles = StyleSheet.create({
   headerWrap: { marginHorizontal: 10, marginTop: 8, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10, gap: 8, overflow: "hidden" },
   headerWrapCompact: { marginHorizontal: 8, marginTop: 6, marginBottom: 7, paddingHorizontal: 10, paddingVertical: 9, gap: 7 },
-  headerBackgroundImage: { resizeMode: "stretch", borderRadius: 24, opacity: 0.42 },
+  headerBackgroundImage: { borderRadius: 24, opacity: 0.42 },
   headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   headerIdentityBlock: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 },
   avatarFrame: { width: 64, height: 64, borderRadius: 999, padding: 2 },
-  avatarFrameCompact: { width: 56, height: 56 },
+  avatarFrameCompact: { width: 44, height: 44 },
   avatarFrameInner: { flex: 1, borderRadius: 999, padding: 3, backgroundColor: "#0a0a0b" },
   headerAvatar: { width: "100%", height: "100%", borderRadius: 999, alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
   headerAvatarImage: { width: "100%", height: "100%" },
@@ -435,13 +469,14 @@ const styles = StyleSheet.create({
   headerStatusPillDotOnline: { backgroundColor: "#3ee96e" },
   headerStatusPillDotDemo: { backgroundColor: "#9aa0ab" },
   headerRespectMedal: { width: 78, height: 78, borderRadius: 999, padding: 2, alignItems: "center", justifyContent: "center" },
-  headerRespectMedalCompact: { width: 68, height: 68 },
+  headerRespectMedalCompact: { width: 52, height: 52 },
   headerRespectMedalInner: { flex: 1, width: "100%", borderRadius: 999, backgroundColor: "#0d0d0f", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
   headerRespectValue: { color: "#ffcf60", fontSize: 25, fontWeight: "900", marginTop: 2 },
   headerRespectValueCompact: { fontSize: 21 },
   headerRespectLabel: { color: "#d9b257", fontSize: 9, fontWeight: "900", marginTop: 2, textAlign: "center" },
   headerRespectLabelCompact: { fontSize: 7 },
   headerStatsColumn: { gap: 6 },
+  headerStatsRow: { flexDirection: "row", gap: 8 },
   headerAlertStrip: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
   headerAlertStripCompact: { paddingHorizontal: 10, paddingVertical: 9, gap: 5 },
   headerAlertTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
@@ -478,14 +513,14 @@ const styles = StyleSheet.create({
   headerCashCard: { flex: 1.08 },
   headerXpCard: { flex: 0.92 },
   infoCard: { flex: 1, minHeight: 82, borderRadius: 16, borderWidth: 1, borderColor: "rgba(237,181,74,0.18)" },
-  infoCardCompact: { minHeight: 74 },
+  infoCardCompact: { minHeight: 64 },
   infoCardInner: { flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, paddingVertical: 10 },
   infoCardIconRing: { width: 38, height: 38, borderRadius: 999, padding: 1.5 },
   infoCardIconInner: { flex: 1, borderRadius: 999, backgroundColor: "#0d0d0f", alignItems: "center", justifyContent: "center" },
   infoCardXpGlyph: { color: "#f0c24d", fontSize: 18, fontWeight: "900" },
   infoCardContent: { flex: 1, minWidth: 0 },
   headerBottomLabel: { color: "#d9b257", fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
-  headerBottomLabelCompact: { fontSize: 8 },
+  headerBottomLabelCompact: { fontSize: 10 },
   infoCardValue: { color: "#f0c24d", fontSize: 18, fontWeight: "900", marginTop: 2 },
   infoCardValueCompact: { fontSize: 14, marginTop: 2 },
   infoCardAuxRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
@@ -494,7 +529,13 @@ const styles = StyleSheet.create({
   infoCardAuxValue: { color: "#cbc0ac", fontSize: 11, fontWeight: "800", flexShrink: 1 },
   infoCardAuxValueCompact: { fontSize: 10 },
   headerXpValue: { color: "#fff6ea", fontSize: 13, fontWeight: "900", marginTop: 1, marginBottom: 6 },
-  headerXpValueCompact: { fontSize: 10, marginTop: 1, marginBottom: 5 },
+  headerXpValueCompact: { fontSize: 12, marginTop: 1, marginBottom: 5 },
+  toastPlacement: { position: "absolute", bottom: 20, left: 12, right: 12, alignItems: "center", zIndex: 100 },
+  toastCard: { width: "100%", maxWidth: 540, flexDirection: "row", alignItems: "center", backgroundColor: "#17191f", borderWidth: 1, borderColor: "#c7902e", borderRadius: 18, padding: 14, gap: 8, elevation: 12 },
+  toastTitle: { color: "#f0c24d", fontSize: 12, fontWeight: "900", marginBottom: 4 },
+  toastMessage: { color: "#fff6ea", fontSize: 14, lineHeight: 20 },
+  toastClose: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  resultSignal: { width: 36, height: 36, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   statBarTrack: { height: 8, borderRadius: 999, backgroundColor: "rgba(15,15,15,0.92)", overflow: "hidden", borderWidth: 1, borderColor: "#262626" },
   statBarFill: { height: "100%", borderRadius: 999 },
   quickTile: { width: "31%", minWidth: 92, flexGrow: 1, minHeight: 116, borderRadius: 20, backgroundColor: "#11141a", borderWidth: 1, borderColor: "#2a2f39", alignItems: "center", justifyContent: "center", overflow: "hidden" },
@@ -502,7 +543,17 @@ const styles = StyleSheet.create({
   quickTileFull: { width: "100%", minHeight: 110, justifyContent: "flex-end" },
   quickTileFullImage: { borderRadius: 17 },
   quickTileOverlay: { width: "100%", paddingHorizontal: 10, paddingVertical: 10, justifyContent: "flex-end", minHeight: 110 },
-  quickTileTitle: { color: "#f6efe6", fontSize: 12, fontWeight: "800", textAlign: "center", textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  quickTileTitle: {
+    color: "#f6efe6",
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center",
+    ...createTextShadowStyle({
+      color: "rgba(0,0,0,0.45)",
+      offsetY: 1,
+      radius: 4,
+    }),
+  },
   featureTilePress: { flexBasis: "48%", flexGrow: 1 },
   featureTile: { minHeight: 132, borderRadius: 22, padding: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", justifyContent: "space-between", overflow: "hidden" },
   featureTileTop: { flexDirection: "row", justifyContent: "space-between" },
@@ -540,6 +591,8 @@ const styles = StyleSheet.create({
   resultModal: { width: "100%", maxWidth: 340, backgroundColor: "#121419", borderRadius: 24, padding: 20, borderWidth: 1, borderColor: "#3a3e47", gap: 14 },
   resultModalSuccess: { borderColor: "#3cbf75" },
   resultModalFailure: { borderColor: "#d95d71" },
+  resultSignalLarge: { alignSelf: "center", width: 58, height: 58, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  resultSignalLabel: { marginTop: -6, marginBottom: -8, fontSize: 10, fontWeight: "900", textAlign: "center", letterSpacing: 1.4 },
   resultModalTitle: { color: "#fff6ea", fontSize: 20, fontWeight: "900", textAlign: "center" },
   resultModalMessage: { color: "#d9cfc1", fontSize: 14, lineHeight: 20, textAlign: "center" },
   resultModalButton: { alignSelf: "center", paddingHorizontal: 18, paddingVertical: 12, borderRadius: 14, backgroundColor: "#201712", borderWidth: 1, borderColor: "#7a5a26" },

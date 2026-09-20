@@ -1,4 +1,5 @@
 import { DISTRICTS } from "./districts.js";
+import { normalizeGangCityResponse, normalizeGangDirectorResponse, normalizeGangIdentity, normalizeGangNetwork } from "./gangIdentity.js";
 
 const clampGangValue = (value, min, max) =>
   Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : min));
@@ -114,6 +115,9 @@ export const GANG_WEEKLY_GOAL_TEMPLATES = [
 ];
 
 export const GANG_JOB_BOARD_TEMPLATES = [
+  { id: "city-response", title: "Miasto pamięta", summary: "3 różni członkowie rozwiązują sytuację miejską w dzielnicy gangu. Decyzje pozostają osobiste; liczy się wspólna reakcja.", progressKey: "cityResponses", target: 3, rewards: { vaultCash: 3000, focusInfluence: 4, pressureRelief: 4 } },
+  { id: "crew-specialists", title: "Każdy ma swoją robotę", summary: "3 członków i 3 różne metody kontaktów w dzielnicy gangu. Nagroda raz w tygodniu, także po zmianie dzielnicy.", progressKey: "contactTeamwork", target: 3, rewards: { vaultCash: 3600, focusInfluence: 3, pressureRelief: 3 } },
+  { id: "contact-network", title: "Sieć kontaktów", summary: "Zamknijcie wspólnie 9 zleceń kontaktów w dzielnicy gangu.", progressKey: "contactOrders", target: 9, rewards: { vaultCash: 1800, focusInfluence: 3, pressureRelief: 2 } },
   {
     id: "open-heist",
     title: "Zbierz ekipe",
@@ -318,9 +322,11 @@ export function createGangJobBoard(
   const weekKey = getWeekKey(now);
   const focusDistrict = DISTRICTS.find((district) => district.id === focusDistrictId) || DISTRICTS[0];
   const wantsProtectedClub = Boolean(options.protectedClubId);
-  const templateIds = wantsProtectedClub
-    ? ["open-heist", "finish-heist", "club-guard", "district-pulse"]
-    : ["open-heist", "finish-heist", "vault-run", "district-pulse"];
+  const rotating = [wantsProtectedClub ? "club-guard" : "vault-run", "district-pulse", "crew-specialists"];
+  const districtSalt = Math.max(0, DISTRICTS.findIndex((entry) => entry.id === focusDistrict.id));
+  const weekSalt = weekKey.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const anchor = (weekSalt + districtSalt * 2) % rotating.length;
+  const templateIds = ["open-heist", "finish-heist", "city-response", "contact-network", rotating[anchor]];
 
   return templateIds
     .map((templateId) => GANG_JOB_BOARD_TEMPLATES.find((entry) => entry.id === templateId))
@@ -366,6 +372,7 @@ export function createGangState(overrides = {}) {
     activeHeistLobby: null,
     lastHeistReport: null,
     protectedClub: null,
+    directorResponse: null,
     ...overrides,
   };
 }
@@ -401,6 +408,10 @@ export function normalizeGangState(value) {
 
   return {
     joined,
+    identity: normalizeGangIdentity(joined ? value.identity : undefined),
+    contactNetwork: normalizeGangNetwork(joined ? value.contactNetwork : null, weeklyGoal.weekKey),
+    cityResponse: normalizeGangCityResponse(joined ? value.cityResponse : null, weeklyGoal.weekKey, focusDistrict.id),
+    directorResponse: normalizeGangDirectorResponse(joined ? value.directorResponse : null),
     role: joined && typeof value.role === "string" && value.role.trim() ? value.role.trim() : null,
     name: joined ? normalizedGangName : null,
     members: joined ? Math.max(0, Math.floor(Number(value.members || 0))) : 0,
@@ -458,7 +469,7 @@ export function normalizeGangState(value) {
               };
             })
             .filter(Boolean)
-            .slice(0, 4)
+            .slice(0, 8)
         : jobBoardBase,
     jobProgress:
       value.jobProgress && typeof value.jobProgress === "object" && !Array.isArray(value.jobProgress)
@@ -478,6 +489,8 @@ export function ensureGangWeeklyGoal(gangState, now = Date.now()) {
     protectedClubId: gang.protectedClub?.id,
   });
   const currentWeekKey = gang.weeklyGoal?.weekKey;
+  gang.contactNetwork = normalizeGangNetwork(gang.contactNetwork, nextGoal.weekKey);
+  gang.cityResponse = normalizeGangCityResponse(gang.cityResponse, nextGoal.weekKey, gang.focusDistrictId);
   const currentBoardWeekKey = gang.jobBoard?.[0]?.weekKey || null;
   if (currentWeekKey !== nextGoal.weekKey || gang.weeklyGoal?.focusDistrictId !== gang.focusDistrictId) {
     gang.weeklyGoal = nextGoal;
@@ -488,6 +501,17 @@ export function ensureGangWeeklyGoal(gangState, now = Date.now()) {
     gang.jobBoard = nextBoard;
     gang.jobProgress = {};
     gang.jobRewardedAt = {};
+  } else {
+    // Add newly released jobs without resetting an existing week's earned progress.
+    for (const job of nextBoard) if (!gang.jobBoard.some((entry) => entry.id === job.id)) gang.jobBoard.push(job);
+  }
+  if (gang.contactNetwork?.rewardedAt) {
+    gang.jobRewardedAt["crew-specialists"] = gang.contactNetwork.rewardedAt;
+    gang.jobProgress.contactTeamwork = 3;
+  }
+  if (gang.cityResponse?.rewardedAt) {
+    gang.jobRewardedAt["city-response"] = gang.cityResponse.rewardedAt;
+    gang.jobProgress.cityResponses = 3;
   }
   return gang;
 }

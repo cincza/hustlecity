@@ -1,12 +1,15 @@
 import { getDistrictSummaries } from "./districts.js";
+import { normalizeOperationsState } from "./operations.js";
+
+export const STARTER_TASK_IDS = ["pierwszy-skok", "pierwszy-trening", "schowaj-hajs", "maly-obrot"];
 
 export const TASK_DEFINITIONS = [
   {
     id: "pierwszy-skok",
     tier: 1,
     title: "Pierwszy skok",
-    description: "Zrob 3 skoki.",
-    objective: { kind: "heists_done", target: 3 },
+    description: "Wykonaj pierwszy skok. Liczy się próba, również nieudana.",
+    objective: { kind: "heists_done", target: 1 },
     reward: { cash: 1500, xp: 6 },
   },
   {
@@ -29,8 +32,8 @@ export const TASK_DEFINITIONS = [
     id: "pierwszy-trening",
     tier: 1,
     title: "Pierwszy trening",
-    description: "Zrob 3 treningi na silowni.",
-    objective: { kind: "gym_trainings", target: 3 },
+    description: "Wykonaj jeden trening na siłowni.",
+    objective: { kind: "gym_trainings", target: 1 },
     reward: { cash: 1200, xp: 6 },
   },
   {
@@ -201,6 +204,9 @@ export const TASK_DEFINITIONS = [
     objective: { kind: "operations_completed", target: 1 },
     reward: { cash: 30000, xp: 16 },
   },
+  { id: "trzy-fronty", tier: 3, title: "Trzy fronty", description: "Ukończ Ledger Pull, VIP Lift i Dock Run. Powtórki jednego celu nie wystarczą.", objective: { kind: "operation_targets", ids: ["ledger-pull", "vip-lift", "dock-run"], target: 3 }, reward: { cash: 18000, xp: 70 } },
+  { id: "sieci-dzielnic", tier: 4, title: "Za kulisami miasta", description: "Zdobądź Księgi syndykatu, Rezerwę Neon i Konwój portowy. Przygotuj biznes, narzędzie i fabrykę.", objective: { kind: "operation_targets", ids: ["syndicate-ledger", "neon-reserve", "harbor-convoy"], target: 3 }, reward: { cash: 48000, xp: 140 } },
+  { id: "skarb-miasta", tier: 4, title: "Miasto jest twoje", description: "Ukończ Skarbiec miasta — finał całej sieci operacji.", objective: { kind: "operation_targets", ids: ["city-vault"], target: 1 }, reward: { cash: 100000, xp: 250 } },
 ];
 
 const LEGACY_TASK_DEFINITIONS = [
@@ -457,6 +463,11 @@ function getTaskProgress(task, snapshot, now = Date.now()) {
       const current = Math.min(target, Math.floor(asNumber(stats.operationsCompleted)));
       return { current, target, label: `${current}/${target} operacje`, completed: current >= target };
     }
+    case "operation_targets": {
+      const progress = normalizeOperationsState(snapshot.operations).progress;
+      const current = objective.ids.filter((id) => Number(progress[id]?.wins || 0) > 0).length;
+      return { current, target, label: `${current}/${target} różnych celów`, completed: current >= target };
+    }
     default:
       return {
         current: 0,
@@ -522,6 +533,11 @@ export function getTaskStates(snapshot, { mode = "offline_demo", now = Date.now(
 
 export function getTaskBoard(snapshot, { mode = "offline_demo", now = Date.now(), slotCount = TASK_BOARD_SLOT_COUNT } = {}) {
   const pendingTasks = getTaskStates(snapshot, { mode, now }).filter((task) => !task.claimed);
+  const priority = (task) => {
+    const index = STARTER_TASK_IDS.indexOf(task.id);
+    return index < 0 ? STARTER_TASK_IDS.length + (task.completed && !task.onlineDisabled ? 0 : 1) : index;
+  };
+  pendingTasks.sort((a, b) => priority(a) - priority(b));
   const safeSlotCount = Math.max(1, Number(slotCount || TASK_BOARD_SLOT_COUNT));
   const visibleTasks = pendingTasks.slice(0, safeSlotCount);
   const claimableTasks = visibleTasks.filter((task) => task.completed && !task.onlineDisabled);

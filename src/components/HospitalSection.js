@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE } from "../utils/uiEffects";
 
 function getHpTone(ratio) {
   if (ratio <= 0.3) {
@@ -138,26 +139,26 @@ export function HospitalSection({
 
     const animations = [
       Animated.sequence([
-        Animated.timing(targetScale, { toValue: 1.03, duration: 110, useNativeDriver: true }),
-        Animated.spring(targetScale, { toValue: 1, friction: 5, tension: 115, useNativeDriver: true }),
+        Animated.timing(targetScale, { toValue: 1.03, duration: 110, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.spring(targetScale, { toValue: 1, friction: 5, tension: 115, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(primaryOpacity, { toValue: 1, duration: 130, useNativeDriver: true }),
+        Animated.timing(primaryOpacity, { toValue: 1, duration: 130, useNativeDriver: USE_NATIVE_DRIVER }),
         Animated.delay(140),
-        Animated.timing(primaryOpacity, { toValue: 0, duration: 230, useNativeDriver: true }),
+        Animated.timing(primaryOpacity, { toValue: 0, duration: 230, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
-      Animated.timing(primaryLift, { toValue: -16, duration: 440, useNativeDriver: true }),
+      Animated.timing(primaryLift, { toValue: -16, duration: 440, useNativeDriver: USE_NATIVE_DRIVER }),
     ];
 
     if (feedback.secondaryText) {
       animations.push(
         Animated.sequence([
           Animated.delay(60),
-          Animated.timing(secondaryOpacity, { toValue: 1, duration: 120, useNativeDriver: true }),
+          Animated.timing(secondaryOpacity, { toValue: 1, duration: 120, useNativeDriver: USE_NATIVE_DRIVER }),
           Animated.delay(110),
-          Animated.timing(secondaryOpacity, { toValue: 0, duration: 210, useNativeDriver: true }),
+          Animated.timing(secondaryOpacity, { toValue: 0, duration: 210, useNativeDriver: USE_NATIVE_DRIVER }),
         ]),
-        Animated.timing(secondaryLift, { toValue: -14, duration: 420, useNativeDriver: true })
+        Animated.timing(secondaryLift, { toValue: -14, duration: 420, useNativeDriver: USE_NATIVE_DRIVER })
       );
     }
 
@@ -166,8 +167,8 @@ export function HospitalSection({
       animations.push(
         Animated.sequence([
           Animated.delay(30),
-          Animated.timing(heatScale, { toValue: 0.985, duration: 90, useNativeDriver: true }),
-          Animated.spring(heatScale, { toValue: 1, friction: 6, tension: 110, useNativeDriver: true }),
+          Animated.timing(heatScale, { toValue: 0.985, duration: 90, useNativeDriver: USE_NATIVE_DRIVER }),
+          Animated.spring(heatScale, { toValue: 1, friction: 6, tension: 110, useNativeDriver: USE_NATIVE_DRIVER }),
         ])
       );
     }
@@ -222,10 +223,11 @@ export function HospitalSection({
         <Animated.View style={{ transform: [{ scale: criticalScale }] }}>
           <LinearGradient colors={["rgba(61,18,24,0.98)", "rgba(24,10,13,0.98)"]} style={[styles.heroCard, styles.criticalHero]}>
             <Animated.View
-              pointerEvents="none"
+              pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
               style={[
                 styles.feedbackChip,
                 styles.feedbackChipCritical,
+                WEB_POINTER_EVENTS_NONE_STYLE,
                 {
                   opacity: primaryOpacity,
                   transform: [{ translateY: primaryLift }],
@@ -236,10 +238,11 @@ export function HospitalSection({
             </Animated.View>
             {feedback?.secondaryText ? (
               <Animated.View
-                pointerEvents="none"
+                pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
                 style={[
                   styles.feedbackChip,
                   styles.feedbackChipMuted,
+                  WEB_POINTER_EVENTS_NONE_STYLE,
                   {
                     opacity: secondaryOpacity,
                     transform: [{ translateY: secondaryLift }],
@@ -290,9 +293,10 @@ export function HospitalSection({
       <Animated.View style={{ transform: [{ scale: hpScale }] }}>
         <LinearGradient colors={hpTone.colors} style={styles.heroCard}>
           <Animated.View
-            pointerEvents="none"
+            pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
             style={[
               styles.feedbackChip,
+              WEB_POINTER_EVENTS_NONE_STYLE,
               {
                 opacity: primaryOpacity,
                 transform: [{ translateY: primaryLift }],
@@ -303,10 +307,11 @@ export function HospitalSection({
           </Animated.View>
           {feedback?.secondaryText ? (
             <Animated.View
-              pointerEvents="none"
+              pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
               style={[
                 styles.feedbackChip,
                 styles.feedbackChipMuted,
+                WEB_POINTER_EVENTS_NONE_STYLE,
                 {
                   opacity: secondaryOpacity,
                   transform: [{ translateY: secondaryLift }],

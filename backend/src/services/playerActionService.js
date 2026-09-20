@@ -6,6 +6,7 @@ import {
   RESTAURANT_ITEMS,
 } from "../../../shared/playerActions.js";
 import { assertPlayerNotInCriticalCare } from "./criticalCareService.js";
+import { getRestaurantQuote } from "../../../shared/restaurant.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -25,13 +26,18 @@ export function buyGymPassForPlayer(player, passId, now = Date.now()) {
   if (Number(player?.profile?.jailUntil || 0) > now) {
     fail("Nie kupisz karnetu z celi.");
   }
+  if (player?.profile?.gymPassTier === "perm") {
+    fail("Masz już stały karnet.");
+  }
   if (Number(player?.profile?.cash || 0) < pass.price) {
     fail(`Brakuje $${pass.price} na ${pass.name}.`);
   }
 
   player.profile.cash -= pass.price;
   player.profile.gymPassTier = pass.id;
-  player.profile.gymPassUntil = pass.durationMs ? now + pass.durationMs : null;
+  player.profile.gymPassUntil = pass.durationMs
+    ? Math.max(now, Number(player.profile.gymPassUntil || 0)) + pass.durationMs
+    : null;
 
   return {
     pass,
@@ -102,25 +108,29 @@ export function buyRestaurantItemForPlayer(player, itemId, now = Date.now()) {
   if (!item) {
     fail("Restaurant item not found", 404);
   }
-  if (Number(player?.profile?.jailUntil || 0) > now) {
-    fail("Wiezienie serwuje tylko standardowy kociolek.");
-  }
-  if (Number(player?.profile?.cash || 0) < item.price) {
-    fail(`Brakuje kasy na ${item.name}.`);
-  }
-
-  player.profile.cash -= item.price;
-  player.profile.energy = Math.min(player.profile.maxEnergy, player.profile.energy + item.energy);
+  const quote = getRestaurantQuote(player.profile, item, now);
+  if (quote.error) fail(quote.error);
+  player.profile.cash -= quote.cost;
+  player.profile.energy += quote.energyGain;
+  player.profile.restaurant = {
+    windowStartedAt: quote.allowance.windowStartedAt,
+    energyUsed: quote.allowance.used + quote.energyGain,
+  };
   player.stats.mealsEaten = Math.max(0, Number(player.stats?.mealsEaten || 0)) + 1;
 
   return {
     item,
-    logMessage: `Zjedzone: ${item.name}. Energia +${item.energy}.`,
+    energyGain: quote.energyGain,
+    cost: quote.cost,
+    logMessage: `Zjedzone: ${item.name}. Energia +${quote.energyGain}, koszt $${quote.cost}.`,
   };
 }
 
 export function healPlayer(player, now = Date.now()) {
   assertPlayerNotInCriticalCare(player, "Zwykle leczenie", now);
+  if (Number(player?.profile?.hp || 0) >= Number(player?.profile?.maxHp || 0)) {
+    fail("Masz już pełne zdrowie.");
+  }
   if (Number(player?.profile?.cash || 0) < HOSPITAL_RULES.healCost) {
     fail("Brakuje kasy na lekarza.");
   }

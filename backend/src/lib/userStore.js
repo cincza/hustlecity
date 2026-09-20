@@ -2,8 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "../bootstrapEnv.js";
 import Datastore from "@seald-io/nedb";
-import { logError, logInfo } from "../utils/logger.js";
+import { gameDatabasePath, getGameDatabase, closeGameDatabase, readUser, readUserByLogin, readUsers, insertUserRecord, stagePlayerSave, stageAuthenticationUpdate, stageUserDelete, stageAdminAudit, readAdminAudits } from "./gameDatabase.js";
+import { logInfo } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,14 +13,11 @@ const configuredDataDir = String(process.env.DATA_DIR || "").trim();
 const dataDir = configuredDataDir
   ? path.resolve(configuredDataDir)
   : path.resolve(__dirname, "../../data");
-const userDbPath = path.join(dataDir, "users.db");
 const globalChatDbPath = path.join(dataDir, "global-chat.db");
 const prisonChatDbPath = path.join(dataDir, "prison-chat.db");
 
-let usersDb;
 let globalChatDb;
 let prisonChatDb;
-let userStoreInitLogged = false;
 const VERBOSE_USER_STORE_LOGS = process.env.VERBOSE_USER_STORE_LOGS === "1";
 
 function logUserStore(message, level = "log") {
@@ -44,15 +43,7 @@ function sanitizeUsernameSeed(rawValue) {
   return cleaned.slice(0, 18) || `gracz${crypto.randomInt(1000, 9999)}`;
 }
 
-async function ensureUsersDbFile() {
-  await fs.mkdir(dataDir, { recursive: true });
-  try {
-    await fs.access(userDbPath);
-  } catch (_error) {
-    await fs.writeFile(userDbPath, "", "utf8");
-    logUserStore(`created database file at ${userDbPath}`);
-  }
-}
+
 
 async function ensureGlobalChatDbFile() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -81,69 +72,15 @@ function clonePlayerData(playerData) {
   return JSON.parse(JSON.stringify(playerData));
 }
 
-async function getDb() {
-  if (usersDb) return usersDb;
-  await ensureUsersDbFile();
-  usersDb = new Datastore({ filename: userDbPath });
-  try {
-    await usersDb.loadDatabaseAsync();
-  } catch (error) {
-    const corruptPath = path.join(
-      dataDir,
-      `users.db.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`
-    );
-    logError("persistence", "users-db-load-failed", {
-      userDbPath,
-      corruptPath,
-      reason: error?.message || "unknown",
-    });
-    await fs.rename(userDbPath, corruptPath);
-    await fs.writeFile(userDbPath, "", "utf8");
-    usersDb = new Datastore({ filename: userDbPath });
-    await usersDb.loadDatabaseAsync();
+function withPlayerIdentity(user) {
+  if (user?.playerData) {
+    user.playerData.id = user._id;
+    user.playerData.username = user.username;
   }
-  await migrateOptionalEmailFields(usersDb);
-  await usersDb.ensureIndexAsync({ fieldName: "usernameLower", unique: true });
-  await usersDb.ensureIndexAsync({ fieldName: "emailLower", sparse: true, unique: true });
-  if (!userStoreInitLogged) {
-    logUserStore(`database ready at ${userDbPath}`);
-    userStoreInitLogged = true;
-  }
-  return usersDb;
+  return user;
 }
 
-async function migrateOptionalEmailFields(db) {
-  const docs = await db.findAsync({
-    $or: [{ email: null }, { email: "" }, { emailLower: null }, { emailLower: "" }],
-  });
 
-  if (!docs.length) return;
-
-  for (const doc of docs) {
-    const trimmedEmail = typeof doc.email === "string" ? doc.email.trim() : "";
-    const normalizedEmail = normalizeEmail(trimmedEmail);
-    const update = {};
-
-    if (normalizedEmail) {
-      update.$set = {
-        email: trimmedEmail,
-        emailLower: normalizedEmail,
-      };
-    } else {
-      update.$unset = {
-        email: true,
-        emailLower: true,
-      };
-    }
-
-    await db.updateAsync({ _id: doc._id }, update, {});
-  }
-
-  logInfo("persistence", "optional-email-migration", {
-    cleanedUsers: docs.length,
-    dataDir,
-  });
-}
 
 async function getGlobalChatDb() {
   if (globalChatDb) return globalChatDb;
@@ -164,56 +101,35 @@ async function getPrisonChatDb() {
 }
 
 export async function initUserStore() {
-  await getDb();
+  await getGameDatabase();
   await getGlobalChatDb();
   await getPrisonChatDb();
   logInfo("persistence", "store-initialized", {
     dataDir,
-    userDbPath,
+    userDbPath: gameDatabasePath,
     globalChatDbPath,
     prisonChatDbPath,
   });
 }
 
-export async function findUserById(userId) {
-  const db = await getDb();
-  const user = await db.findOneAsync({ _id: userId });
-  logUserStore(`read by id ${userId} -> ${user ? "hit" : "miss"}`);
-  return user;
-}
+export async function findUserById(userId) { return readUser(userId); }
 
-export async function findUserByLogin(login) {
-  const db = await getDb();
-  const rawLogin = String(login || "").trim();
-  if (!rawLogin) return null;
-
-  const emailLower = normalizeEmail(rawLogin);
-  const usernameLower = normalizeUsername(rawLogin);
-  const user =
-    (await db.findOneAsync({ emailLower })) ||
-    (await db.findOneAsync({ usernameLower })) ||
-    null;
-  logUserStore(`read by login ${rawLogin} -> ${user ? "hit" : "miss"}`);
-  return user;
-}
+export async function findUserByLogin(login) { return readUserByLogin(login); }
 
 export async function usernameExists(username) {
-  const db = await getDb();
-  const usernameLower = normalizeUsername(username);
-  if (!usernameLower) return false;
-  const existing = await db.findOneAsync({ usernameLower });
-  return Boolean(existing);
+  const db = await getGameDatabase();
+  const lower = normalizeUsername(username);
+  return Boolean(lower && db.prepare("SELECT id FROM users WHERE username_lower = ?").get(lower));
 }
 
 export async function createAvailableUsername(login, preferredUsername) {
-  const db = await getDb();
   const preferred = sanitizeUsernameSeed(
     preferredUsername || (String(login || "").includes("@") ? String(login).split("@")[0] : login)
   );
 
   let candidate = preferred;
   let counter = 1;
-  while (await db.findOneAsync({ usernameLower: normalizeUsername(candidate) })) {
+  while (await usernameExists(candidate)) {
     counter += 1;
     candidate = `${preferred}${counter}`;
   }
@@ -227,7 +143,6 @@ export async function createUserRecord({
   passwordHash,
   playerData,
 }) {
-  const db = await getDb();
   const now = new Date().toISOString();
   const safePlayerData = clonePlayerData(playerData);
   if (!safePlayerData) {
@@ -240,6 +155,8 @@ export async function createUserRecord({
     username,
     usernameLower: normalizeUsername(username),
     passwordHash,
+    authVersion: 0,
+    authDisabled: false,
     playerData: safePlayerData,
     createdAt: now,
     updatedAt: now,
@@ -248,67 +165,37 @@ export async function createUserRecord({
     doc.email = trimmedEmail;
     doc.emailLower = normalizedEmail;
   }
-  const inserted = await db.insertAsync(doc);
+  withPlayerIdentity(doc);
+  const inserted = await insertUserRecord(doc);
   logUserStore(`created user ${inserted.username} (${inserted._id})`);
   return inserted;
 }
 
 export async function saveUserPlayerData(userId, playerData) {
-  const db = await getDb();
-  const safePlayerData = clonePlayerData(playerData);
-  if (!userId) {
-    throw new Error("saveUserPlayerData requires userId");
-  }
-  if (!safePlayerData) {
-    throw new Error("saveUserPlayerData requires playerData object");
-  }
-  const updatedAt = new Date().toISOString();
-  await db.updateAsync(
-    { _id: userId },
-    {
-      $set: {
-        playerData: safePlayerData,
-        updatedAt,
-      },
-    },
-    {}
-  );
-  logUserStore(`saved playerData for ${userId} at ${updatedAt}`);
-  logInfo("persistence", "player-saved", {
-    userId,
-    updatedAt,
-    dataDir,
-  });
-  return findUserById(userId);
+  return stagePlayerSave(userId, playerData);
+}
+
+export function closeUserStore() { closeGameDatabase(); }
+
+export async function updateUserAuthentication(userId, { passwordHash, authDisabled }) {
+  return stageAuthenticationUpdate(userId, { passwordHash, authDisabled });
 }
 
 export async function deleteUserByLogin(login) {
-  const db = await getDb();
-  const rawLogin = String(login || "").trim();
-  if (!rawLogin) return 0;
-
-  const emailLower = normalizeEmail(rawLogin);
-  const usernameLower = normalizeUsername(rawLogin);
-  const result = await db.removeAsync(
-    {
-      $or: [{ emailLower }, { usernameLower }],
-    },
-    { multi: true }
-  );
-  logUserStore(`deleted by login ${rawLogin} -> ${result}`);
-  return result;
+  const user = await readUserByLogin(login);
+  if (!user) return 0;
+  return (await stageUserDelete(user._id)) ? 1 : 0;
 }
 
-export async function listUsers() {
-  const db = await getDb();
-  return db.findAsync({});
-}
+export async function deleteUserById(userId) { return stageUserDelete(userId); }
+export async function appendAdminAudit(entry) { return stageAdminAudit(entry); }
+export async function listAdminAudits(options) { return readAdminAudits(options); }
+
+export async function listUsers() { return readUsers(); }
 
 export async function clearAllUsers() {
-  const db = await getDb();
-  const removed = await db.removeAsync({}, { multi: true });
-  logUserStore(`cleared users -> ${removed}`);
-  return removed;
+  const db = await getGameDatabase();
+  return db.prepare("DELETE FROM users").run().changes;
 }
 
 export async function getGlobalChatMessages(limit = 40) {

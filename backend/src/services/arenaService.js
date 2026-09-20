@@ -253,7 +253,6 @@ export function resolveArenaFightForPlayer(player, now = Date.now()) {
   }
 
   player.profile.energy = Math.max(0, Number(player.profile.energy || 0) - Number(currentFight.energyCost || 0));
-  player.timers.energyUpdatedAt = now;
 
   const success = Math.random() < Number(currentFight.winChance || 0);
   if (success) {

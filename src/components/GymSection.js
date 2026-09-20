@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE } from "../utils/uiEffects";
 
 const DISPLAY_SERIES_COUNT = 10;
 
@@ -250,25 +251,25 @@ function GymExerciseCard({
 
     const animation = Animated.parallel([
       Animated.sequence([
-        Animated.timing(glow, { toValue: 1, duration: 160, useNativeDriver: true }),
-        Animated.timing(glow, { toValue: 0, duration: 360, useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 1, duration: 160, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.timing(glow, { toValue: 0, duration: 360, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(scale, { toValue: 0.985, duration: 90, useNativeDriver: true }),
-        Animated.spring(scale, { toValue: 1, friction: 5, tension: 125, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 0.985, duration: 90, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.spring(scale, { toValue: 1, friction: 5, tension: 125, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(burstOpacity, { toValue: 1, duration: 110, useNativeDriver: true }),
+        Animated.timing(burstOpacity, { toValue: 1, duration: 110, useNativeDriver: USE_NATIVE_DRIVER }),
         Animated.delay(140),
-        Animated.timing(burstOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+        Animated.timing(burstOpacity, { toValue: 0, duration: 220, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
-      Animated.timing(burstLift, { toValue: -18, duration: 420, useNativeDriver: true }),
+      Animated.timing(burstLift, { toValue: -18, duration: 420, useNativeDriver: USE_NATIVE_DRIVER }),
       Animated.sequence([
-        Animated.timing(energyOpacity, { toValue: 1, duration: 110, useNativeDriver: true }),
+        Animated.timing(energyOpacity, { toValue: 1, duration: 110, useNativeDriver: USE_NATIVE_DRIVER }),
         Animated.delay(120),
-        Animated.timing(energyOpacity, { toValue: 0, duration: 240, useNativeDriver: true }),
+        Animated.timing(energyOpacity, { toValue: 0, duration: 240, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
-      Animated.timing(energyLift, { toValue: -12, duration: 420, useNativeDriver: true }),
+      Animated.timing(energyLift, { toValue: -12, duration: 420, useNativeDriver: USE_NATIVE_DRIVER }),
     ]);
 
     animation.start(() => {
@@ -308,9 +309,10 @@ function GymExerciseCard({
         {burstPrimary ? (
           <>
             <Animated.View
-              pointerEvents="none"
+              pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
               style={[
                 styles.exerciseBurst,
+                WEB_POINTER_EVENTS_NONE_STYLE,
                 {
                   opacity: burstOpacity,
                   transform: [{ translateY: burstLift }],
@@ -320,9 +322,10 @@ function GymExerciseCard({
               <Text style={styles.exerciseBurstText}>{burstPrimary}</Text>
             </Animated.View>
             <Animated.View
-              pointerEvents="none"
+              pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
               style={[
                 styles.energyBurst,
+                WEB_POINTER_EVENTS_NONE_STYLE,
                 {
                   opacity: energyOpacity,
                   transform: [{ translateY: energyLift }],
@@ -475,8 +478,8 @@ export function GymSection({
     if (!passHighlightNonce) return undefined;
     passPulse.setValue(1);
     const animation = Animated.sequence([
-      Animated.timing(passPulse, { toValue: 1.015, duration: 110, useNativeDriver: true }),
-      Animated.spring(passPulse, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }),
+      Animated.timing(passPulse, { toValue: 1.015, duration: 110, useNativeDriver: USE_NATIVE_DRIVER }),
+      Animated.spring(passPulse, { toValue: 1, friction: 5, tension: 120, useNativeDriver: USE_NATIVE_DRIVER }),
     ]);
     animation.start();
     return () => animation.stop();

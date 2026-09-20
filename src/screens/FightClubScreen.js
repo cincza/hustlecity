@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { USE_NATIVE_DRIVER } from "../utils/uiEffects";
 import {
   ARENA_BOOSTS,
   ARENA_MODES,
@@ -126,8 +127,8 @@ export function FightClubScreen({
     lastAnimatedResultId.current = nextResultId;
     pulse.setValue(0.96);
     Animated.sequence([
-      Animated.timing(pulse, { toValue: 1.03, duration: 140, useNativeDriver: true }),
-      Animated.spring(pulse, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1.03, duration: 140, useNativeDriver: USE_NATIVE_DRIVER }),
+      Animated.spring(pulse, { toValue: 1, friction: 5, tension: 120, useNativeDriver: USE_NATIVE_DRIVER }),
     ]).start();
   }, [latestFightResult?.id, pulse, safeArena.lastRunReport?.id]);
 

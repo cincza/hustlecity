@@ -1,17 +1,11 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native";
-import { QuickActionTile } from "../components/GameShellUI";
 import { HeroPanel } from "../components/GameScreenPrimitives";
-
-const QUICK_ACTION_IMAGES = {
-  bank: require("../../assets/quick-icons/bank.png"),
-  casino: require("../../assets/quick-icons/casino.png"),
-  restaurant: require("../../assets/quick-icons/restaurant.png"),
-  hospital: require("../../assets/quick-icons/hospital.png"),
-  gym: require("../../assets/quick-icons/gym.png"),
-};
+import { getContextActions } from "../../shared/contextActions.js";
+import SessionPlanBoard from "../components/SessionPlanBoard";
 
 export function HubScreen({
+  game,
   styles,
   SceneArtwork,
   SectionCard,
@@ -29,14 +23,22 @@ export function HubScreen({
   criticalCareStatus,
   formatCooldown,
   actions,
+  token,
+  onUser,
 }) {
-  const quickActions = [
-    { id: "quick-bank", title: "Bank", icon: "bank", image: QUICK_ACTION_IMAGES.bank, onPress: () => actions.openQuickAction("bank") },
-    { id: "quick-casino", title: "Kasyno", icon: "casino", image: QUICK_ACTION_IMAGES.casino, onPress: () => actions.openQuickAction("casino") },
-    { id: "quick-food", title: "Restauracja", icon: "food", image: QUICK_ACTION_IMAGES.restaurant, onPress: () => actions.openQuickAction("restaurant") },
-    { id: "quick-hospital", title: "Szpital", icon: "hospital", image: QUICK_ACTION_IMAGES.hospital, onPress: () => actions.openQuickAction("hospital") },
-    { id: "quick-gym", title: "Trening", icon: "training", image: QUICK_ACTION_IMAGES.gym, onPress: () => actions.openQuickAction("gym") },
-  ];
+  const quickActions = getContextActions(game, { criticalCare: criticalCareStatus?.active });
+  const [busyAction, setBusyAction] = React.useState(null);
+  const actionLock = React.useRef(false);
+  const [showOverview, setShowOverview] = React.useState(false);
+  async function activate(action) {
+    if (actionLock.current) return;
+    actionLock.current = true; setBusyAction(action.id);
+    try {
+      if (action.quick) actions.openQuickAction(action.quick);
+      else if (action.action) await actions[action.action](action.amount);
+      else actions.openSection(action.tab, action.section);
+    } finally { actionLock.current = false; setBusyAction(null); }
+  }
 
   const criticalCareActive = Boolean(criticalCareStatus?.active);
   const criticalCareProtected = Boolean(criticalCareStatus?.protected);
@@ -81,22 +83,28 @@ export function HubScreen({
       title: "Kontrakty",
       subtitle: criticalCareActive
         ? "Najpierw wyjdz ze szpitala i dopiero wracaj do grubszych robot."
-        : "Trudniejszy loop z eq, autem i lepsza kasa niz zwykle napady.",
-      highlight: criticalCareActive ? "Offline" : "Late-game",
+        : "Dobierz sprzęt i auto, żeby wejść w trudniejsze roboty z większą stawką.",
+      highlight: criticalCareActive ? "Szpital" : "Sprzęt i auto",
       onPress: () => actions.openSection("heists", "contracts"),
     },
   ];
 
   return (
     <>
-      <SectionCard title="Szybkie wejscia" subtitle="Najblizsze utility sa od razu pod reka.">
-        <View style={styles.quickActionGrid}>
+      <SessionPlanBoard game={game} token={token} onUser={onUser} onNavigate={actions.openSection} />
+      <SectionCard title="Pod ręką" subtitle="Ruchy dobrane do Twojej sytuacji.">
+        <View style={{ gap: 8 }}>
           {quickActions.map((action) => (
-            <QuickActionTile key={action.id} icon={action.icon} image={action.image} title={action.title} onPress={action.onPress} />
+            <Pressable key={action.id} accessibilityRole="button" disabled={Boolean(busyAction)} onPress={() => activate(action)} style={[styles.listCard, { minHeight: 60, marginBottom: 0, padding: 12 }]}>
+              <Text style={styles.listCardTitle}>{busyAction === action.id ? "Chwila…" : action.title}{action.amount ? ` · ${formatMoney(action.amount)}` : ""} ›</Text>
+              <Text style={styles.listCardMeta}>{action.hint}</Text>
+            </Pressable>
           ))}
+          {!quickActions.length ? <Text style={styles.listCardMeta}>Nie masz pilnych spraw. Wybierz cel z Twojej drogi lub sprawdź miasto.</Text> : null}
         </View>
       </SectionCard>
-
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: showOverview }} onPress={() => setShowOverview(!showOverview)} style={[styles.inlineButton, { minHeight: 44 }]}><Text style={styles.inlineButtonText}>{showOverview ? "Zwiń przegląd miasta ▴" : "Przegląd miasta i kontakty ▾"}</Text></Pressable>
+      {showOverview ? <>
       <HeroPanel
         eyebrow={criticalCareActive ? "Stan krytyczny" : criticalCareProtected ? "Powrot do gry" : "Start"}
         title={heroTitle}
@@ -202,6 +210,7 @@ export function HubScreen({
           </View>
         </SectionCard>
       ) : null}
+      </> : null}
     </>
   );
 }

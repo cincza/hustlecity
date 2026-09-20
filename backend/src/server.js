@@ -1,11 +1,27 @@
+import { bootstrapAdmin } from "./services/adminBootstrap.js";
+import { PREMIUM_PACKS } from "../../shared/premium.js";
+import { buyGangIdentity, recordGangCityResponse, recordGangDirectorResponse, recordGangSpecialist } from "../../shared/gangIdentity.js";
+import { advanceCityDirectorState, applyCityEventMarketQuote, applyCityEventToMarketView, createCityDirectorState, getCityEventAt, getCityEventResponse, normalizePlayerDirector, respondToCityEvent } from "../../shared/cityDirector.js";
+import { abandonSessionPlan, acceptSessionPlan, claimSessionPlan, createSessionPlanState, getSessionPlanBoard, normalizeSessionPlanState } from "../../shared/sessionPlans.js";
+import { premiumConfiguration, createPremiumCheckout, verifyPremiumWebhook, fulfillPremiumOrder } from "./services/premiumService.js";
+import { executeContactAction, normalizeContacts } from "../../shared/contacts.js";
+import { recordGangJobProgress as recordContactGangProgress } from "../../shared/gangProjects.js";
+import { getSoloHeistOdds } from "../../shared/heists.js";
+import { createRivalState, getRivalView, maybeCreateRivalFromContact, normalizeRivalState, resolveRivalChoice } from "../../shared/rivals.js";
+import { createEmpireProjects, finalizeEmpireProject, getEmpireProjectsView, normalizeEmpireProjects, runEmpireDirective, startEmpireProject } from "../../shared/empireProjects.js";
+import { syncPlayerEnergy, syncPlayerHeat } from "../../shared/resources.js";
+import { buildBlackjackPublicSession as serializeBlackjackSession } from "./services/blackjackView.js";
 ﻿import crypto from "node:crypto";
 import path from "node:path";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
+import "./bootstrapEnv.js";
+import { runTransactionalAction } from "./services/transactionService.js";
+import { afterCommit, afterTransaction, currentTransaction } from "./lib/transactionContext.js";
+import { readWorldDocument, saveWorldDocument } from "./lib/gameDatabase.js";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
-import dotenv from "dotenv";
 import {
   applyMarketBuy,
   applyMarketSell,
@@ -33,19 +49,23 @@ import {
 import {
   addGlobalChatMessage,
   addPrisonChatMessage,
+  appendAdminAudit,
   clearAllUsers,
   clearGlobalChatMessages,
   clearPrisonChatMessages,
   createAvailableUsername,
   createUserRecord,
   deleteUserByLogin,
+  deleteUserById,
   findUserById,
   findUserByLogin,
   getGlobalChatMessages,
   getPrisonChatMessages,
   initUserStore,
   listUsers,
+  listAdminAudits,
   saveUserPlayerData,
+  updateUserAuthentication,
 } from "./repositories/userRepository.js";
 import {
   getWorldState,
@@ -157,8 +177,10 @@ import {
 } from "./services/gangPvpService.js";
 import {
   advanceOperationForPlayer,
+  cancelOperationForPlayer,
   ensurePlayerOperationState,
   executeOperationForPlayer,
+  resolveOperationComplicationForPlayer,
   startOperationForPlayer,
 } from "./services/operationService.js";
 import {
@@ -171,9 +193,13 @@ import {
 } from "./services/contractService.js";
 import {
   applyAdminProfileFloors,
+  buildAdminPlayerDetail,
+  buildAdminPlayerSnapshot,
   buildAdminPublicState,
   grantCashToPlayerByAdmin,
   grantRespectToPlayerByAdmin,
+  repairAdminPlayerState,
+  setAdminPlayerField,
 } from "./services/adminActionService.js";
 import { sendError, sendOk } from "./utils/http.js";
 import { applyXpProgression, getXpRequirementForRespect } from "../../shared/progression.js";
@@ -227,24 +253,21 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const backendRootDir = path.resolve(__dirname, "..");
-const configuredEnvFile = String(process.env.BACKEND_ENV_FILE || "").trim();
-
-// Keep backend env resolution stable no matter whether we start from root or backend/.
-dotenv.config({
-  path: configuredEnvFile
-    ? path.resolve(configuredEnvFile)
-    : path.join(backendRootDir, ".env"),
-});
 
 const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 4000;
 const host = process.env.HOST || "0.0.0.0";
-const realtime = createRealtimeServer({
+const realtimeTransport = createRealtimeServer({
   server,
   findUserById,
 });
+const realtime = Object.fromEntries(Object.entries(realtimeTransport).map(([name, method]) => [
+  name,
+  typeof method === "function" && name !== "close"
+    ? (...args) => afterCommit(() => method(...args))
+    : method,
+]));
 const allowedOriginsFromEnv = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((entry) => entry.trim())
@@ -267,7 +290,6 @@ const RESET_GAME_TOKEN = String(process.env.RESET_GAME_TOKEN || "").trim();
 const ADMIN_ACCOUNT = {
   username: ADMIN_DEFAULT_USERNAME,
   email: "czincza11@hustle-city.local",
-  password: "1234",
   cash: ADMIN_PROFILE_FLOORS.cash,
   bank: ADMIN_PROFILE_FLOORS.bank,
 };
@@ -336,7 +358,7 @@ function isImplicitlyAllowedOrigin(origin) {
 
 function asyncHandler(handler) {
   return function wrappedHandler(req, res, next) {
-    Promise.resolve(handler(req, res, next)).catch(next);
+    Promise.resolve(runTransactionalAction(req, res, handler)).catch(next);
   };
 }
 
@@ -357,6 +379,31 @@ function requireAdminRequest(req, res) {
   return false;
 }
 
+async function requireCurrentAdmin(req) {
+  const actor = await findUserById(req.user?.id);
+  if (!actor?.playerData || !isAdminUsername(actor.username)) {
+    throw Object.assign(new Error("Admin only"), { statusCode: 403 });
+  }
+  return actor;
+}
+
+function adminReason(value) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 500) : null;
+}
+
+function recordAdminAudit(actor, target, operation, before, after, reason = null) {
+  return appendAdminAudit({
+    adminId: actor._id,
+    adminUsername: actor.username,
+    targetId: target?._id || before?.id || after?.id || null,
+    targetUsername: target?.username || before?.username || after?.username || null,
+    operation,
+    before,
+    after,
+    reason: adminReason(reason),
+  });
+}
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -373,7 +420,7 @@ app.use(
     },
   })
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "1mb", verify: (req, _res, buffer) => { if (req.path === "/premium/webhook") req.paymentRawBody = Buffer.from(buffer); } }));
 app.use((req, _res, next) => {
   if (VERBOSE_SERVER_LOGS) {
     const requester = req.ip || "unknown";
@@ -534,17 +581,20 @@ function createInitialPlayerData(username = "gracz") {
     },
     log: [
       "Miasto wrze. Lokalne ekipy obserwuja kazdy ruch.",
-      "Backend liczy energie i rewardy. Klient tylko to pokazuje.",
+      "Pierwszy kontakt już czeka. Sprawdź napady i wykonaj swój pierwszy skok.",
     ],
     flags: {
-      alphaTestGrantApplied: false,
+      alphaTestGrantApplied: true,
     },
     online: createOnlineSocialState(),
     escortsOwned: [],
     gang: createGangState(),
     club: createClubState(),
     city: createCityState(),
+    sessionPlans: createSessionPlanState(),
     operations: createOperationsState(),
+    rivals: createRivalState(),
+    empireProjects: createEmpireProjects(),
     contracts: createContractState(),
     arena: createArenaState(),
     businessesOwned: [],
@@ -576,23 +626,30 @@ const state = {
   market: createMarketState(),
   routeRateLimit: new Map(),
   actionLocks: new Map(),
+  cityDirector: createCityDirectorState(),
+  cityDirectorSyncPromise: null,
 };
 
 await initUserStore();
 await initWorldStateStore();
-await deleteUserByLogin("boss");
 state.dealerInventory = normalizeDealerInventory((await getWorldState())?.dealerInventory);
-
-const existingAdmin = await findUserByLogin(ADMIN_ACCOUNT.username);
-if (!existingAdmin) {
-  const passwordHash = await bcrypt.hash(ADMIN_ACCOUNT.password, 10);
-  await createUserRecord({
-    username: ADMIN_ACCOUNT.username,
-    email: ADMIN_ACCOUNT.email,
-    passwordHash,
-    playerData: createAdminPlayerData(),
-  });
+state.market = (await readWorldDocument("market-state"))?.value || state.market;
+{
+  const savedDirector = await readWorldDocument("city-director-state");
+  const advanced = advanceCityDirectorState(savedDirector?.value);
+  state.cityDirector = advanced.state;
+  if (!savedDirector || advanced.changed) await saveWorldDocument("city-director-state", advanced.state, savedDirector?.revision || 0);
 }
+
+await bootstrapAdmin({
+  account: ADMIN_ACCOUNT,
+  adminUsernames: ADMIN_USERNAMES,
+  findUser: findUserByLogin,
+  createUser: createUserRecord,
+  updateAuthentication: updateUserAuthentication,
+  createPlayer: createAdminPlayerData,
+  logWarning: (username) => logWarn("auth", "legacy-admin-disabled", { username }),
+});
 
 function pushLog(player, message) {
   player.log = [message, ...player.log].slice(0, 16);
@@ -606,6 +663,10 @@ function ensurePlayerExtendedState(player) {
   if (!player.stats || typeof player.stats !== "object") {
     player.stats = {};
   }
+  player.cityDirector = normalizePlayerDirector(player.cityDirector);
+  player.sessionPlans = normalizeSessionPlanState(player.sessionPlans);
+  player.empireProjects = normalizeEmpireProjects(player.empireProjects);
+  player.stats.rivalsResolved = Math.max(0, Math.floor(Number(player.stats.rivalsResolved || 0)));
   player.stats.gangHeistsWon = Math.max(0, Math.floor(Number(player.stats.gangHeistsWon || 0)));
   player.stats.gangHeistsParticipated = Math.max(0, Math.floor(Number(player.stats.gangHeistsParticipated || 0)));
   player.stats.heistsDone = Math.max(0, Math.floor(Number(player.stats.heistsDone || 0)));
@@ -795,19 +856,16 @@ function isUserOnline(userId, now = Date.now()) {
 }
 
 function getSharedDealerInventory() {
+  const staged = currentTransaction()?.documents?.get("world-state");
+  if (staged) return normalizeDealerInventory(staged.value.dealerInventory);
   state.dealerInventory = normalizeDealerInventory(state.dealerInventory);
   return state.dealerInventory;
 }
 
-async function persistSharedDealerInventory() {
-  const safeDealerInventory = normalizeDealerInventory(state.dealerInventory);
-  try {
-    await saveDealerInventory(safeDealerInventory);
-  } catch (error) {
-    logWarn("dealer", "persist-shared-inventory-failed", {
-      reason: error?.message || "unknown",
-    });
-  }
+async function persistSharedDealerInventory(inventory = state.dealerInventory) {
+  const safeDealerInventory = normalizeDealerInventory(inventory);
+  await saveDealerInventory(safeDealerInventory);
+  afterCommit(() => { state.dealerInventory = safeDealerInventory; });
   return safeDealerInventory;
 }
 
@@ -950,6 +1008,10 @@ function buildGangDirectoryEntry(gangName, memberRecords, now = Date.now()) {
   return {
     id: `gang-${slugifyGangName(gangName) || bossMember.id}`,
     name: gangName,
+    identity: canonicalGang.identity,
+    contactNetwork: canonicalGang.contactNetwork,
+    cityResponse: canonicalGang.cityResponse,
+    directorResponse: canonicalGang.directorResponse,
     boss: bossMember.name,
     bossUserId: bossMember.id,
     viceBoss: viceBossMember?.name || "-",
@@ -1104,6 +1166,10 @@ function syncResponseGangEntryWithPlayerState(gangs, user) {
           ? { ...user.gang.weeklyProgress }
           : gangEntry.weeklyProgress,
       weeklyGoalClaimedAt: user.gang.weeklyGoalClaimedAt ?? gangEntry.weeklyGoalClaimedAt ?? null,
+      directorResponse:
+        user.gang.directorResponse && typeof user.gang.directorResponse === "object"
+          ? { ...user.gang.directorResponse }
+          : gangEntry.directorResponse,
       jobBoard:
         Array.isArray(user.gang.jobBoard) && user.gang.jobBoard.length
           ? user.gang.jobBoard.map((entry) => ({ ...entry }))
@@ -1394,7 +1460,9 @@ function enforceRateLimit(req, res, scope, minIntervalMs, message) {
   const now = Date.now();
   const lastAt = state.routeRateLimit.get(key) || 0;
   if (now - lastAt < minIntervalMs) {
-    res.status(429).json({ error: message || "Too many requests" });
+    const retryAfterSeconds = Math.max(1, Math.ceil((minIntervalMs - (now - lastAt)) / 1000));
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+    res.status(429).json({ error: `Zwolnij na chwilę. Spróbuj ponownie za ${retryAfterSeconds} s.`, code: "rate_limited", retryAfterSeconds });
     return false;
   }
   state.routeRateLimit.set(key, now);
@@ -1436,8 +1504,8 @@ async function withUserMutationLocks(userIds, actionKey, handler) {
   try {
     return await handler();
   } finally {
-    keys.forEach((key) => {
-      state.actionLocks.delete(key);
+    afterTransaction(() => {
+      keys.forEach((key) => state.actionLocks.delete(key));
     });
   }
 }
@@ -1445,6 +1513,10 @@ async function withUserMutationLocks(userIds, actionKey, handler) {
 function buildSharedGangPatch(gangState) {
   const gang = normalizeGangState(gangState);
   return {
+    identity: gang.identity,
+    contactNetwork: gang.contactNetwork,
+    cityResponse: gang.cityResponse,
+    directorResponse: gang.directorResponse,
     memberCapLevel: gang.memberCapLevel,
     maxMembers: gang.maxMembers,
     territory: gang.territory,
@@ -1577,30 +1649,38 @@ function parsePositiveInteger(rawValue, { min = 1, max = Number.MAX_SAFE_INTEGER
 }
 
 function refreshMarket(now = Date.now()) {
+  if (state.actionLocks.has("market:global:mutation")) return;
   state.market = rebalanceMarketState(state.market, now, getActiveUserCount(now));
 }
 
-function syncPlayerEnergy(player, now = Date.now()) {
-  if (!player.timers) player.timers = { energyUpdatedAt: now };
-  const regenMs = ECONOMY_RULES.energy.regenSeconds * 1000;
-  const lastEnergyAt = player.timers.energyUpdatedAt || now;
+function getEventMarketView(marketState = state.market, now = Date.now()) {
+  return applyCityEventToMarketView(
+    getMarketPublicView(marketState, getActiveUserCount(now)),
+    getCityEventAt(now)
+  );
+}
 
-  if (player.profile.energy >= player.profile.maxEnergy) {
-    player.timers.energyUpdatedAt = now;
-    return;
-  }
-
-  const elapsed = now - lastEnergyAt;
-  if (elapsed < regenMs) return;
-
-  const recovered = Math.floor(elapsed / regenMs);
-  player.profile.energy = Math.min(player.profile.maxEnergy, player.profile.energy + recovered);
-  player.timers.energyUpdatedAt = lastEnergyAt + recovered * regenMs;
-
-  if (player.profile.energy >= player.profile.maxEnergy) {
-    player.timers.energyUpdatedAt = now;
+async function syncCityDirectorDocument(now = Date.now()) {
+  const local = advanceCityDirectorState(state.cityDirector, now);
+  if (!local.changed) return local.event;
+  if (state.cityDirectorSyncPromise) return state.cityDirectorSyncPromise;
+  state.cityDirectorSyncPromise = (async () => {
+    const saved = await readWorldDocument("city-director-state");
+    const advanced = advanceCityDirectorState(saved?.value || state.cityDirector, now);
+    if (!saved || advanced.changed) {
+      await saveWorldDocument("city-director-state", advanced.state, saved?.revision || 0);
+    }
+    state.cityDirector = advanced.state;
+    return advanced.event;
+  })();
+  try {
+    return await state.cityDirectorSyncPromise;
+  } finally {
+    state.cityDirectorSyncPromise = null;
   }
 }
+
+
 
 function syncPlayerHealth(player, now = Date.now()) {
   if (!player.timers) player.timers = { hpUpdatedAt: now };
@@ -1640,6 +1720,7 @@ function syncClubState(player, now = Date.now()) {
 
 function syncPlayerState(player, now = Date.now()) {
   ensurePlayerExtendedState(player);
+  syncPlayerHeat(player, now);
   syncPlayerEnergy(player, now);
   syncPlayerCriticalCare(player, now);
   syncPlayerHealth(player, now);
@@ -1655,24 +1736,7 @@ function syncPlayerState(player, now = Date.now()) {
 }
 
 function getHeistSuccessChance(player, heist) {
-  const statScore =
-    player.profile.attack * 1.2 +
-    player.profile.defense * 0.65 +
-    player.profile.dexterity * 1.1 +
-    player.profile.stamina * 0.5;
-  const heatPenalty = player.profile.heat * 0.0045;
-  const hpPenalty = player.profile.hp < player.profile.maxHp * 0.4 ? 0.05 : 0;
-  const arenaModifiers = getArenaActionModifiers(player.activeBoosts, "heist");
-
-  return clamp(
-    heist.baseSuccess +
-      (statScore - heist.difficultyScore) / 100 +
-      Number(arenaModifiers.heistSuccessBonus || 0) -
-      heatPenalty -
-      hpPenalty,
-    heist.minSuccess,
-    heist.maxSuccess
-  );
+  return getSoloHeistOdds(player.profile, heist, player.activeBoosts).chance;
 }
 
 function isPlayerJailed(player, now = Date.now()) {
@@ -1680,15 +1744,7 @@ function isPlayerJailed(player, now = Date.now()) {
 }
 
 function getHeistJailChance(player, heist) {
-  const heatFactor = (Number(player?.profile?.heat) || 0) * 0.0025;
-  const defenseReduction = (Number(player?.profile?.defense) || 0) * 0.004;
-  const dexterityReduction = (Number(player?.profile?.dexterity) || 0) * 0.006;
-
-  return clamp(
-    0.08 + heist.risk * 0.48 + heist.energy * 0.018 + heatFactor - defenseReduction - dexterityReduction,
-    0.06,
-    0.72
-  );
+  return getSoloHeistOdds(player.profile, heist, player.activeBoosts).jailChance;
 }
 
 function getHeistJailSentenceSeconds(player, heist) {
@@ -1710,6 +1766,7 @@ function publicPlayer(player, now = Date.now()) {
   const dealerInventory = getSharedDealerInventory();
   return {
     id: player.id,
+    stateRevision: Number(player.stateRevision || 0),
     username: player.username,
     profile: player.profile,
     stats: player.stats,
@@ -1721,6 +1778,10 @@ function publicPlayer(player, now = Date.now()) {
     gang: player.gang,
     city: player.city,
     operations: player.operations,
+    rivals: normalizeRivalState(player.rivals),
+    rivalView: getRivalView(player, now),
+    empireProjects: normalizeEmpireProjects(player.empireProjects),
+    empireProjectsView: getEmpireProjectsView(player, now),
     contracts: player.contracts,
     arena: player.arena,
     businessesOwned: player.businessesOwned,
@@ -1728,6 +1789,11 @@ function publicPlayer(player, now = Date.now()) {
     factoriesOwned: player.factoriesOwned,
     supplies: player.supplies,
     tasksClaimed: player.tasksClaimed,
+    contacts: normalizeContacts(player.contacts, now),
+    cityEvent: getCityEventAt(now),
+    cityDirector: normalizePlayerDirector(player.cityDirector, now),
+    sessionPlans: normalizeSessionPlanState(player.sessionPlans, now),
+    planBoard: getSessionPlanBoard(player, now),
     collections: player.collections,
     club: player.club,
     online: {
@@ -1777,6 +1843,10 @@ async function buildPlayerEnvelope(player, now = Date.now(), extra = {}) {
           ? { ...liveGang.weeklyProgress }
           : user.gang.weeklyProgress,
       weeklyGoalClaimedAt: liveGang.weeklyGoalClaimedAt ?? user.gang.weeklyGoalClaimedAt ?? null,
+      directorResponse:
+        liveGang.directorResponse && typeof liveGang.directorResponse === "object"
+          ? { ...liveGang.directorResponse }
+          : user.gang.directorResponse,
       jobBoard:
         Array.isArray(liveGang.jobBoard) && liveGang.jobBoard.length
           ? liveGang.jobBoard.map((entry) => ({ ...entry }))
@@ -1958,19 +2028,7 @@ function settleCasinoResult(player, { gameId, stake, totalReturn = 0, message })
 }
 
 function buildBlackjackPublicSession(session) {
-  if (!session) return null;
-  return {
-    stage: session.stage,
-    bet: session.bet,
-    playerCards: session.playerCards || [],
-    dealerCards: session.dealerCards || [],
-    message: session.message || "",
-    playerValue: getBlackjackHandValue(session.playerCards || []),
-    dealerValue:
-      session.stage === "player"
-        ? Number(session.dealerCards?.[0]?.value || 0)
-        : getBlackjackHandValue(session.dealerCards || []),
-  };
+  return serializeBlackjackSession(session, getBlackjackHandValue);
 }
 
 function snapshotPlayerMutationState(player) {
@@ -1998,12 +2056,12 @@ async function commitPlayerMutation(req, actionName, mutator) {
       req.player = updatedRecord.playerData;
     }
     const after = snapshotPlayerMutationState(req.player);
-    logMutationSuccess({
+    afterCommit(() => logMutationSuccess({
       actionName,
       userId: req.user.id,
       before,
       after,
-    });
+    }));
     return result;
   } catch (error) {
     logMutationFailure({
@@ -2062,6 +2120,8 @@ app.post("/reset-game", asyncHandler(async (req, res) => {
   state.routeRateLimit.clear();
   state.actionLocks.clear();
   state.market = createMarketState();
+  const savedMarket = await readWorldDocument("market-state");
+  await saveWorldDocument("market-state", state.market, savedMarket?.revision || 0);
   state.dealerInventory = normalizeDealerInventory((await resetWorldState())?.dealerInventory);
 
   console.log(
@@ -2087,7 +2147,7 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
       res,
       "auth-register",
       BACKEND_RULES.rateLimitsMs.authRegister,
-      "Register rate limit active"
+      "Za szybko z kolejna proba rejestracji."
     )
   ) {
     return;
@@ -2099,37 +2159,41 @@ app.post("/auth/register", asyncHandler(async (req, res) => {
   const requestedUsername = sanitizeAuthInput(username || (!rawLogin.includes("@") ? rawLogin : ""));
 
   if (!rawLogin || !rawPassword) {
-    res.status(400).json({ error: "Login/email and password are required" });
+    res.status(400).json({ error: "Login albo email i haslo sa wymagane." });
     return;
   }
   if (rawPassword.length < 6) {
-    res.status(400).json({ error: "Password must be at least 6 characters long" });
+    res.status(400).json({ error: "Haslo musi miec co najmniej 6 znakow." });
     return;
   }
 
   if (rawEmail && !isValidEmail(rawEmail)) {
-    res.status(400).json({ error: "Invalid email format" });
+    res.status(400).json({ error: "Nieprawidlowy format maila." });
     return;
   }
 
   if (requestedUsername && !isValidUsername(requestedUsername)) {
-    res.status(400).json({ error: "Username must be 3-18 chars and use only letters, numbers, dot, dash or underscore" });
+    res.status(400).json({ error: "Nick musi miec 3-18 znakow i moze uzywac tylko liter, cyfr, kropki, myslnika albo podkreslenia." });
     return;
   }
 
   const existingByLogin = await findUserByLogin(rawLogin);
   const existingByEmail = rawEmail ? await findUserByLogin(rawEmail) : null;
   if (existingByLogin || existingByEmail) {
-    res.status(409).json({ error: "Login or email already exists" });
+    res.status(409).json({ error: "Ten login albo mail juz istnieje." });
     return;
   }
 
   const nextUsername = await createAvailableUsername(rawLogin, requestedUsername);
   if (!isValidUsername(nextUsername)) {
-    res.status(400).json({ error: "Username must be 3-18 chars and use only letters, numbers, dot, dash or underscore" });
+    res.status(400).json({ error: "Nick musi miec 3-18 znakow i moze uzywac tylko liter, cyfr, kropki, myslnika albo podkreslenia." });
     return;
   }
 
+  if (ADMIN_USERNAMES.has(nextUsername.toLowerCase())) {
+    res.status(409).json({ error: "Ten nick jest zarezerwowany." });
+    return;
+  }
   const passwordHash = await bcrypt.hash(rawPassword, 10);
   const playerData = createInitialPlayerData(nextUsername);
   playerData.profile.name = nextUsername;
@@ -2165,7 +2229,7 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
       res,
       "auth-login",
       BACKEND_RULES.rateLimitsMs.authLogin,
-      "Login rate limit active"
+      "Za szybko z kolejnym logowaniem."
     )
   ) {
     return;
@@ -2175,14 +2239,14 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
   const rawPassword = String(password || "");
   const userRecord = await findUserByLogin(identifier);
 
-  if (!userRecord || !rawPassword) {
-    res.status(401).json({ error: "Invalid credentials" });
+  if (!userRecord || userRecord.authDisabled || !rawPassword) {
+    res.status(401).json({ error: "Nieprawidlowy login albo haslo." });
     return;
   }
 
   const passwordOk = await bcrypt.compare(rawPassword, userRecord.passwordHash);
   if (!passwordOk) {
-    res.status(401).json({ error: "Invalid credentials" });
+    res.status(401).json({ error: "Nieprawidlowy login albo haslo." });
     return;
   }
 
@@ -2209,12 +2273,19 @@ app.post("/auth/login", asyncHandler(async (req, res) => {
 
 app.get("/me", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
-  refreshMarket();
-  ensureAlphaTestGrant(req.player, req.user);
-  settleClubPassiveReportForPlayer(req.player, now);
-  req.player.online.friends = await buildFriendEntries(req.player);
-  await persistPlayerForUser(req.user.id, req.player);
-  const marketView = getMarketPublicView(state.market, getActiveUserCount());
+  refreshMarket(now);
+  await syncCityDirectorDocument(now);
+  await withPlayerActionLock(req, "profile-refresh", async () => {
+    const latest = await findUserById(req.user.id);
+    req.player = latest.playerData;
+    syncPlayerState(req.player);
+    syncCasinoDay(req.player);
+    ensureAlphaTestGrant(req.player, req.user);
+    settleClubPassiveReportForPlayer(req.player, now);
+    req.player.online.friends = await buildFriendEntries(req.player);
+    await persistPlayerForUser(req.user.id, req.player);
+  });
+  const marketView = getEventMarketView(state.market, now);
   res.json({
     ...(await buildPlayerEnvelope(req.player, now)),
     market: marketView.prices,
@@ -2235,6 +2306,116 @@ app.get("/me", auth, asyncHandler(async (req, res) => {
       streetIncome: ECONOMY_RULES.streetIncome,
       },
     });
+}));
+
+app.get("/admin/players", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  await requireCurrentAdmin(req);
+  const query = String(req.query?.q || "").trim().toLowerCase();
+  const users = await listUsers();
+  const players = users
+    .filter((entry) => !query || entry.username.toLowerCase().includes(query) || String(entry.email || "").toLowerCase().includes(query))
+    .map((entry) => ({ ...buildAdminPlayerSnapshot(entry), isAdmin: isAdminUsername(entry.username), online: isUserOnline(entry._id) }))
+    .sort((left, right) => Number(right.online) - Number(left.online) || right.respect - left.respect || left.username.localeCompare(right.username, "pl"));
+  res.json({ players: players.slice(0, 100), total: players.length });
+}));
+
+app.get("/admin/players/:targetUserId", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  await requireCurrentAdmin(req);
+  const target = await findUserById(String(req.params.targetUserId || "").trim());
+  if (!target?.playerData) return res.status(404).json({ error: "Target player not found" });
+  res.json({ player: { ...buildAdminPlayerDetail(target), isAdmin: isAdminUsername(target.username), online: isUserOnline(target._id) } });
+}));
+
+app.get("/admin/audit", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  await requireCurrentAdmin(req);
+  const limit = Math.max(1, Math.min(250, Math.floor(Number(req.query?.limit) || 100)));
+  const targetId = String(req.query?.targetId || "").trim() || null;
+  res.json({ entries: await listAdminAudits({ limit, targetId }) });
+}));
+
+app.post("/admin/players/:targetUserId/adjust", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  const targetUserId = String(req.params.targetUserId || "").trim();
+  const field = String(req.body?.field || "").trim();
+  let response;
+  await withUserMutationLocks([req.user.id, targetUserId], `admin-adjust:${targetUserId}`, async () => {
+    const actor = await requireCurrentAdmin(req);
+    const target = await findUserById(targetUserId);
+    if (!target?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
+    const before = buildAdminPlayerSnapshot(target);
+    const result = setAdminPlayerField(target.playerData, field, req.body?.value);
+    const saved = await persistPlayerForUser(target._id, target.playerData);
+    const after = buildAdminPlayerSnapshot(saved);
+    recordAdminAudit(actor, target, `player.adjust.${field}`, before, after, req.body?.reason);
+    response = { player: buildAdminPlayerDetail(saved), result };
+  });
+  emitProfileRealtimeUpdate([targetUserId], "admin.adjust");
+  res.json(response);
+}));
+
+app.post("/admin/players/:targetUserId/reset", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  const targetUserId = String(req.params.targetUserId || "").trim();
+  let response;
+  await withUserMutationLocks([req.user.id, targetUserId], `admin-reset:${targetUserId}`, async () => {
+    const actor = await requireCurrentAdmin(req);
+    const target = await findUserById(targetUserId);
+    if (!target?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
+    if (isAdminUsername(target.username)) throw Object.assign(new Error("Admin account cannot be reset"), { statusCode: 400 });
+    const before = buildAdminPlayerSnapshot(target);
+    const fresh = createInitialPlayerData(target.username);
+    fresh.stateRevision = Number(target.playerData.stateRevision || 0);
+    const saved = await persistPlayerForUser(target._id, fresh);
+    const after = buildAdminPlayerSnapshot(saved);
+    recordAdminAudit(actor, target, "player.reset", before, after, req.body?.reason);
+    response = { player: buildAdminPlayerDetail(saved), result: { ok: true, message: `Zresetowano postep ${target.username}.` } };
+  });
+  emitProfileRealtimeUpdate([targetUserId], "admin.reset");
+  res.json(response);
+}));
+
+app.post("/admin/players/:targetUserId/repair", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  const targetUserId = String(req.params.targetUserId || "").trim();
+  const system = String(req.body?.system || "").trim();
+  let response;
+  await withUserMutationLocks([req.user.id, targetUserId], `admin-repair:${targetUserId}`, async () => {
+    const actor = await requireCurrentAdmin(req);
+    const target = await findUserById(targetUserId);
+    if (!target?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
+    const before = buildAdminPlayerSnapshot(target);
+    const result = repairAdminPlayerState(target.playerData, system);
+    const saved = await persistPlayerForUser(target._id, target.playerData);
+    const after = buildAdminPlayerSnapshot(saved);
+    recordAdminAudit(actor, target, `player.repair.${system}`, before, after, req.body?.reason);
+    response = { player: buildAdminPlayerDetail(saved), result };
+  });
+  emitProfileRealtimeUpdate([targetUserId], "admin.repair");
+  res.json(response);
+}));
+
+app.post("/admin/players/:targetUserId/ban", auth, asyncHandler(async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  const targetUserId = String(req.params.targetUserId || "").trim();
+  const banned = req.body?.banned;
+  if (typeof banned !== "boolean") return res.status(400).json({ error: "banned must be a boolean" });
+  let response;
+  await withUserMutationLocks([req.user.id, targetUserId], `admin-ban:${targetUserId}`, async () => {
+    const actor = await requireCurrentAdmin(req);
+    const target = await findUserById(targetUserId);
+    if (!target?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
+    if (isAdminUsername(target.username)) throw Object.assign(new Error("Admin account cannot be banned"), { statusCode: 400 });
+    const before = buildAdminPlayerSnapshot(target);
+    const saved = await updateUserAuthentication(target._id, { authDisabled: banned });
+    const after = buildAdminPlayerSnapshot(saved);
+    recordAdminAudit(actor, target, banned ? "player.ban" : "player.unban", before, after, req.body?.reason);
+    response = { player: buildAdminPlayerDetail(saved), result: { ok: true, banned } };
+  });
+  if (banned) afterCommit(() => state.activeUsers.delete(targetUserId));
+  res.json(response);
 }));
 
 app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (req, res) => {
@@ -2280,6 +2461,7 @@ app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (re
   let actorRecordSnapshot = null;
   let targetRecordSnapshot = null;
   let result = null;
+  let auditBefore = null;
 
   await withUserMutationLocks([req.user.id, targetUserId], `admin-grant-cash:${targetUserId}`, async () => {
     const [actorRecord, targetRecord] = await Promise.all([
@@ -2299,6 +2481,8 @@ app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (re
       throw error;
     }
 
+    auditBefore = buildAdminPlayerSnapshot(targetRecord);
+
     result = grantCashToPlayerByAdmin({
       actorPlayer: actorRecord.playerData,
       targetPlayer: targetRecord.playerData,
@@ -2317,6 +2501,14 @@ app.post("/admin/players/:targetUserId/grant-cash", auth, asyncHandler(async (re
 
     actorRecordSnapshot = actorRecord;
     targetRecordSnapshot = targetRecord;
+    recordAdminAudit(
+      actorRecord,
+      targetRecord,
+      "player.grant.cash",
+      auditBefore,
+      buildAdminPlayerSnapshot(targetRecord),
+      req.body?.reason
+    );
   });
 
   logInfo("admin", "grant-cash", {
@@ -2375,6 +2567,7 @@ app.post("/admin/players/:targetUserId/grant-respect", auth, asyncHandler(async 
   let actorRecordSnapshot = null;
   let targetRecordSnapshot = null;
   let result = null;
+  let auditBefore = null;
 
   await withUserMutationLocks([req.user.id, targetUserId], `admin-grant-respect:${targetUserId}`, async () => {
     const [actorRecord, targetRecord] = await Promise.all([
@@ -2394,6 +2587,8 @@ app.post("/admin/players/:targetUserId/grant-respect", auth, asyncHandler(async 
       throw error;
     }
 
+    auditBefore = buildAdminPlayerSnapshot(targetRecord);
+
     result = grantRespectToPlayerByAdmin({
       actorPlayer: actorRecord.playerData,
       targetPlayer: targetRecord.playerData,
@@ -2412,6 +2607,14 @@ app.post("/admin/players/:targetUserId/grant-respect", auth, asyncHandler(async 
 
     actorRecordSnapshot = actorRecord;
     targetRecordSnapshot = targetRecord;
+    recordAdminAudit(
+      actorRecord,
+      targetRecord,
+      "player.grant.respect",
+      auditBefore,
+      buildAdminPlayerSnapshot(targetRecord),
+      req.body?.reason
+    );
   });
 
   logInfo("admin", "grant-respect", {
@@ -2466,8 +2669,13 @@ app.post("/admin/players/delete-account", auth, asyncHandler(async (req, res) =>
     return;
   }
 
-  await withUserMutationLocks([targetRecord._id], `admin-delete-account:${targetRecord._id}`, async () => {
-    await deleteUserByLogin(login);
+  await withUserMutationLocks([req.user.id, targetRecord._id], `admin-delete-account:${targetRecord._id}`, async () => {
+    const currentActor = await requireCurrentAdmin(req);
+    const currentTarget = await findUserById(targetRecord._id);
+    if (!currentTarget?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
+    const before = buildAdminPlayerSnapshot(currentTarget);
+    await deleteUserById(currentTarget._id);
+    recordAdminAudit(currentActor, currentTarget, "player.delete", before, { ...before, deleted: true }, req.body?.reason);
   });
   state.activeUsers.delete(targetRecord._id);
 
@@ -3128,15 +3336,16 @@ app.post("/player/restaurant/eat", auth, asyncHandler(async (req, res) => {
   const now = Date.now();
   const itemId = String(req.body?.itemId || "").trim();
 
+  let result;
   await withPlayerActionLock(req, "player-restaurant-eat", async () => {
     await commitPlayerMutation(req, "player-restaurant-eat", async (player) => {
-      const { logMessage } = buyRestaurantItemForPlayer(player, itemId, now);
-      pushLog(player, logMessage);
+      result = buyRestaurantItemForPlayer(player, itemId, now);
+      pushLog(player, result.logMessage);
       return null;
     });
   });
 
-  res.json({ user: publicPlayer(req.player, now) });
+  res.json({ user: publicPlayer(req.player, now), result: { energyGain: result.energyGain, cost: result.cost } });
 }));
 
 app.post("/player/hospital/heal", auth, asyncHandler(async (req, res) => {
@@ -3194,6 +3403,268 @@ app.post("/player/jail/bribe", auth, asyncHandler(async (req, res) => {
   });
 
   res.json({ user: publicPlayer(req.player, now) });
+}));
+
+app.get("/premium/catalog", auth, asyncHandler(async (_req, res) => {
+  res.json({ enabled: premiumConfiguration().enabled, packs: PREMIUM_PACKS });
+}));
+app.post("/premium/checkout", auth, asyncHandler(async (req, res) => {
+  const order = await createPremiumCheckout(req.user.id, req.body?.packId, req.get("Idempotency-Key") || crypto.randomUUID());
+  const stored = await readWorldDocument(`premium-order:${order.id}`);
+  if (!stored) await saveWorldDocument(`premium-order:${order.id}`, order);
+  res.json({ url: order.url });
+}));
+app.post("/premium/webhook", asyncHandler(async (req, res) => {
+  const event = verifyPremiumWebhook(req.paymentRawBody, req.get("Stripe-Signature"), process.env.STRIPE_WEBHOOK_SECRET);
+  if (!["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type) || event.data.object.payment_status !== "paid") return res.json({ received: true });
+  const id = `premium-order:${event.data.object.id}`;
+  const initial = await readWorldDocument(id);
+  if (!initial) { const error = new Error("Zamówienie nie jest jeszcze zapisane."); error.statusCode = 409; throw error; }
+  const internal = { user: { id: initial.value.userId }, method: "POST", path: "/premium/webhook", originalUrl: "/premium/webhook", body: event, get: () => undefined };
+  await runTransactionalAction(internal, res, async () => {
+    await withUserMutationLocks([initial.value.userId], "premium-webhook", async () => {
+      const stored = await readWorldDocument(id);
+      const user = await findUserById(initial.value.userId);
+      if (!user?.playerData) throw new Error("Nie znaleziono odbiorcy płatności.");
+      const credited = fulfillPremiumOrder(user.playerData, stored.value, event);
+      if (credited) {
+        await persistPlayerForUser(user._id, user.playerData);
+        await saveWorldDocument(id, stored.value, stored.revision);
+      }
+      res.json({ received: true, credited });
+    });
+  });
+}));
+
+app.get("/city-event", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const event = await syncCityDirectorDocument(now);
+  res.json({
+    event,
+    response: getCityEventResponse(req.player, now),
+    director: {
+      currentKey: state.cityDirector.currentKey,
+      transitionedAt: state.cityDirector.transitionedAt,
+    },
+  });
+}));
+
+app.post("/city-event/respond", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const event = await syncCityDirectorDocument(now);
+  const choiceId = String(req.body?.choiceId || "").trim();
+  let result = null;
+
+  const perform = (player) => {
+    result = respondToCityEvent(player, choiceId, now);
+    pushLog(player, `${event.title}: ${result.message}`);
+  };
+
+  if (req.player.gang?.joined) {
+    await withGangMutation(req, "city-event-response", async (entries) => {
+      const actor = getGangMutationActor(entries, req.user.id, now);
+      perform(actor.player);
+      if (actor.player.gang.focusDistrictId === event.districtId) {
+        const gangResponse = recordGangDirectorResponse(actor.player.gang, actor.userId, event);
+        if (gangResponse.progress >= 3 && !gangResponse.rewarded) {
+          applyGangGoalRewardToPlayer(
+            actor.player,
+            { vaultCash: 3000, focusInfluence: 4, pressureRelief: 4 },
+            now
+          );
+          actor.player.gang.directorResponse.rewardedAt = now;
+        }
+        result.gang = {
+          progress: gangResponse.progress,
+          target: 3,
+          rewarded: Boolean(actor.player.gang.directorResponse.rewardedAt),
+        };
+      }
+      const patch = buildSharedGangPatch(actor.player.gang);
+      for (const entry of entries) {
+        syncSharedGangPatchToPlayer(entry.player, patch, entries.length, now);
+      }
+    });
+    emitGangRealtimeUpdate({
+      userIds: [req.user.id],
+      gangNames: [req.player.gang?.name],
+      reason: "city-event.response",
+    });
+  } else {
+    await withPlayerActionLock(req, "city-event-response", async () => {
+      await commitPlayerMutation(req, "city-event-response", async (player) => {
+        perform(player);
+        return null;
+      });
+    });
+  }
+
+  res.json({ user: publicPlayer(req.player, now), event, result });
+}));
+
+app.get("/plans", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  res.json({ board: getSessionPlanBoard(req.player, now) });
+}));
+
+app.post("/plans/accept", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "plan-accept", async () => {
+    await commitPlayerMutation(req, "plan-accept", async (player) => {
+      result = acceptSessionPlan(player, String(req.body?.planKey || ""), String(req.body?.approachId || ""), now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/plans/abandon", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "plan-abandon", async () => {
+    await commitPlayerMutation(req, "plan-abandon", async (player) => {
+      result = abandonSessionPlan(player, now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/plans/claim", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "plan-claim", async () => {
+    await commitPlayerMutation(req, "plan-claim", async (player) => {
+      result = claimSessionPlan(player, now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/contacts/:action", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  const perform = (player) => {
+    if (["execute", "situation"].includes(req.params.action)) {
+      assertPlayerNotInCriticalCare(player, "Kontakty", now);
+      if (isPlayerJailed(player, now)) {
+        const error = new Error("Najpierw opuść więzienie."); error.statusCode = 423; throw error;
+      }
+    }
+    result = executeContactAction(player, req.params.action, req.body, now);
+    if (req.params.action === "execute") {
+      const latest = player.contacts?.history?.[0];
+      if (latest) maybeCreateRivalFromContact(player, { districtId: latest.districtId || req.body?.districtId, sourceKey: `${latest.at || now}:${latest.districtId || req.body?.districtId}:${latest.methodId || req.body?.methodId}`, mode: latest.mode || req.body?.mode, success: latest.success }, now);
+    } else if (req.params.action === "situation") {
+      maybeCreateRivalFromContact(player, { districtId: req.body?.districtId, sourceKey: `situation:${req.body?.districtId}:${req.body?.choiceId}:${Math.floor(now / 604800000)}`, choiceId: req.body?.choiceId, success: true }, now);
+    }
+    pushLog(player, result.message);
+  };
+  if (["execute", "situation"].includes(req.params.action) && req.player.gang?.joined) {
+    await withGangMutation(req, "contacts", async (entries) => {
+      const actor = getGangMutationActor(entries, req.user.id, now);
+      perform(actor.player);
+      if (req.params.action === "execute" && actor.player.contacts.history[0]?.success && actor.player.gang.focusDistrictId === req.body.districtId) {
+        const progress = recordContactGangProgress(actor.player.gang, "contactOrders", 1, now);
+        actor.player.gang = progress.gang;
+        for (const job of progress.completedJobs) applyGangGoalRewardToPlayer(actor.player, job.rewards, now);
+        const team = recordGangSpecialist(actor.player.gang, actor.userId, req.body.methodId);
+        const delta = Math.max(0, team.progress - Number(actor.player.gang.jobProgress.contactTeamwork || 0));
+        if (delta && !team.rewarded) {
+          const teamwork = recordContactGangProgress(actor.player.gang, "contactTeamwork", delta, now);
+          actor.player.gang = teamwork.gang;
+          for (const job of teamwork.completedJobs) {
+            applyGangGoalRewardToPlayer(actor.player, job.rewards, now);
+            actor.player.gang.contactNetwork.rewardedAt = now;
+          }
+        }
+      }
+      if (result?.citySituationResolved && actor.player.gang.focusDistrictId === req.body.districtId) {
+        const response = recordGangCityResponse(actor.player.gang, actor.userId);
+        if (response.delta && !response.rewarded) {
+          const progress = recordContactGangProgress(actor.player.gang, "cityResponses", response.delta, now);
+          actor.player.gang = progress.gang;
+          for (const job of progress.completedJobs) {
+            applyGangGoalRewardToPlayer(actor.player, job.rewards, now);
+            actor.player.gang.cityResponse.rewardedAt = now;
+          }
+        }
+      }
+      const patch = buildSharedGangPatch(actor.player.gang);
+      for (const entry of entries) syncSharedGangPatchToPlayer(entry.player, patch, entries.length, now);
+    });
+  } else {
+    await withPlayerActionLock(req, "contacts", async () => {
+      await commitPlayerMutation(req, "contacts", async (player) => { perform(player); return null; });
+    });
+  }
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/rivals/respond", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const choiceId = String(req.body?.choiceId || "").trim();
+  let result;
+  await withPlayerActionLock(req, "rivals-respond", async () => {
+    await commitPlayerMutation(req, "rivals-respond", async (player) => {
+      assertPlayerNotInCriticalCare(player, "Konflikty", now);
+      if (isPlayerJailed(player, now)) { const error = new Error("Najpierw opuść więzienie."); error.statusCode = 423; throw error; }
+      result = resolveRivalChoice(player, choiceId, now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/empire-projects/start", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "empire-project-start", async () => {
+    await commitPlayerMutation(req, "empire-project-start", async (player) => {
+      assertPlayerNotInCriticalCare(player, "Przedsięwzięcia Imperium", now);
+      if (isPlayerJailed(player, now)) { const error = new Error("Najpierw opuść więzienie."); error.statusCode = 423; throw error; }
+      result = startEmpireProject(player, String(req.body?.projectId || "").trim(), now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/empire-projects/finalize", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "empire-project-finalize", async () => {
+    await commitPlayerMutation(req, "empire-project-finalize", async (player) => {
+      assertPlayerNotInCriticalCare(player, "Przedsięwzięcia Imperium", now);
+      if (isPlayerJailed(player, now)) { const error = new Error("Najpierw opuść więzienie."); error.statusCode = 423; throw error; }
+      result = finalizeEmpireProject(player, String(req.body?.choiceId || "").trim(), now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/empire-projects/directive", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "empire-project-directive", async () => {
+    await commitPlayerMutation(req, "empire-project-directive", async (player) => {
+      assertPlayerNotInCriticalCare(player, "Dyrektywy Imperium", now);
+      if (isPlayerJailed(player, now)) { const error = new Error("Najpierw opuść więzienie."); error.statusCode = 423; throw error; }
+      result = runEmpireDirective(player, String(req.body?.projectId || "").trim(), String(req.body?.districtId || "").trim(), now);
+      pushLog(player, result.message);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
 }));
 
 app.post("/tasks/claim", auth, asyncHandler(async (req, res) => {
@@ -3536,15 +4007,15 @@ app.post("/dealer/buy", auth, asyncHandler(async (req, res) => {
         player,
         { ...getSharedDealerInventory() },
         drugId,
-        parsedQuantity.value
+        parsedQuantity.value,
+        now
       );
       nextDealerInventory = result?.dealerInventory || null;
       pushLog(player, result.logMessage);
       return null;
     });
     if (nextDealerInventory) {
-      state.dealerInventory = normalizeDealerInventory(nextDealerInventory);
-      await persistSharedDealerInventory();
+      await persistSharedDealerInventory(nextDealerInventory);
     }
   });
 
@@ -3585,15 +4056,15 @@ app.post("/dealer/sell", auth, asyncHandler(async (req, res) => {
         player,
         { ...getSharedDealerInventory() },
         drugId,
-        parsedQuantity.value
+        parsedQuantity.value,
+        now
       );
       nextDealerInventory = result?.dealerInventory || null;
       pushLog(player, result.logMessage);
       return null;
     });
     if (nextDealerInventory) {
-      state.dealerInventory = normalizeDealerInventory(nextDealerInventory);
-      await persistSharedDealerInventory();
+      await persistSharedDealerInventory(nextDealerInventory);
     }
   });
 
@@ -4124,6 +4595,17 @@ app.get("/gangs", auth, asyncHandler(async (_req, res) => {
   res.json({
     gangs: await buildGangDirectorySnapshot(now),
   });
+}));
+
+app.post("/gang/identity", auth, asyncHandler(async (req, res) => {
+  const now = Date.now(); let result;
+  await withGangMutation(req, "gang-identity", async (entries) => {
+    const actor = getGangMutationActor(entries, req.user.id, now);
+    result = buyGangIdentity(actor.player, req.body?.id, now);
+    const patch = buildSharedGangPatch(actor.player.gang);
+    for (const entry of entries) syncSharedGangPatchToPlayer(entry.player, patch, entries.length, now);
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
 }));
 
 app.post("/gang/create", auth, asyncHandler(async (req, res) => {
@@ -5111,8 +5593,22 @@ app.get("/operations", auth, asyncHandler(async (req, res) => {
     catalog: OPERATION_CATALOG,
     active: req.player.operations?.active || null,
     history: req.player.operations?.history || [],
+    progress: req.player.operations?.progress || {},
     districts: getDistrictSummaries(req.player.city),
   });
+}));
+
+app.post("/operations/cancel", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  let result;
+  await withPlayerActionLock(req, "operations-cancel", async () => {
+    await commitPlayerMutation(req, "operations-cancel", async (player) => {
+      result = cancelOperationForPlayer(player, now);
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
 }));
 
 app.post("/operations/start", auth, asyncHandler(async (req, res) => {
@@ -5149,7 +5645,22 @@ app.post("/operations/execute", auth, asyncHandler(async (req, res) => {
   await withPlayerActionLock(req, "operations-execute", async () => {
     await commitPlayerMutation(req, "operations-execute", async (player) => {
       result = executeOperationForPlayer(player, now);
-      applyOperationDistrictOutcome(player, result.districtId, { success: result.success, now });
+      if (!result.pendingComplication) applyOperationDistrictOutcome(player, result.districtId, { success: result.success, now });
+      pushLog(player, result.logMessage);
+      return null;
+    });
+  });
+  res.json({ user: publicPlayer(req.player, now), result });
+}));
+
+app.post("/operations/resolve", auth, asyncHandler(async (req, res) => {
+  const now = Date.now();
+  const responseId = String(req.body?.responseId || "").trim();
+  let result = null;
+  await withPlayerActionLock(req, "operations-resolve", async () => {
+    await commitPlayerMutation(req, "operations-resolve", async (player) => {
+      result = resolveOperationComplicationForPlayer(player, responseId, now);
+      if (result.outcome !== "retreat") applyOperationDistrictOutcome(player, result.districtId, { success: result.success || result.partial, now });
       pushLog(player, result.logMessage);
       return null;
     });
@@ -5225,15 +5736,18 @@ app.post("/club-pvp/preview", auth, (req, res) => {
 });
 
 app.get("/market", auth, asyncHandler(async (req, res) => {
-  refreshMarket();
+  const now = Date.now();
+  refreshMarket(now);
+  const cityEvent = await syncCityDirectorDocument(now);
   await persistPlayerForUser(req.user.id, req.player);
-  const marketView = getMarketPublicView(state.market, getActiveUserCount());
+  const marketView = getEventMarketView(state.market, now);
   res.json({
     products: MARKET_PRODUCTS,
     prices: marketView.prices,
     supply: marketView.products,
     dealerInventory: getSharedDealerInventory(),
     refreshedAt: marketView.refreshedAt,
+    cityEvent,
     sellRate: ECONOMY_RULES.market.sellRate,
     npcFallbackMarkup: ECONOMY_RULES.market.npcFallbackMarkup,
     orderRules: {
@@ -5256,7 +5770,9 @@ app.post("/market/buy", auth, asyncHandler(async (req, res) => {
   ) {
     return;
   }
-  refreshMarket();
+  const now = Date.now();
+  refreshMarket(now);
+  const cityEvent = await syncCityDirectorDocument(now);
   const { productId } = req.body || {};
   const product = MARKET_PRODUCTS.find((item) => item.id === productId);
   const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
@@ -5279,18 +5795,22 @@ app.post("/market/buy", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  const quote = applyMarketBuy(state.market, product.id, qty, getActiveUserCount());
-  if (quote.error) {
-    res.status(400).json({ error: quote.error, buyLimit: quote.buyLimit, available: quote.available });
-    return;
-  }
-
-  if (req.player.profile.cash < quote.total) {
-    res.status(400).json({ error: "Not enough cash" });
-    return;
-  }
-
-  await withPlayerActionLock(req, "market-buy", async () => {
+  let quote;
+  let candidateMarket;
+  await withUserMutationLocks([req.user.id, "market:global"], "market-buy", async () => {
+    const savedMarket = await readWorldDocument("market-state");
+    candidateMarket = rebalanceMarketState(structuredClone(savedMarket?.value || state.market), now, getActiveUserCount(now));
+    quote = applyCityEventMarketQuote(
+      applyMarketBuy(candidateMarket, product.id, qty, getActiveUserCount(now)),
+      cityEvent,
+      "buy",
+      product.id
+    );
+    if (quote.error || req.player.profile.cash < quote.total) {
+      const error = new Error(quote.error || "Not enough cash");
+      error.statusCode = 400;
+      throw error;
+    }
     await commitPlayerMutation(req, "market-buy", async (player) => {
       player.profile.cash -= quote.total;
       player.inventory[product.id] += qty;
@@ -5301,18 +5821,25 @@ app.post("/market/buy", auth, asyncHandler(async (req, res) => {
       );
       return null;
     });
+    await saveWorldDocument("market-state", candidateMarket, savedMarket?.revision || 0);
+    afterCommit(() => { state.market = candidateMarket; });
   });
+  emitMarketRealtimeUpdate("market.buy");
+
+  const marketView = getEventMarketView(candidateMarket, now);
 
   res.json({
-    user: publicPlayer(req.player),
+    user: publicPlayer(req.player, now),
     total: quote.total,
     breakdown: {
       streetUnits: quote.streetUnits,
       fallbackUnits: quote.fallbackUnits,
-      streetPrice: state.market.products[product.id].streetPrice,
-      fallbackPrice: state.market.products[product.id].fallbackPrice,
+      streetPrice: marketView.products[product.id].streetPrice,
+      fallbackPrice: marketView.products[product.id].fallbackPrice,
+      cityEventMultiplier: quote.cityEventMultiplier,
     },
-    market: getMarketPublicView(state.market, getActiveUserCount()),
+    market: marketView,
+    cityEvent,
   });
 }));
 
@@ -5328,7 +5855,9 @@ app.post("/market/sell", auth, asyncHandler(async (req, res) => {
   ) {
     return;
   }
-  refreshMarket();
+  const now = Date.now();
+  refreshMarket(now);
+  const cityEvent = await syncCityDirectorDocument(now);
   const { productId } = req.body || {};
   const product = MARKET_PRODUCTS.find((item) => item.id === productId);
   const parsedQuantity = parsePositiveInteger(req.body?.quantity ?? 1, {
@@ -5351,13 +5880,22 @@ app.post("/market/sell", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  const sale = applyMarketSell(state.market, product.id, qty, getActiveUserCount());
-  if (sale.error) {
-    res.status(400).json({ error: sale.error, sellLimit: sale.sellLimit });
-    return;
-  }
-
-  await withPlayerActionLock(req, "market-sell", async () => {
+  let sale;
+  let candidateMarket;
+  await withUserMutationLocks([req.user.id, "market:global"], "market-sell", async () => {
+    const savedMarket = await readWorldDocument("market-state");
+    candidateMarket = rebalanceMarketState(structuredClone(savedMarket?.value || state.market), now, getActiveUserCount(now));
+    sale = applyCityEventMarketQuote(
+      applyMarketSell(candidateMarket, product.id, qty, getActiveUserCount(now)),
+      cityEvent,
+      "sell",
+      product.id
+    );
+    if (sale.error) {
+      const error = new Error(sale.error);
+      error.statusCode = 400;
+      throw error;
+    }
     await commitPlayerMutation(req, "market-sell", async (player) => {
       player.inventory[product.id] -= qty;
       player.profile.cash += sale.total;
@@ -5366,13 +5904,17 @@ app.post("/market/sell", auth, asyncHandler(async (req, res) => {
       pushLog(player, `Sprzedano ${qty}x ${product.name} za $${sale.total}. Towar zasila uliczna podaz.`);
       return null;
     });
+    await saveWorldDocument("market-state", candidateMarket, savedMarket?.revision || 0);
+    afterCommit(() => { state.market = candidateMarket; });
   });
+  emitMarketRealtimeUpdate("market.sell");
 
   res.json({
-    user: publicPlayer(req.player),
+    user: publicPlayer(req.player, now),
     total: sale.total,
     payoutPerUnit: sale.payoutPerUnit,
-    market: getMarketPublicView(state.market, getActiveUserCount()),
+    market: getEventMarketView(candidateMarket, now),
+    cityEvent,
   });
 }));
 
@@ -5459,10 +6001,25 @@ app.post("/bank/withdraw", auth, asyncHandler(async (req, res) => {
   res.json({ user: publicPlayer(req.player), amount, fee });
 }));
 
+app.post("/casino/roulette", auth, asyncHandler(async (req, res) => {
+  const { rouletteOutcome } = await import("../../shared/roulette.js");
+  const choice = req.body?.choice;
+  if (!["red", "black", "green"].includes(choice)) return res.status(400).json({ error: "Wybierz czerwone, czarne albo zero." });
+  const result = await withPlayerActionLock(req, "casino-roulette", async () => commitPlayerMutation(req, "casino-roulette", async (player) => {
+    const guard = requireCasinoActionAllowed(player, "roulette", req.body?.bet);
+    if (guard.error) throw Object.assign(new Error(guard.error), { statusCode: 400 });
+    const outcome = rouletteOutcome(crypto.randomInt(0, 37), choice, guard.amount);
+    const settled = settleCasinoResult(player, { gameId: "roulette", stake: outcome.stake, totalReturn: outcome.totalReturn, message: `Ruletka: ${outcome.number}. Stawka $${outcome.stake}, zwrot $${outcome.totalReturn}, bilans $${outcome.net}.` });
+    return { ...outcome, user: settled.user };
+  }));
+  res.json(result);
+}));
+
 app.get("/casino/meta", auth, asyncHandler(async (req, res) => {
   await commitPlayerMutation(req, "casino-meta-touch", async () => ({ ok: true }));
   const limits = {
     slot: getCasinoBetLimits("slot", req.player.profile),
+    roulette: getCasinoBetLimits("roulette", req.player.profile),
     highRisk: getCasinoBetLimits("highRisk", req.player.profile),
     blackjack: getCasinoBetLimits("blackjack", req.player.profile),
   };
@@ -5798,7 +6355,6 @@ app.post("/casino/blackjack/stand", auth, asyncHandler(async (req, res) => {
   });
 }));
 app.get("/heists", auth, asyncHandler(async (req, res) => {
-  await commitPlayerMutation(req, "heists-touch", async () => ({ ok: true }));
   logHeistEvent(`catalog requested by ${req.user?.username || req.user?.id || "unknown"} :: ${HEIST_DEFINITIONS.length} entries`);
   res.json({ heists: HEIST_DEFINITIONS });
 }));
@@ -5811,7 +6367,6 @@ app.get("/heists/:id", auth, asyncHandler(async (req, res) => {
     return;
   }
 
-  await commitPlayerMutation(req, "heist-detail-touch", async () => ({ ok: true }));
   res.json({ heist });
 }));
 
@@ -5858,7 +6413,6 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
         );
         resolvedXpGain = finalXpGain;
         currentPlayer.profile.energy -= heist.energy;
-        currentPlayer.timers.energyUpdatedAt = now;
         currentPlayer.stats.heistsDone += 1;
         currentPlayer.profile.cash += gain;
         const progression = applyXpProgression(
@@ -5917,7 +6471,6 @@ app.post("/heists/:id/execute", auth, asyncHandler(async (req, res) => {
       const arenaModifiers = getArenaActionModifiers(currentPlayer.activeBoosts, "heist", now);
       const { nextBoosts, consumed } = consumeArenaActionBoosts(currentPlayer.activeBoosts, "heist", now);
       currentPlayer.profile.energy -= heist.energy;
-      currentPlayer.timers.energyUpdatedAt = now;
       currentPlayer.stats.heistsDone += 1;
       currentPlayer.profile.cash = Math.max(0, currentPlayer.profile.cash - loss);
       const damageState = applyCriticalCareDamage(currentPlayer, damage, {
@@ -6002,15 +6555,14 @@ app.use((error, _req, res, _next) => {
     sendError(res, "CORS blocked", 403);
     return;
   }
-  sendError(res, error?.message || "Internal server error", error?.statusCode || 500);
+  sendError(res, error?.message || "Internal server error", error?.statusCode || 500, error?.code ? { code: error.code } : {});
 });
 
 server.listen(port, host, () => {
   logInfo("api", "server-started", {
+    boundPort: server.address()?.port,
     host,
     port,
     corsOrigins: allowedOrigins.length ? allowedOrigins.join(",") : "all",
   });
 });
-
-

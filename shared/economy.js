@@ -6,7 +6,7 @@ export const ECONOMY_RULES = {
     baseMax: 20,
     regenSeconds: 6 * 60,
     passiveClaimCapMinutes: 12 * 60,
-    restaurantEnergyCapPerHour: 10,
+    restaurantEnergyCapPerHour: 15,
   },
   health: {
     regenSeconds: 10 * 60,
@@ -57,6 +57,7 @@ export const ECONOMY_RULES = {
         { id: "miss", weight: 682, multiplier: 0, label: "Miss", symbols: ["LEMON", "BAR", "SKULL"] },
       ],
     },
+    roulette: { minBet: 100, maxBet: 15000, dailyBetShareCap: 0.1, targetRtp: 36 / 37 },
     highRisk: {
       minBet: 500,
       maxBet: 1000000,

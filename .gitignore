@@ -2,11 +2,15 @@ node_modules/
 backend/node_modules/
 .expo/
 .codex-local/
+.codex-logs/
 .idea/
 dist/
 
 backend/data/
 *.db
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 .env
 backend/.env

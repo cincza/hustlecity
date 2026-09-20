@@ -5,12 +5,12 @@ Hustle City to projekt mobilnej gry online inspirowanej klasycznymi gangsterkami
 ## Co jest teraz w repo
 
 - jedna aktywna wersja aplikacji; starego duplikatu `upload_bundle/` juz nie ma
-- grywalny prototyp aplikacji Expo w [App.js](C:\Users\Adam\Documents\New project\App.js)
-- dokument systemow gry w [docs/GAME_BLUEPRINT.md](C:\Users\Adam\Documents\New project\docs\GAME_BLUEPRINT.md)
-- model ekonomii w [docs/ECONOMY_AND_BALANCE.md](C:\Users\Adam\Documents\New project\docs\ECONOMY_AND_BALANCE.md)
-- architektura online w [docs/ONLINE_ARCHITECTURE.md](C:\Users\Adam\Documents\New project\docs\ONLINE_ARCHITECTURE.md)
-- roadmap produkcyjny w [docs/ROADMAP.md](C:\Users\Adam\Documents\New project\docs\ROADMAP.md)
-- szkic backendu w [backend](C:\Users\Adam\Documents\New project\backend)
+- grywalna aplikacja Expo w [App.js](App.js)
+- dokument systemów gry w [docs/GAME_BLUEPRINT.md](docs/GAME_BLUEPRINT.md)
+- model ekonomii w [docs/ECONOMY_AND_BALANCE.md](docs/ECONOMY_AND_BALANCE.md)
+- architektura online w [docs/ONLINE_ARCHITECTURE.md](docs/ONLINE_ARCHITECTURE.md)
+- roadmap produkcyjny w [docs/ROADMAP.md](docs/ROADMAP.md)
+- backend gry w [backend](backend)
 
 Aktywna struktura:
 
@@ -27,14 +27,14 @@ Jedyny aktywny flow projektu jest teraz taki:
 - `eas.json` - profile buildow Expo i produkcyjny URL backendu dla buildow
 - `.env` - lokalny URL backendu dla frontendu podczas pracy developerskiej
 - `backend/.env` - lokalny config API i persystencji
-- `render.yaml` - produkcyjny deploy backendu na Render
+- `render.yaml` - produkcyjny deploy API i webowej wersji gry na Render
 
 To znaczy:
 
 - lokalnie frontend bierze API z `.env`
 - lokalnie backend bierze config z `backend/.env`, niezaleznie od katalogu startu
 - buildy EAS biora produkcyjny backend z `eas.json`
-- Render deployuje tylko `backend/`
+- Render buduje API z `backend/` oraz frontend Expo Web z katalogu głównego
 
 ## Frontend
 
@@ -52,12 +52,14 @@ Uwaga:
 - frontend jest ustawiony na port `8090`, bo domyslny port Expo `8081` byl zajety przez inne procesy na tej maszynie
 - jesli odpalasz `npm run start`, Metro rowniez wystartuje na `8090`
 - publiczny backend ustawiasz przez `EXPO_PUBLIC_API_BASE_URL`, np. `https://hustle-city-api.onrender.com`, ale lokalny `.env.example` celowo startuje od `127.0.0.1`
-- pod prywatne testy online patrz tez: [docs/PRIVATE_TESTS_DEPLOY.md](C:\Users\Adam\Documents\New project\docs\PRIVATE_TESTS_DEPLOY.md)
-- pierwszy build Expo preview: [docs/EXPO_PREVIEW_FIRST_BUILD.md](C:\Users\Adam\Documents\New project\docs\EXPO_PREVIEW_FIRST_BUILD.md)
-- pelny flow backend + APK dla testerow: [docs/RENDER_AND_EXPO_TESTER_FLOW.md](C:\Users\Adam\Documents\New project\docs\RENDER_AND_EXPO_TESTER_FLOW.md)
-- stary skrot Android private test: [docs/ANDROID_PRIVATE_TEST.md](C:\Users\Adam\Documents\New project\docs\ANDROID_PRIVATE_TEST.md)
+- pod prywatne testy online patrz też: [docs/PRIVATE_TESTS_DEPLOY.md](docs/PRIVATE_TESTS_DEPLOY.md)
+- pierwszy build Expo preview: [docs/EXPO_PREVIEW_FIRST_BUILD.md](docs/EXPO_PREVIEW_FIRST_BUILD.md)
+- pełny flow backend + APK dla testerów: [docs/RENDER_AND_EXPO_TESTER_FLOW.md](docs/RENDER_AND_EXPO_TESTER_FLOW.md)
+- skrót Android private test: [docs/ANDROID_PRIVATE_TEST.md](docs/ANDROID_PRIVATE_TEST.md)
 
 ## Backend
+
+Wymagany Node.js **24.15.0–24.x**. Konta zapisują się w `DATA_DIR/game.sqlite`; przy pierwszym starcie następuje jednorazowy import istniejącego `users.db`. Procedura kopii i migracji: `docs/TRANSAKCJE_2026-09-09.md`.
 
 1. Wejdz do `backend`.
 2. Uruchom `npm install`.
@@ -71,44 +73,34 @@ Szybki lokalny start z root:
 - terminal 2: `npm run web`
 - smoke test end-to-end: `npm run smoke`
 
-Konta do testow API:
-
-- login: `boss`
-- haslo: `1234`
+Konta do testów API twórz przez rejestrację. Nie ma domyślnego konta z publicznym hasłem. Opcjonalny `ADMIN_BOOTSTRAP_PASSWORD` służy do utworzenia zarezerwowanego administratora lub przywrócenia zablokowanego starego konta; wymaga unikalnego hasła o długości co najmniej 12 znaków (maksymalnie 72 bajty UTF-8).
 
 Wazne zmienne backendu:
 
 - `PORT` - port procesu HTTP, uzywany na deployu przez Render / Railway
 - `JWT_SECRET` - sekret do podpisywania tokenow
 - `CORS_ORIGIN` - dozwolone originy frontendu, po przecinku
-- `DATA_DIR` - katalog na pliki `users.db` i `global-chat.db`; w produkcji ustaw go na sciezke z persistent diskiem
+- `DATA_DIR` - katalog na `game.sqlite`, jego pliki WAL, stan świata i czaty; w produkcji ustaw go na trwały dysk i wykonuj kopie całego katalogu
 
-Deploy backendu:
+Deploy online:
 
-- `Render`: repo ma gotowy [render.yaml](C:\Users\Adam\Documents\New project\render.yaml)
-- pierwszy czysty deploy krok po kroku: [docs/RENDER_FIRST_DEPLOY.md](C:\Users\Adam\Documents\New project\docs\RENDER_FIRST_DEPLOY.md)
-- `Railway`: repo ma gotowy [railway.json](C:\Users\Adam\Documents\New project\railway.json), ustaw root directory na `backend`
-- jesli chcesz zachowac konta i sejwy po redeployu, backend musi miec persistent disk / volume, bo `backend/data/users.db` jest plikiem lokalnym
+- `Render`: [render.yaml](render.yaml) tworzy `hustle-city-api` i publiczny frontend `hustle-city-web`
+- pierwszy deploy krok po kroku: [docs/RENDER_FIRST_DEPLOY.md](docs/RENDER_FIRST_DEPLOY.md)
+- `Railway`: repo ma też [railway.json](railway.json); ustaw root directory na `backend`
+- konta i sejwy API trafiają na persistent disk do `DATA_DIR/game.sqlite`
 
 Uwaga:
 
 - frontend lokalnie bierze backend z `.env`, a buildy EAS z `eas.json`
 - zeby ustawic inny backend lokalnie, zmien `EXPO_PUBLIC_API_BASE_URL` w `.env`
 - backend zwraca teraz JSON rowniez dla nieistniejacych tras, wiec frontend nie powinien juz dostawac surowego `Cannot POST ...`
-- userzy sa zapisywani do `DATA_DIR/users.db`; lokalnie przetrwa to restart procesu, ale na darmowym Render Web Service pliki sa efemeryczne i znikaja po restarcie / spin-downie
+- dane graczy są zapisywane w `DATA_DIR/game.sqlite`; produkcyjny serwis API używa dysku `/var/data`
 
 Smoke test:
 
 - `npm run smoke` odpala lokalny backend na osobnym porcie, robi rejestracje, login, heist, chat, silownie, avatar, bezpieczny sync klienta, restart backendu i sprawdza, czy dane dalej istnieja
 
-## Najblizszy cel
+## Publiczne adresy Render
 
-Budujemy teraz vertical slice online:
-
-- auth
-- profil
-- napady
-- bank
-- rynek
-- biznesy
-- zapis postepu online
+- gra: `https://hustle-city-web.onrender.com`
+- API i health check: `https://hustle-city-api.onrender.com/health`

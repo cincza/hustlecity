@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { getCasinoGameConfig } from "../game/selectors/authorityFeedback";
+import { CasinoMachinePanel } from "../components/CasinoMachinePanel";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, Text, TextInput, View } from "react-native";
 
@@ -8,6 +10,7 @@ function sanitizeCasinoBetInput(value, maxBet) {
 }
 
 export function CasinoScreen({
+  cash,
   apiStatus,
   casinoState,
   styles,
@@ -40,73 +43,32 @@ export function CasinoScreen({
     message: "Usiadz do stolu.",
     ...(casinoState?.blackjack || {}),
   };
-  const rouletteDisplay = casinoState?.rouletteDisplay ?? "00";
-  const rouletteChoice = casinoState?.rouletteChoice ?? "red";
-  const rouletteBet = casinoState?.rouletteBet ?? "0";
-  const rouletteSpinning = Boolean(casinoState?.rouletteSpinning);
-  const rouletteResult = casinoState?.rouletteResult ?? null;
-  const slotBet = casinoState?.slotBet ?? "200";
-  const slotDisplay = Array.isArray(casinoState?.slotDisplay) ? casinoState.slotDisplay : ["MASK", "CASH", "CROWN"];
-  const slotSpinning = Boolean(casinoState?.slotSpinning);
-  const slotResult = casinoState?.slotResult ?? null;
-  const serverGame = casinoState?.serverGame ?? null;
-  const slotLimits = safeBackendMeta?.limits?.slot || null;
-  const highRiskLimits = safeBackendMeta?.limits?.highRisk || null;
   const blackjackLimits = safeBackendMeta?.limits?.blackjack || null;
-  const casinoCooldownRemainingMs = Math.max(0, Math.round(Number(safeBackendMeta?.cooldownRemainingSeconds || 0) * 1000));
-  const slotSymbols = useMemo(() => ({
-    MASK: { icon: "mask", color: "#e7cf95", label: "Maska" },
-    CASH: { icon: "cash-multiple", color: "#f0cf75", label: "Kasa" },
-    BAR: { icon: "gold", color: "#d8a753", label: "Sztaba" },
-    DICE: { icon: "dice-5", color: "#b896e8", label: "Kostka" },
-    SKULL: { icon: "skull", color: "#c56b6b", label: "Czaszka" },
-    CROWN: { icon: "crown", color: "#ffd65a", label: "Jackpot" },
-  }), []);
-
-  const renderSlotSymbol = (symbol, index) => {
-    const config = slotSymbols[symbol] || slotSymbols.MASK;
-    return (
-      <View
-        key={`${symbol}-${index}`}
-        style={{
-          flex: 1,
-          minWidth: 76,
-          alignItems: "center",
-          justifyContent: "center",
-          paddingVertical: 16,
-          paddingHorizontal: 8,
-          borderWidth: 1,
-          borderColor: "#56442c",
-          backgroundColor: "#0f0d0a",
-        }}
-      >
-        <MaterialCommunityIcons name={config.icon} size={34} color={config.color} />
-        <Text style={{ color: "#f3e7c9", fontWeight: "800", marginTop: 8, fontSize: 12 }}>{config.label}</Text>
-      </View>
-    );
-  };
+  const casinoCooldownRemainingMs = getCasinoGameConfig(safeBackendMeta, "blackjack").cooldownRemainingMs;
+  const [, tick] = useState(0);
+  useEffect(() => { const timer = setInterval(() => tick(n => n + 1), 250); return () => clearInterval(timer); }, []);
 
   return (
     <>
       <SectionCard title="Kasyno" subtitle="Wybierz stol i grasz.">
-        <View style={styles.choiceRow}>
+        <View style={{ flexDirection: "row", gap: 5 }}>
           <Pressable
-            onPress={() => setCasinoView("blackjack")}
-            style={[styles.choiceChip, casinoView === "blackjack" && styles.choiceChipActive]}
+            accessibilityRole="tab" accessibilityState={{ selected: casinoView === "blackjack" }} onPress={() => setCasinoView("blackjack")}
+            style={{ flex: 1, minHeight: 44, padding: 6, justifyContent: "center", alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: casinoView === "blackjack" ? "#dfbc74" : "#4b3d2a", backgroundColor: "#211b12" }}
           >
-            <Text style={styles.choiceChipText}>BLACKJACK</Text>
+            <Text style={{ color: "#e7d5b2", fontSize: 10, fontWeight: "800" }}>BLACKJACK</Text>
           </Pressable>
           <Pressable
-            onPress={() => setCasinoView("roulette")}
-            style={[styles.choiceChip, casinoView === "roulette" && styles.choiceChipActive]}
+            accessibilityRole="tab" accessibilityState={{ selected: casinoView === "roulette" }} onPress={() => setCasinoView("roulette")}
+            style={{ flex: 1, minHeight: 44, padding: 6, justifyContent: "center", alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: casinoView === "roulette" ? "#dfbc74" : "#4b3d2a", backgroundColor: "#211b12" }}
           >
-            <Text style={styles.choiceChipText}>RULETKA</Text>
+            <Text style={{ color: "#e7d5b2", fontSize: 10, fontWeight: "800" }}>RULETKA</Text>
           </Pressable>
           <Pressable
-            onPress={() => setCasinoView("slot")}
-            style={[styles.choiceChip, casinoView === "slot" && styles.choiceChipActive]}
+            accessibilityRole="tab" accessibilityState={{ selected: casinoView === "slot" }} onPress={() => setCasinoView("slot")}
+            style={{ flex: 1, minHeight: 44, padding: 6, justifyContent: "center", alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: casinoView === "slot" ? "#dfbc74" : "#4b3d2a", backgroundColor: "#211b12" }}
           >
-            <Text style={styles.choiceChipText}>SLOT</Text>
+            <Text style={{ color: "#e7d5b2", fontSize: 10, fontWeight: "800" }}>AUTOMATY</Text>
           </Pressable>
         </View>
       </SectionCard>
@@ -166,6 +128,9 @@ export function CasinoScreen({
               ) : (
                 <PlayingCard card={{ label: "?", value: 0 }} hidden />
               )}
+              {safeBlackjack.stage === "player" && safeBlackjack.dealerHasHiddenCard ? (
+                <PlayingCard card={{ label: "?", value: 0 }} hidden />
+              ) : null}
             </View>
             <Text style={styles.blackjackTotal}>
               Suma: {safeBlackjack.stage === "player" ? (safeBlackjack.dealerCards[0]?.value || 0) : handValue(safeBlackjack.dealerCards)}
@@ -204,193 +169,7 @@ export function CasinoScreen({
       </SectionCard>
       ) : null}
 
-      {casinoView === "slot" ? (
-      <SectionCard title="Slot" subtitle="Szybki spin z jackpotem.">
-        <SceneArtwork
-          eyebrow="Slot"
-          title="Automat jackpot"
-          lines={["Tani spin, szybki wynik i mala szansa na gruby strzal."]}
-          accent={["#5a3a10", "#17110a", "#050505"]}
-          source={sceneBackgrounds.casinoWide}
-        />
-        {slotLimits ? (
-          <View style={styles.listCard}>
-            <StatLine
-              label="Stawki slota"
-              value={`${formatMoney(slotLimits.minBet || 0)} - ${formatMoney(slotLimits.maxBet || 0)}`}
-              visual={systemVisuals.casino}
-            />
-            <StatLine label="RTP preview" value={`${Math.round((safeBackendMeta?.rtp?.slot || 0) * 100)}%`} />
-            {casinoCooldownRemainingMs > 0 ? (
-              <StatLine label="Kolejny spin za" value={formatCooldown(casinoCooldownRemainingMs)} />
-            ) : null}
-          </View>
-        ) : null}
-        <View style={[styles.listCard, { borderColor: "#4f3820", backgroundColor: "#0f0d0a" }]}>
-          <View style={styles.inlineRow}>
-            <View style={styles.flexOne}>
-              <Text style={[styles.listCardTitle, { color: "#f3d58f" }]}>Automat low-stakes</Text>
-              <Text style={styles.listCardMeta}>3 bebny, szybki spin, jackpot na trzech koronach.</Text>
-            </View>
-            <View style={{
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderWidth: 1,
-              borderColor: "#816234",
-              backgroundColor: "#1a140c",
-            }}>
-              <Text style={{ color: "#ffd65a", fontWeight: "900", fontSize: 12 }}>JACKPOT x28</Text>
-            </View>
-          </View>
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-            {slotDisplay.map(renderSlotSymbol)}
-          </View>
-          <Text style={[styles.casinoMeta, { marginTop: 12, color: "#d6c7ad" }]}>
-            {slotSpinning
-              ? "Bebny kreca sie..."
-              : slotResult
-                ? `${slotResult.label || "Spin zakonczony"}${slotResult.multiplier ? ` | x${slotResult.multiplier}` : ""}`
-                : "Wrzucasz stawke i od razu widzisz wynik."}
-          </Text>
-        </View>
-        <View style={styles.choiceRow}>
-          <TextInput
-            value={slotBet}
-            onChangeText={(value) =>
-              setCasinoState((prev) => ({
-                ...prev,
-                slotBet: sanitizeCasinoBetInput(value, slotLimits?.maxBet || 50000),
-              }))
-            }
-            keyboardType="numeric"
-            style={styles.betInput}
-          />
-          <Pressable
-            onPress={spinSlot}
-            disabled={slotSpinning || casinoCooldownRemainingMs > 0}
-            style={[styles.inlineButton, (slotSpinning || casinoCooldownRemainingMs > 0) && styles.tileDisabled]}
-          >
-            <Text style={styles.inlineButtonText}>
-              {slotSpinning ? "Kreci..." : casinoCooldownRemainingMs > 0 ? `Wroc za ${formatCooldown(casinoCooldownRemainingMs)}` : `Spin ${formatMoney(Number(slotBet || 0))}`}
-            </Text>
-          </Pressable>
-        </View>
-        <View style={styles.grid}>
-          <View style={styles.listCard}>
-            <StatLine label="Najlepszy symbol" value="Korona" visual={systemVisuals.respect} />
-            <StatLine label="Main jackpot" value="3x korona = x28 stawki" visual={systemVisuals.cash} />
-          </View>
-          <View style={styles.listCard}>
-            <StatLine label="Wygrane srednie" value="3x maska = x8 | 2x kasa = x2" visual={systemVisuals.casino} />
-            <StatLine label="Zwrot lekki" value="Cash + sztaba + kostka = x1.15" visual={systemVisuals.market} />
-          </View>
-        </View>
-        {serverGame?.mode === "slot" ? (
-          <StatLine
-            label="Ostatni spin"
-            value={`${serverGame.win ? "Wygrana" : "Pudlo"} | net ${formatMoney(serverGame.net || 0)}`}
-          />
-        ) : null}
-      </SectionCard>
-      ) : null}
-
-      {casinoView === "roulette" ? (
-      <SectionCard title="Ruletka" subtitle="Kolor, stawka, spin.">
-        <SceneArtwork
-          eyebrow="Kasyno"
-          title="Neon i ciezki stol"
-          lines={["Jeden spin i od razu wiesz, czy noc niesie."]}
-          accent={["#532614", "#1a120d", "#050505"]}
-          source={sceneBackgrounds.casinoWide}
-        />
-        <View style={styles.listCard}>
-          <View style={styles.entityHead}>
-            <EntityBadge visual={systemVisuals.casino} />
-            <View style={styles.flexOne}>
-              <Text style={styles.listCardTitle}>Stol kasyna</Text>
-              <Text style={styles.listCardMeta}>Tryb: {apiStatus === "online" ? "online" : "lokalny"}.</Text>
-            </View>
-          </View>
-        </View>
-        {safeBackendMeta ? (
-          <View style={styles.listCard}>
-            <StatLine label="Dzienny limit strat" value={formatMoney(safeBackendMeta.dailyLossCap || 0)} />
-            <StatLine label="Straty dzis" value={formatMoney(safeBackendMeta.dailyLoss || 0)} />
-            <StatLine
-              label="Stawka high-risk"
-              value={`${formatMoney(safeBackendMeta.limits?.highRisk?.minBet || 0)} - ${formatMoney(safeBackendMeta.limits?.highRisk?.maxBet || 0)}`}
-            />
-            {casinoCooldownRemainingMs > 0 ? (
-              <StatLine label="Kolejny spin za" value={formatCooldown(casinoCooldownRemainingMs)} />
-            ) : null}
-          </View>
-        ) : null}
-        <View style={styles.casinoHero}>
-          <View style={styles.rouletteWheel}>
-            <View style={styles.rouletteRingOuter} />
-            <View style={styles.rouletteRingInner}>
-              <Text style={styles.casinoNumber}>{rouletteDisplay}</Text>
-            </View>
-            <View style={styles.rouletteNeedle} />
-          </View>
-          <Text style={styles.casinoMeta}>
-            {rouletteSpinning ? "Kula leci..." : rouletteResult ? `Ostatni wynik: ${rouletteResult.color.toUpperCase()}` : "Wybierz kolor i krec."}
-          </Text>
-        </View>
-        <View style={styles.choiceRow}>
-          {["red", "black", "green"].map((choice) => (
-            <Pressable
-              key={choice}
-              onPress={() => setCasinoState((prev) => ({ ...prev, rouletteChoice: choice }))}
-              style={[styles.choiceChip, rouletteChoice === choice && styles.choiceChipActive, choice === "green" && styles.choiceChipGreen]}
-            >
-              <Text style={styles.choiceChipText}>{choice.toUpperCase()}</Text>
-            </Pressable>
-          ))}
-          <TextInput
-            value={rouletteBet}
-            onChangeText={(value) =>
-              setCasinoState((prev) => ({
-                ...prev,
-                rouletteBet: sanitizeCasinoBetInput(value, highRiskLimits?.maxBet || 15000),
-              }))
-            }
-            keyboardType="numeric"
-            style={styles.betInput}
-          />
-          <Pressable
-            onPress={spinRoulette}
-            disabled={rouletteSpinning || casinoCooldownRemainingMs > 0}
-            style={[styles.inlineButton, (rouletteSpinning || casinoCooldownRemainingMs > 0) && styles.tileDisabled]}
-          >
-            <Text style={styles.inlineButtonText}>
-              {casinoCooldownRemainingMs > 0 ? `Wroc za ${formatCooldown(casinoCooldownRemainingMs)}` : `Spin ${formatMoney(Number(rouletteBet || 0))}`}
-            </Text>
-          </Pressable>
-        </View>
-        <View style={styles.historyRow}>
-          {safeRouletteHistory.map((entry, index) => (
-            <View
-              key={`${entry.number}-${index}`}
-              style={[
-                styles.historyChip,
-                entry.color === "red" && styles.historyChipRed,
-                entry.color === "black" && styles.historyChipBlack,
-                entry.color === "green" && styles.historyChipGreen,
-              ]}
-            >
-              <Text style={styles.historyChipText}>{entry.number}</Text>
-            </View>
-          ))}
-        </View>
-        {serverGame ? (
-          <StatLine
-            label="Ostatni wynik online"
-            value={`${serverGame.win ? "Wygrana" : "Przegrana"} | net ${formatMoney(serverGame.net || 0)}`}
-          />
-        ) : null}
-      </SectionCard>
-      ) : null}
+      {casinoView === "slot" || casinoView === "roulette" ? <CasinoMachinePanel key={casinoView} mode={casinoView} state={casinoState} setState={setCasinoState} cash={cash} onSpin={casinoView === "slot" ? spinSlot : spinRoulette} formatMoney={formatMoney} /> : null}
     </>
   );
 }

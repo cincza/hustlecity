@@ -18,34 +18,55 @@ export const DISTRICTS = [
     id: "oldtown",
     name: "Old Town",
     shortName: "Old",
-    flavor: "Fronty, papier i cichy obrot.",
+    icon: "bank-outline",
+    accent: "#c8a86b",
+    signature: "Kamień, długi i nazwiska starsze niż twoja ekipa.",
+    streetLine: "Tutaj reputację zapisuje się w księgach, a błędy zostają na pokolenia.",
+    flavor: "Fronty, dokumenty i cichy obrót.",
     assetType: "fronty",
     basePressure: 16,
     bonusLabel: "Cichsze fronty",
-    bonusText: "Latwiej utrzymac spokoj i trzymac papiery w ryzach.",
-    note: "Dzielnica pod fronty, male biznesy i spokojniejsze ruchy.",
+    bonusText: "Łatwiej utrzymać spokój i trzymać papiery w ryzach.",
+    note: "Najlepszy grunt pod fronty, małe biznesy i ruchy bez świadków.",
+    contactRewardMultiplier: 0.96,
+    contactHeatDelta: -2,
+    rushChanceDelta: 0,
   },
   {
     id: "neon",
     name: "Neon Strip",
     shortName: "Neon",
-    flavor: "Kluby, VIP i glod okazji.",
+    icon: "glass-cocktail",
+    accent: "#c879da",
+    signature: "Neon gaśnie dopiero wtedy, gdy ktoś przestaje płacić.",
+    streetLine: "Ochrona zna twarz, barmani znają sekrety, a Mara Voss zna jedno i drugie.",
+    flavor: "Kluby, VIP-y i głód okazji.",
     assetType: "kluby",
     basePressure: 24,
     bonusLabel: "Ruch po zmroku",
-    bonusText: "Lepszy klubowy ruch i szybsze kontakty, ale gliny patrza.",
+    bonusText: "Lepszy klubowy ruch i szybsze kontakty, ale gliny patrzą.",
     note: "Najmocniejszy grunt pod kluby, kontakty i nocne okazje.",
+    contactRewardMultiplier: 1.12,
+    contactHeatDelta: 2,
+    rushChanceDelta: 0,
   },
   {
     id: "harbor",
     name: "Harbor Line",
     shortName: "Harbor",
+    icon: "ferry",
+    accent: "#5d9fb2",
+    signature: "Kontenery nie zadają pytań. Ludzie na rampie już tak.",
+    streetLine: "Każdy ładunek ma trasę, każdy kierowca cenę, a Żelazne Psy długą pamięć.",
     flavor: "Magazyny, dostawy i szybki odjazd.",
     assetType: "operacje",
     basePressure: 20,
     bonusLabel: "Logistyka i wyjazd",
     bonusText: "Lepsze warunki pod operacje i grubsze transporty.",
     note: "Mocne miejsce pod dostawy, magazyny i grubsze roboty.",
+    contactRewardMultiplier: 1.06,
+    contactHeatDelta: 1,
+    rushChanceDelta: 0.04,
   },
 ];
 
@@ -72,6 +93,8 @@ export const DISTRICT_PRESSURE_STATES = [
     leakMultiplier: 0.92,
     heistHeatMultiplier: 0.95,
     successPenalty: 0,
+    opportunityMultiplier: 1,
+    contactHeatDelta: 0,
   },
   {
     id: "watched",
@@ -83,6 +106,8 @@ export const DISTRICT_PRESSURE_STATES = [
     leakMultiplier: 1.04,
     heistHeatMultiplier: 1.02,
     successPenalty: 0.015,
+    opportunityMultiplier: 1.02,
+    contactHeatDelta: 1,
   },
   {
     id: "crackdown",
@@ -94,6 +119,8 @@ export const DISTRICT_PRESSURE_STATES = [
     leakMultiplier: 1.2,
     heistHeatMultiplier: 1.16,
     successPenalty: 0.05,
+    opportunityMultiplier: 1.12,
+    contactHeatDelta: 3,
   },
   {
     id: "lockdown",
@@ -105,6 +132,8 @@ export const DISTRICT_PRESSURE_STATES = [
     leakMultiplier: 1.38,
     heistHeatMultiplier: 1.32,
     successPenalty: 0.1,
+    opportunityMultiplier: 1.25,
+    contactHeatDelta: 5,
   },
 ];
 
@@ -318,8 +347,8 @@ export function applyDistrictActivity(
   };
 }
 
-export function getDistrictModifierSummary(cityState, districtId) {
-  const safeCity = syncCityState(cityState);
+export function getDistrictModifierSummary(cityState, districtId, now = Date.now()) {
+  const safeCity = syncCityState(cityState, now);
   const district = findDistrictById(districtId || safeCity.focusDistrictId);
   const runtime = safeCity.districts[district.id] || createDistrictState(district.id);
   const pressureState = getDistrictPressureState(runtime.pressure);
@@ -340,6 +369,6 @@ export function getDistrictModifierSummary(cityState, districtId) {
   };
 }
 
-export function getDistrictSummaries(cityState) {
-  return DISTRICTS.map((district) => getDistrictModifierSummary(cityState, district.id));
+export function getDistrictSummaries(cityState, now = Date.now()) {
+  return DISTRICTS.map((district) => getDistrictModifierSummary(cityState, district.id, now));
 }

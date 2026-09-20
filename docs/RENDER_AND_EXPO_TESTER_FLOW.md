@@ -11,7 +11,7 @@ Ta checklista opisuje pelny, najprostszy flow dla kilku testerow:
 
 Najpierw zrob backend deploy wedlug:
 
-- [RENDER_FIRST_DEPLOY.md](C:\Users\Adam\Documents\New project\docs\RENDER_FIRST_DEPLOY.md)
+- [RENDER_FIRST_DEPLOY.md](RENDER_FIRST_DEPLOY.md)
 
 Po deployu sprawdz:
 
@@ -39,7 +39,7 @@ Oczekiwany wynik:
 
 Buildy EAS korzystaja w tym projekcie z:
 
-- [eas.json](C:\Users\Adam\Documents\New project\eas.json)
+- [eas.json](../eas.json)
 
 Jesli chcesz, zeby testerzy laczyli sie z nowym backendem Render, ustaw tam:
 
@@ -53,7 +53,7 @@ Dokladniej: zmien wartosc w `build.base.env`.
 
 Korzystaj z:
 
-- [EXPO_PREVIEW_FIRST_BUILD.md](C:\Users\Adam\Documents\New project\docs\EXPO_PREVIEW_FIRST_BUILD.md)
+- [EXPO_PREVIEW_FIRST_BUILD.md](EXPO_PREVIEW_FIRST_BUILD.md)
 
 Komenda:
 

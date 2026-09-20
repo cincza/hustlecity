@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE, createShadowStyle } from "../utils/uiEffects";
+import { getRestaurantAllowance, getRestaurantQuote } from "../../shared/restaurant.js";
 
 const FOOD_ICON_BY_ID = {
   burger: "hamburger",
@@ -53,6 +55,7 @@ function MealCard({
   feedbackToken,
   feedbackText,
   compact,
+  quote,
 }) {
   const glow = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -69,19 +72,19 @@ function MealCard({
 
     const animation = Animated.parallel([
       Animated.sequence([
-        Animated.timing(glow, { toValue: 1, duration: 150, useNativeDriver: true }),
-        Animated.timing(glow, { toValue: 0, duration: 320, useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 1, duration: 150, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.timing(glow, { toValue: 0, duration: 320, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(scale, { toValue: 0.985, duration: 80, useNativeDriver: true }),
-        Animated.spring(scale, { toValue: 1, friction: 5, tension: 125, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 0.985, duration: 80, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.spring(scale, { toValue: 1, friction: 5, tension: 125, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
       Animated.sequence([
-        Animated.timing(burstOpacity, { toValue: 1, duration: 130, useNativeDriver: true }),
+        Animated.timing(burstOpacity, { toValue: 1, duration: 130, useNativeDriver: USE_NATIVE_DRIVER }),
         Animated.delay(110),
-        Animated.timing(burstOpacity, { toValue: 0, duration: 210, useNativeDriver: true }),
+        Animated.timing(burstOpacity, { toValue: 0, duration: 210, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
-      Animated.timing(burstLift, { toValue: -16, duration: 420, useNativeDriver: true }),
+      Animated.timing(burstLift, { toValue: -16, duration: 420, useNativeDriver: USE_NATIVE_DRIVER }),
     ]);
 
     animation.start();
@@ -94,11 +97,15 @@ function MealCard({
   return (
     <Animated.View style={[styles.cardWrap, { transform: [{ scale }] }]}>
       <LinearGradient colors={gradient} style={styles.card}>
-        <Animated.View pointerEvents="none" style={[styles.cardGlow, { opacity: glow }]} />
         <Animated.View
-          pointerEvents="none"
+          pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
+          style={[styles.cardGlow, WEB_POINTER_EVENTS_NONE_STYLE, { opacity: glow }]}
+        />
+        <Animated.View
+          pointerEvents={USE_NATIVE_DRIVER ? "none" : undefined}
           style={[
             styles.burstWrap,
+            WEB_POINTER_EVENTS_NONE_STYLE,
             {
               opacity: burstOpacity,
               transform: [{ translateY: burstLift }],
@@ -115,25 +122,14 @@ function MealCard({
             </View>
             <View style={styles.copyWrap}>
               <Text style={styles.cardTitle}>{meal.name}</Text>
-              <Text style={styles.cardMeta}>+{meal.energy} energii</Text>
+              <Text style={styles.cardMeta}>{quote.energyGain > 0 ? `+${quote.energyGain} EN · ${formatMoney(quote.cost)}` : "Chwilowo niedostępne"}</Text>
             </View>
           </View>
-          {highlightedLabel ? <MealBadge text={highlightedLabel} tone={highlightTone} /> : null}
+          {highlightedLabel && !quote.error && !compact ? <MealBadge text={highlightedLabel} tone={highlightTone} /> : null}
         </View>
 
-        <View style={styles.valueRow}>
-          <View style={styles.valueChip}>
-            <MaterialCommunityIcons name="lightning-bolt" size={14} color="#ffcb5c" />
-            <Text style={styles.valueChipText}>+{meal.energy} EN</Text>
-          </View>
-          <View style={styles.valueChip}>
-            <MaterialCommunityIcons name="cash-multiple" size={14} color="#9fe0b1" />
-            <Text style={styles.valueChipText}>{formatMoney(meal.price)}</Text>
-          </View>
-        </View>
-
-        <Pressable onPress={() => onEat(meal)} disabled={busy} style={[styles.actionButton, busy && styles.actionButtonBusy]}>
-          <Text style={styles.actionButtonText}>{busy ? "Chwila..." : `Zjedz - ${formatMoney(meal.price)}`}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Zjedz: ${meal.name}`} onPress={() => onEat(meal)} disabled={busy || Boolean(quote.error)} style={[styles.actionButton, (busy || quote.error) && styles.actionButtonBusy]}>
+          <Text style={styles.actionButtonText}>{busy ? "Zamawianie…" : quote.error || "Zjedz"}</Text>
         </Pressable>
       </LinearGradient>
     </Animated.View>
@@ -146,21 +142,34 @@ export function RestaurantSection({
   formatMoney,
   energy,
   maxEnergy,
+  player,
   onEat,
 }) {
   const { width } = useWindowDimensions();
   const compact = width < 410;
   const [busyMealId, setBusyMealId] = useState("");
   const [feedback, setFeedback] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const pending = useRef(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const profile = player || { energy, maxEnergy, cash: 0 };
+  const currentTime = Math.max(now, Date.now());
+  const allowance = getRestaurantAllowance(profile, currentTime);
   const bestDealId = useMemo(() => getBestDealId(restaurantItems), [restaurantItems]);
   const fastestChargeId = useMemo(() => getFastestChargeId(restaurantItems), [restaurantItems]);
 
   const handleEat = async (meal) => {
-    if (busyMealId) return;
+    if (pending.current) return;
+    pending.current = true;
+    setError("");
     setBusyMealId(meal.id);
     try {
       const result = await onEat?.(meal);
-      if (result && typeof result === "object") {
+      if (result && typeof result === "object" && result.energyGain > 0) {
         const energyGain = Math.max(0, Number(result.energyGain || 0));
         setFeedback({
           id: Date.now(),
@@ -168,7 +177,9 @@ export function RestaurantSection({
           text: energyGain > 0 ? `+${energyGain} energii` : "Pelny bak",
         });
       }
-    } finally {
+    } catch (err) { setError(err?.message || "Nie udało się zamówić. Spróbuj ponownie."); }
+    finally {
+      pending.current = false;
       setBusyMealId("");
     }
   };
@@ -176,17 +187,21 @@ export function RestaurantSection({
   return (
     <SectionCard title="Restauracja" subtitle="Jedz i wracaj do roboty.">
       <View style={[styles.sectionLead, compact && styles.sectionLeadCompact]}>
-        <View>
-          <Text style={styles.leadEyebrow}>Szybkie doladowanie</Text>
-          <Text style={styles.leadText}>Lap energie i wracaj na ulice bez zbednego klikania.</Text>
-        </View>
         <View style={styles.energyPill}>
           <MaterialCommunityIcons name="lightning-bolt" size={14} color="#ffca59" />
           <Text style={styles.energyPillText}>Energia: {energy} / {maxEnergy}</Text>
         </View>
       </View>
 
-      <View style={styles.list}>
+      {allowance.remaining > 0 ? <Text style={styles.leadText}>
+        Posiłki: jeszcze {allowance.remaining}/{allowance.limit} EN.
+        {allowance.resetsAt ? ` Odnowienie za ${Math.ceil((allowance.resetsAt - currentTime) / 60000)} min.` : " Limit odnawia się godzinę po pierwszym posiłku."}
+        {" Płacisz tylko za otrzymaną energię."}
+      </Text> : null}
+      {energy >= maxEnergy || allowance.remaining <= 0 || Number(profile.jailUntil || 0) > currentTime ? <View style={styles.unavailable}>
+        <Text style={styles.cardTitle}>{Number(profile.jailUntil || 0) > currentTime ? "Wróć po wyjściu z aresztu" : energy >= maxEnergy ? "Masz pełną energię" : "Przerwa między posiłkami"}</Text>
+        <Text style={styles.leadText}>{energy >= maxEnergy ? "Nie musisz teraz jeść. Zachowaj gotówkę na kolejną sesję." : allowance.remaining <= 0 ? `Kolejne ${allowance.limit} EN z jedzenia za ${Math.max(1, Math.ceil((allowance.resetsAt - currentTime) / 60000))} min. W tym czasie energia regeneruje się naturalnie.` : "Posiłki będą dostępne po opuszczeniu aresztu."}</Text>
+      </View> : <View style={styles.list}>
         {restaurantItems.map((meal) => {
           const highlight =
             meal.id === bestDealId
@@ -199,25 +214,29 @@ export function RestaurantSection({
             <MealCard
               key={meal.id}
               meal={meal}
+              quote={getRestaurantQuote(profile, meal, currentTime)}
               formatMoney={formatMoney}
               onEat={handleEat}
               highlightedLabel={highlight?.label}
               highlightTone={highlight?.tone}
-              busy={busyMealId === meal.id}
+              busy={Boolean(busyMealId)}
               compact={compact}
               feedbackToken={feedback?.mealId === meal.id ? feedback.id : null}
               feedbackText={feedback?.mealId === meal.id ? feedback.text : ""}
             />
           );
         })}
-      </View>
+      </View>}
+      {error ? <Text accessibilityLiveRegion="polite" style={styles.leadText}>{error}</Text> : null}
     </SectionCard>
   );
 }
 
 const styles = StyleSheet.create({
+  unavailable: { padding: 16, borderWidth: 1, borderColor: "#57472d", borderRadius: 14, backgroundColor: "#19150e", marginTop: 12 },
   sectionLead: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
@@ -268,8 +287,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(228, 183, 98, 0.16)",
-    padding: 14,
-    gap: 12,
+    padding: 12,
+    gap: 8,
   },
   cardGlow: {
     ...StyleSheet.absoluteFillObject,
@@ -370,10 +389,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: "rgba(255, 235, 192, 0.18)",
-    shadowColor: "#d8a94c",
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    ...createShadowStyle({
+      color: "#d8a94c",
+      opacity: 0.18,
+      radius: 12,
+      offsetY: 4,
+    }),
   },
   actionButtonBusy: {
     opacity: 0.7,

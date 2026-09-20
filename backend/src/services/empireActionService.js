@@ -10,15 +10,19 @@ import {
   findFactoryById,
   findSupplyById,
   getBusinessIncomePerMinute,
+  getBusinessPurchaseCost,
   getBusinessUpgradeCost,
+  getDrugProductionEnergyCost,
   getDrugProductionRespectRequirement,
   getDrugPoliceProfile,
+  isBusinessUpgradeMaxed,
   normalizeBusinessCollections,
   normalizeBusinessUpgrades,
   normalizeBusinessesOwned,
   normalizeFactoriesOwned,
   normalizeSupplies,
 } from "../../../shared/empire.js";
+import { getCityEventAt, getCityEventEffects } from "../../../shared/cityDirector.js";
 import { getDistrictModifierSummary, getFactoryDistrictId } from "../../../shared/districts.js";
 import { ESCORTS, createDrugCounterMap, findDrugById } from "../../../shared/socialGameplay.js";
 import {
@@ -31,6 +35,7 @@ import {
   normalizeEscortsOwned,
 } from "../../../shared/street.js";
 import { getTaskStateById } from "../../../shared/tasks.js";
+import { assertPlayerNotInCriticalCare } from "./criticalCareService.js";
 
 function fail(message, statusCode = 400) {
   const error = new Error(message);
@@ -59,6 +64,7 @@ function buildTaskSnapshot(player) {
     club: player?.club || {},
     city: player?.city || {},
     contracts: player?.contracts || {},
+    operations: player?.operations || {},
     businessesOwned: player?.businessesOwned || [],
     factoriesOwned: player?.factoriesOwned || {},
     tasksClaimed: player?.tasksClaimed || [],
@@ -209,7 +215,8 @@ export function buyBusinessForPlayer(player, businessId, now = Date.now()) {
   if (Number(player.profile?.respect || 0) < Number(business.respect || 0)) {
     fail(`Masz za niski szacunek. Wymagany szacunek: ${business.respect}.`);
   }
-  if (Number(player.profile?.cash || 0) < Number(business.cost || 0)) {
+  const purchaseCost = getBusinessPurchaseCost(player, business);
+  if (Number(player.profile?.cash || 0) < purchaseCost) {
     fail(`Za malo gotowki na ${business.name}.`);
   }
 
@@ -220,11 +227,12 @@ export function buyBusinessForPlayer(player, businessId, now = Date.now()) {
     player.businessesOwned.push({ id: business.id, count: 1 });
   }
 
-  player.profile.cash = Number(player.profile.cash || 0) - Number(business.cost || 0);
+  player.profile.cash = Number(player.profile.cash || 0) - purchaseCost;
   player.collections.businessAccruedAt = now;
 
   return {
     businessId: business.id,
+    cost: purchaseCost,
     count: existing ? existing.count : 1,
     logMessage: `Kupiono ${business.name}. Imperium zaczyna drukowac pieniadz.`,
   };
@@ -246,6 +254,9 @@ export function upgradeBusinessForPlayer(player, businessId, path, now = Date.no
   const owned = player.businessesOwned.find((entry) => entry.id === business.id);
   if (!owned?.count) {
     fail("Najpierw musisz miec ten biznes.");
+  }
+  if (isBusinessUpgradeMaxed(player, business.id, safePath)) {
+    fail(`Ta ścieżka ma już maksymalny poziom.`);
   }
 
   const cost = getBusinessUpgradeCost(player, business, safePath);
@@ -542,18 +553,23 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   ensurePlayerEmpireState(player);
 
   const drug = findDrugById(drugId);
-  const productionRespectRequirement = getDrugProductionRespectRequirement(drug);
   if (!drug) {
     fail("Nie ma takiego towaru.");
   }
+  const productionRespectRequirement = getDrugProductionRespectRequirement(drug);
+  const energyCost = getDrugProductionEnergyCost(drug);
   if (Number(player.profile?.jailUntil || 0) > now) {
     fail("Z celi nie odpalisz produkcji.");
   }
+  assertPlayerNotInCriticalCare(player, "Produkcja", now);
   if (Number(player.factoriesOwned?.[drug.factoryId] || 0) <= 0) {
     fail(`Najpierw musisz miec ${findFactoryById(drug.factoryId)?.name || "wlasciwa fabryke"}.`);
   }
   if (Number(player.profile?.respect || 0) < productionRespectRequirement) {
     fail(`Masz za niski szacunek. Wymagany szacunek: ${productionRespectRequirement}.`);
+  }
+  if (Number(player.profile?.energy || 0) < energyCost) {
+    fail(`Potrzebujesz ${energyCost} EN na tę partię.`);
   }
 
   for (const [supplyId, amount] of Object.entries(drug.supplies || {})) {
@@ -566,6 +582,8 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   const policeProfile = getDrugPoliceProfile(drug);
   const factoryDistrictId = getFactoryDistrictId(drug.factoryId);
   const factoryDistrict = getDistrictModifierSummary(player?.city, factoryDistrictId);
+  const cityEvent = getCityEventAt(now);
+  const cityEventEffects = getCityEventEffects(cityEvent, factoryDistrictId, player?.contacts?.classId);
   const focusedFactory = String(player?.gang?.focusDistrictId || "") === factoryDistrictId;
   const bustChance = clamp(
     Number(policeProfile.risk || 0) +
@@ -573,7 +591,8 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
       Number(player.profile?.dexterity || 0) * 0.003 +
       Math.max(0, Number(factoryDistrict.pressure || 0) - Number(factoryDistrict.basePressure || 0)) * 0.0015 +
       (factoryDistrict.pressureState?.id === "lockdown" ? 0.05 : 0) -
-      (focusedFactory ? 0.012 : 0),
+      (focusedFactory ? 0.012 : 0) +
+      Number(cityEventEffects?.factoryBust || 0),
     0.03,
     0.52
   );
@@ -582,6 +601,8 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
     busted && Number(drug.unlockRespect || 0) >= 30 && Math.random() < bustChance * 0.42
       ? randomBetween(180, 420)
       : 0;
+
+  player.profile.energy = Math.max(0, Number(player.profile?.energy || 0) - energyCost);
 
   for (const [supplyId, amount] of Object.entries(drug.supplies || {})) {
     player.supplies[supplyId] = Math.max(0, Number(player.supplies?.[supplyId] || 0) - Number(amount || 0));
@@ -603,6 +624,7 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
     return {
       drugId: drug.id,
       busted: true,
+      energyCost,
       jailSeconds,
       fine,
       logMessage:
@@ -616,9 +638,10 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
   if (!player.producedDrugInventory || typeof player.producedDrugInventory !== "object" || Array.isArray(player.producedDrugInventory)) {
     player.producedDrugInventory = createDrugCounterMap();
   }
-  player.drugInventory[drug.id] = Number(player.drugInventory?.[drug.id] || 0) + Number(drug.batchSize || 0);
+  const actualBatchSize = Number(drug.batchSize || 0) + Number(cityEventEffects?.factoryBatch || 0);
+  player.drugInventory[drug.id] = Number(player.drugInventory?.[drug.id] || 0) + actualBatchSize;
   player.producedDrugInventory[drug.id] =
-    Number(player.producedDrugInventory?.[drug.id] || 0) + Number(drug.batchSize || 0);
+    Number(player.producedDrugInventory?.[drug.id] || 0) + actualBatchSize;
   player.profile.heat = clamp(
     Number(player.profile?.heat || 0) +
       Math.max(
@@ -635,7 +658,9 @@ export function produceDrugForPlayer(player, drugId, now = Date.now()) {
     districtId: factoryDistrict.id,
     districtName: factoryDistrict.name,
     busted: false,
-    batchSize: Number(drug.batchSize || 0),
-    logMessage: `Wyprodukowano ${drug.batchSize} szt. ${drug.name} pod ${factoryDistrict.name}. Ryzyko: ${policeProfile.label}, dzielnica: ${factoryDistrict.pressureLabel}.`,
+    energyCost,
+    batchSize: actualBatchSize,
+    cityEventKey: cityEventEffects ? cityEvent.key : null,
+    logMessage: `Wyprodukowano ${actualBatchSize} szt. ${drug.name} pod ${factoryDistrict.name}. Ryzyko: ${policeProfile.label}, dzielnica: ${factoryDistrict.pressureLabel}.${cityEventEffects ? ` Wydarzenie: ${cityEvent.title}.` : ""}`,
   };
 }

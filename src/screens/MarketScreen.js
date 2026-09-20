@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getDealerPayoutForDrug } from "../../shared/socialGameplay.js";
+import { getDealerCityEventPricing } from "../../shared/cityDirector.js";
 import { HeroPanel } from "../components/GameScreenPrimitives";
+import CityEventPanel from "../components/CityEventPanel";
 
 const CONTRACT_CATEGORY_LABELS = {
   weapon: "Bron",
@@ -102,8 +104,10 @@ export function MarketScreen({
     visibleDealerDrugs[0] ||
     safeDrugs[0] ||
     null;
-  const selectedDealerPayout = selectedDealerDrug ? getDealerPayoutForDrug(selectedDealerDrug) : 0;
-  const selectedDealerBuyTotal = Number(selectedDealerDrug?.streetPrice || 0) * dealerTradeQuantity;
+  const dealerEventPricing = getDealerCityEventPricing(safeGame.cityEvent, selectedDealerDrug?.id);
+  const selectedDealerBuyPrice = Math.max(1, Math.ceil(Number(selectedDealerDrug?.streetPrice || 0) * dealerEventPricing.buyMultiplier));
+  const selectedDealerPayout = selectedDealerDrug ? Math.max(1, Math.floor(getDealerPayoutForDrug(selectedDealerDrug) * dealerEventPricing.sellMultiplier)) : 0;
+  const selectedDealerBuyTotal = selectedDealerBuyPrice * dealerTradeQuantity;
   const selectedDealerSellTotal = selectedDealerPayout * dealerTradeQuantity;
   const selectedDealerInventory = selectedDealerDrug ? Number(safeGame.drugInventory?.[selectedDealerDrug.id] || 0) : 0;
   const selectedDealerStock = selectedDealerDrug ? Number(safeGame.dealerInventory?.[selectedDealerDrug.id] || 0) : 0;
@@ -112,7 +116,7 @@ export function MarketScreen({
         0,
         Math.min(
           selectedDealerStock,
-          Math.floor(Number(safeGame.player.cash || 0) / Math.max(1, Number(selectedDealerDrug.streetPrice || 1)))
+          Math.floor(Number(safeGame.player.cash || 0) / selectedDealerBuyPrice)
         )
       )
     : 0;
@@ -389,6 +393,7 @@ export function MarketScreen({
           accent={["#372417", "#160f0c", "#050505"]}
           source={sceneBackgrounds.market}
         />
+        <CityEventPanel game={safeGame} compact readOnly />
         <HeroPanel
           eyebrow="Towar"
           title="Rynek miasta"
@@ -412,7 +417,7 @@ export function MarketScreen({
           {products.map((product) => {
             const locked = safeGame.player.respect < product.unlockRespect;
             const buyPrice = safeGame.market[product.id] ?? product.basePrice ?? 0;
-            const sellPrice = Math.floor(buyPrice * 0.85);
+            const sellPrice = Number(safeMarketState?.[product.id]?.sellPrice ?? Math.floor(buyPrice * 0.85));
             const snapshot = safeMarketState?.[product.id];
 
             return (
@@ -468,6 +473,7 @@ export function MarketScreen({
   if (section === "drugs") {
     return (
       <>
+        <CityEventPanel game={safeGame} compact readOnly />
         <SectionCard title="Diler" subtitle="Kupujesz albo sprzedajesz bez mieszania z klubami.">
           <View style={[styles.listCard, { paddingVertical: 10, gap: 8 }]}>
             <View style={[styles.inlineRow, { alignItems: "center", gap: 10 }]}>
@@ -531,7 +537,8 @@ export function MarketScreen({
                 />
               </View>
               <Text style={styles.listCardMeta}>
-                Kupno {formatMoney(selectedDealerDrug.streetPrice || 0)} • Skup {formatMoney(selectedDealerPayout)}
+                Kupno {formatMoney(selectedDealerBuyPrice)} • Skup {formatMoney(selectedDealerPayout)}
+                {dealerEventPricing.eventKey ? " • wydarzenie miasta" : ""}
               </Text>
               <Text style={styles.listCardMeta}>
                 {dealerPane === "buy" ? "Stock" : "Przy Tobie"} {dealerPane === "buy" ? selectedDealerStock : selectedDealerInventory} • Max teraz {selectedDealerMaxQuantity}
@@ -627,14 +634,16 @@ export function MarketScreen({
 
           <View style={{ gap: 8 }}>
             {visibleDealerDrugs.map((drug) => {
-              const dealerPayout = getDealerPayoutForDrug(drug);
+              const pricing = getDealerCityEventPricing(safeGame.cityEvent, drug.id);
+              const dealerBuyPrice = Math.max(1, Math.ceil(Number(drug.streetPrice || 0) * pricing.buyMultiplier));
+              const dealerPayout = Math.max(1, Math.floor(getDealerPayoutForDrug(drug) * pricing.sellMultiplier));
               const ownedQuantity = Number(safeGame.drugInventory?.[drug.id] || 0);
               const dealerStock = Number(safeGame.dealerInventory?.[drug.id] || 0);
               const isSelected = selectedDealerDrug?.id === drug.id;
               const canBuy =
                 safeGame.player.respect >= drug.unlockRespect &&
                 dealerStock >= dealerTradeQuantity &&
-                Number(safeGame.player.cash || 0) >= Number(drug.streetPrice || 0) * dealerTradeQuantity;
+                Number(safeGame.player.cash || 0) >= dealerBuyPrice * dealerTradeQuantity;
               const canSell = ownedQuantity >= dealerTradeQuantity;
 
               return (
@@ -658,7 +667,7 @@ export function MarketScreen({
                       <View style={styles.flexOne}>
                         <Text style={styles.listCardTitle}>{drug.name}</Text>
                         <Text style={styles.listCardMeta}>
-                          Kupno {formatMoney(drug.streetPrice || 0)} • Skup {formatMoney(dealerPayout)}
+                          Kupno {formatMoney(dealerBuyPrice)} • Skup {formatMoney(dealerPayout)}{pricing.eventKey ? " • event" : ""}
                         </Text>
                         <Text style={styles.listCardMeta}>
                           {dealerPane === "buy"
