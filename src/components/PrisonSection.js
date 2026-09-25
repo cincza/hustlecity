@@ -1,7 +1,8 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
+import { Text, TextInput } from "../i18n";
 export function PrisonSection({
   SectionCard,
   formatMoney,
@@ -86,9 +87,9 @@ export function PrisonSection({
             safeChat.map((entry) => (
               <View key={entry.id} style={styles.chatBubble}>
                 <Text style={styles.chatAuthor}>
-                  {entry.author} <Text style={styles.chatTime}>{entry.time}</Text>
+                  <Text translate={false}>{entry.author}</Text> <Text translate={false} style={styles.chatTime}>{entry.time}</Text>
                 </Text>
-                <Text style={styles.chatText}>{entry.text}</Text>
+                <Text translate={entry.author === "System"} style={styles.chatText}>{entry.text}</Text>
               </View>
             ))
           ) : (

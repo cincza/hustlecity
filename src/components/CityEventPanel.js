@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { DISTRICTS } from "../../shared/districts";
 import { getCityEventImpactLines, getCityEventRemaining, getCityEventResponse } from "../../shared/cityDirector";
 import { request } from "../game/api/client";
 
+import { Text } from "../i18n";
 function durationLabel(milliseconds) {
   const minutes = Math.max(0, Math.ceil(Number(milliseconds || 0) / 60000));
   const hours = Math.floor(minutes / 60);

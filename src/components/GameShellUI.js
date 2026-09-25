@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, Image, ImageBackground, Modal, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE, createTextShadowStyle } from "../utils/uiEffects";
 
+import { Pressable, Text } from "../i18n";
 const ICON_MAP = {
   bank: "bank-outline",
   casino: "cards-playing-outline",
@@ -191,7 +192,7 @@ export function GameHeader({
         <View style={styles.headerIdentityBlock}>
           <AvatarFrame activeAvatar={activeAvatar} compact={compact} />
           <View style={styles.headerIdentity}>
-            <Text style={[styles.headerName, compact && styles.headerNameCompact]} numberOfLines={1}>{playerName}</Text>
+            <Text translate={false} style={[styles.headerName, compact && styles.headerNameCompact]} numberOfLines={1}>{playerName}</Text>
             <View style={[styles.headerSubline, compact && styles.headerSublineCompact]}>
               <Text style={[styles.headerRank, compact && styles.headerRankCompact]} numberOfLines={1}>{rankTitle}</Text>
               <View style={styles.headerStatusPill}>

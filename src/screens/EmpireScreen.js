@@ -1,10 +1,11 @@
 import React from "react";
 import { getBusinessPurchaseCost, getDrugProductionEnergyCost, getDrugProductionRespectRequirement } from "../../shared/empire.js";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { getFactoryDistrictId } from "../../shared/districts.js";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getClubGuestVenueState, getClubThreatLabel, hasClubGuestAccess } from "../../shared/socialGameplay.js";
 import { HeroPanel } from "../components/GameScreenPrimitives";
+import { Text, TextInput } from "../i18n";
 import {
   getDistrictAlertText,
   getDistrictEffectLines,

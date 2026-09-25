@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getOperationCondition } from "../../shared/operations.js";
@@ -12,6 +12,7 @@ import { MissionPlaceholderTile, MissionTile } from "../components/MissionTile";
 import { RestaurantSection } from "../components/RestaurantSection";
 import CityEventPanel from "../components/CityEventPanel";
 
+import { Text, getIntlLocale } from "../i18n";
 const MAX_GYM_BATCH = 10;
 
 function getAffordableGymSeries(energy, exerciseCost) {
@@ -261,7 +262,7 @@ export function CityScreen({
                 <View style={styles.listCardHeader}>
                   <View style={styles.flexOne}>
                     <Text style={styles.listCardTitle}>{completion.projectName || completion.projectId}</Text>
-                    <Text style={styles.listCardMeta}>Droga: {completion.choiceName || completion.choiceId} · ukończono {new Date(completion.completedAt).toLocaleDateString("pl-PL")}</Text>
+                    <Text style={styles.listCardMeta}>Droga: {completion.choiceName || completion.choiceId} · ukończono {new Date(completion.completedAt).toLocaleDateString(getIntlLocale())}</Text>
                   </View>
                   <Tag text="DZIEDZICTWO" />
                 </View>

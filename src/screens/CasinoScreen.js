@@ -2,8 +2,9 @@ import React, { useEffect, useState } from "react";
 import { getCasinoGameConfig } from "../game/selectors/authorityFeedback";
 import { CasinoMachinePanel } from "../components/CasinoMachinePanel";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, View } from "react-native";
 
+import { Text, TextInput } from "../i18n";
 function sanitizeCasinoBetInput(value, maxBet) {
   const safeDigits = Math.max(1, String(Math.max(0, Math.floor(Number(maxBet || 0)))).length);
   return value.replace(/[^0-9]/g, "").slice(0, safeDigits) || "0";

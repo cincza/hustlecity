@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { PREMIUM_PACKS, recordPremiumChange } from "../../../shared/premium.js";
+import { isPremiumCheckoutEnabled } from "../../../shared/releaseFeatures.js";
 const fail = (message, statusCode = 400) => { throw Object.assign(new Error(message), { statusCode }); };
 
 export function premiumConfiguration(env = process.env) {
@@ -8,7 +9,7 @@ export function premiumConfiguration(env = process.env) {
     const parsed = new URL(env.PREMIUM_RETURN_URL);
     if (parsed.protocol === "https:" || (parsed.protocol === "http:" && ["127.0.0.1", "localhost"].includes(parsed.hostname))) returnUrl = parsed.href;
   } catch {}
-  return { enabled: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && returnUrl), returnUrl };
+  return { enabled: Boolean(isPremiumCheckoutEnabled(env) && env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && returnUrl), returnUrl };
 }
 export async function createPremiumCheckout(userId, packId, key, { env = process.env, send = fetch, now = Date.now() } = {}) {
   const config = premiumConfiguration(env);

@@ -1080,15 +1080,17 @@ async function main() {
       await request("/contacts/execute", { method: "POST", token: memberToken, body: { methodId, districtId: "neon", mode: "quiet", slot: Math.floor(Date.now() / CONTACT_SLOT_MS) } });
     }
     const completedTeam = (await request("/me", { token })).user.gang;
-    assert.ok(completedTeam.contactNetwork.rewardedAt > 0);
+    const specialistJobActive = completedTeam.jobBoard.some((job) => job.id === "crew-specialists");
+    assert.equal(Boolean(completedTeam.contactNetwork.rewardedAt), specialistJobActive, "specialist reward follows the current weekly board");
+    assert.equal(Object.keys(completedTeam.contactNetwork.members).length, 3);
     assert.equal(completedTeam.jobProgress.contactTeamwork, 3);
     for (const memberToken of [invitedUserLogin.token, noEmailRegisterTwo.token]) {
       const member = (await request("/me", { token: memberToken })).user;
       assert.equal(member.gang.vault, completedTeam.vault);
       assert.deepEqual(member.gang.contactNetwork, completedTeam.contactNetwork);
     }
-    await expectRequestFailure("/gang/identity", { method: "POST", token: invitedUserLogin.token, body: { id: "street" } }, /boss/i);
-    await expectRequestFailure("/gang/identity", { method: "POST", token, body: { id: "noir" } }, /żetonów/i);
+    await expectRequestFailure("/gang/identity", { method: "POST", token: invitedUserLogin.token, body: { id: "street" } }, /wyłączon/i);
+    await expectRequestFailure("/gang/identity", { method: "POST", token, body: { id: "noir" } }, /wyłączon/i);
 
     const postJoinGangState = await request("/me", { token });
     if (Number(postJoinGangState?.user?.gang?.members || 0) < 3) {

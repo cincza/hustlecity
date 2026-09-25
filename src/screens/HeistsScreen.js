@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { HEIST_TIERS, getNextHeistTier, groupHeistsByTier } from "../game/config/heistTiers";
 import { HeistCard, HeistTabs } from "../components/GameShellUI";
 import { getContractTagText } from "../../shared/contracts.js";
 
+import { Text, getIntlLocale } from "../i18n";
 export function HeistsScreen({
   section = "solo",
   heists,
@@ -85,7 +86,7 @@ export function HeistsScreen({
 
   if (section === "contracts") {
     const contractRefreshLabel = safeContractBoard?.nextRefreshAt
-      ? new Date(safeContractBoard.nextRefreshAt).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+      ? new Date(safeContractBoard.nextRefreshAt).toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" })
       : "Brak danych";
 
     return (
@@ -256,7 +257,7 @@ export function HeistsScreen({
             ) : null}
           </View>
         ) : nextTier ? (
-          <Text style={soloStyles.nextTierNote}>Nastepny prog: {nextTier.shortLabel} od {nextTier.unlockRespect} RES</Text>
+          <Text style={soloStyles.nextTierNote}>{`Nastepny prog: ${nextTier.shortLabel} przy ${nextTier.unlockRespect} RES`}</Text>
         ) : null}
       </View>
 

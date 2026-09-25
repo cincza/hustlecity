@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
+import { Pressable, Text } from "../i18n";
 export function MobileSectionNav({ items, activeId, onSelect, icons, styles }) {
   const scroll = useRef(null);
   const positions = useRef({});

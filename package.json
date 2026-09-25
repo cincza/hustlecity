@@ -17,9 +17,11 @@
     "ios:lan": "expo start --lan --port 8090 --ios",
     "ios:tunnel": "expo start --tunnel --port 8090 --ios",
     "web": "expo start --web --port 8090",
-    "export:web": "expo export --platform web",
+    "export:web": "expo export --platform web && node tools/copy-public-pages.mjs",
     "doctor": "npx expo-doctor",
     "check": "node tools/check-source.mjs",
+    "i18n:audit": "node tools/i18n-audit.mjs",
+    "data:external-test": "node tools/external-test-data.mjs",
     "smoke": "node tools/smoke-test.mjs",
     "test": "node --test tools/tests/*.test.mjs"
   },

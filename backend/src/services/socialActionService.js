@@ -91,6 +91,8 @@ export function appendPlayerMessage(player, message) {
       subject: String(message?.subject || "Powiadomienie"),
       preview: String(message?.preview || ""),
       time: message?.time || createTimeLabel(),
+      ...(message?.fromUserId ? { fromUserId: String(message.fromUserId) } : {}),
+      ...(message?.toUserId ? { toUserId: String(message.toUserId) } : {}),
     },
     ...player.online.messages,
   ].slice(0, 20);
@@ -282,11 +284,13 @@ export function addFriendForPlayer(player, targetEntry, now = Date.now()) {
   };
 }
 
-export function sendQuickMessageBetweenPlayers(senderPlayer, targetPlayer, senderName, targetName, now = Date.now()) {
+export function sendQuickMessageBetweenPlayers(senderPlayer, targetPlayer, senderName, targetName, now = Date.now(), identities = {}) {
   return sendPlayerMessageBetweenPlayers(senderPlayer, targetPlayer, {
     senderName,
     targetName,
     now,
+    senderUserId: identities.senderUserId,
+    targetUserId: identities.targetUserId,
   });
 }
 
@@ -297,6 +301,8 @@ export function sendPlayerMessageBetweenPlayers(
     senderName,
     targetName,
     message,
+    senderUserId,
+    targetUserId,
     now = Date.now(),
   } = {}
 ) {
@@ -317,12 +323,16 @@ export function sendPlayerMessageBetweenPlayers(
     subject,
     preview: outboundPreview,
     time: createTimeLabel(now),
+    fromUserId: senderUserId,
+    toUserId: targetUserId,
   });
   appendPlayerMessage(targetPlayer, {
     from: safeSenderName,
     subject,
     preview: inboundPreview,
     time: createTimeLabel(now),
+    fromUserId: senderUserId,
+    toUserId: targetUserId,
   });
 
   return {

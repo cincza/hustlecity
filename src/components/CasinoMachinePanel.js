@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, Text, TextInput, View, StyleSheet } from "react-native";
+import { Pressable, View, StyleSheet } from "react-native";
 import { ECONOMY_RULES } from "../../shared/economy.js";
 import { getCasinoGameConfig } from "../game/selectors/authorityFeedback";
 
+import { Text, TextInput } from "../i18n";
 const names = { red: "Czerwone", black: "Czarne", green: "Zero" };
 const symbols = { '7': '7', BAR: 'BAR', CHERRY: '🍒', LEMON: '🍋', MASK: '◆', CASH: '$', CROWN: '7', DICE: '◇', SKULL: '×' };
 export function CasinoMachinePanel({ mode, state, setState, cash, onSpin, formatMoney }) {

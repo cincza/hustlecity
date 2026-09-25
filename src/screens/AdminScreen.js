@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { HeroPanel } from "../components/GameScreenPrimitives";
+import { Alert, Text, TextInput, getIntlLocale, translateText } from "../i18n";
 import {
   adjustAdminPlayerOnline,
   deleteAdminPlayerAccountOnline,
@@ -15,7 +16,6 @@ import {
 const EDIT_FIELDS = [
   ["cash", "Gotowka"],
   ["bank", "Bank"],
-  ["premiumTokens", "Zetony premium"],
   ["hp", "HP"],
   ["energy", "Energia"],
   ["heat", "Heat"],
@@ -27,6 +27,19 @@ function Button({ label, onPress, danger = false, disabled = false }) {
       <Text style={[localStyles.buttonText, danger && localStyles.buttonTextDanger]}>{label}</Text>
     </Pressable>
   );
+}
+
+function compactEntries(value, limit = 10) {
+  if (!value || typeof value !== "object") return "brak";
+  const entries = Object.entries(value).filter(([, item]) => Number(item?.count ?? item ?? 0) > 0 || (item && typeof item === "object"));
+  if (!entries.length) return "brak";
+  const visible = entries.slice(0, limit).map(([key, item]) => `${key}: ${typeof item === "object" ? item.count ?? "tak" : item}`);
+  return `${visible.join(" · ")}${entries.length > limit ? ` · +${entries.length - limit}` : ""}`;
+}
+
+function auditState(entry) {
+  const state = entry && typeof entry === "object" ? entry : {};
+  return `cash ${state.cash ?? "-"} · bank ${state.bank ?? "-"} · HP ${state.hp ?? "-"} · EN ${state.energy ?? "-"} · Heat ${state.heat ?? "-"} · RES ${state.respect ?? "-"}`;
 }
 
 export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
@@ -88,7 +101,7 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
 
   const confirm = (title, message, action, confirmLabel = "Potwierdz") => {
     if (Platform.OS === "web" && typeof globalThis.confirm === "function") {
-      if (globalThis.confirm(`${title}\n\n${message}`)) action();
+      if (globalThis.confirm(`${translateText(title)}\n\n${translateText(message)}`)) action();
       return;
     }
     Alert.alert(title, message, [
@@ -137,7 +150,7 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
         <View style={localStyles.playerGrid}>
           {players.map((player) => (
             <Pressable key={player.id} onPress={() => loadDetail(player.id).catch((nextError) => setError(nextError.message))} style={[localStyles.playerCard, selectedId === player.id && localStyles.playerCardActive]}>
-              <Text style={localStyles.playerName}>{player.username}{player.isAdmin ? " · ADMIN" : ""}</Text>
+              <Text translate={false} style={localStyles.playerName}>{player.username}{player.isAdmin ? " · ADMIN" : ""}</Text>
               <Text style={localStyles.meta}>RES {player.respect} · {formatMoney(player.cash + player.bank)} · {player.classId || "bez klasy"}</Text>
               <Text style={[localStyles.status, player.authDisabled && localStyles.statusDanger]}>{player.authDisabled ? "ZABLOKOWANY" : player.online ? "ONLINE" : "OFFLINE"}</Text>
             </Pressable>
@@ -150,6 +163,7 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
           <SectionCard title={detail.username} subtitle={`ID ${detail.id} · rewizja ${detail.stateRevision}`}>
             <View style={localStyles.metricGrid}>
               <Text style={localStyles.metric}>Klasa: {detail.classId || "nie wybrana"}</Text>
+              <Text style={localStyles.metric}>RES / XP: {detail.respect} / {detail.xp}</Text>
               <Text style={localStyles.metric}>Gang: {detail.gang || "brak"}</Text>
               <Text style={localStyles.metric}>HP: {detail.hp}/{detail.maxHp}</Text>
               <Text style={localStyles.metric}>Energia: {detail.energy}/{detail.maxEnergy}</Text>
@@ -163,6 +177,14 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
               <Text style={localStyles.metric}>Rywal: {detail.activeRival || "brak"}</Text>
             </View>
             <TextInput value={reason} onChangeText={setReason} placeholder="Powod zmiany (opcjonalnie)" placeholderTextColor="#777" style={[localStyles.input, localStyles.reason]} />
+          </SectionCard>
+
+          <SectionCard title="Pełny stan QA" subtitle="Najważniejszy progres i własności bez danych logowania.">
+            <View style={localStyles.detailBlock}><Text style={localStyles.detailTitle}>Profesje i kontakty</Text><Text style={localStyles.detailText}>Poznane: {(detail.classState?.learned || []).join(", ") || "brak"} · specjalizacje: {(detail.specializations || []).join(", ") || "brak"} · umowy: {detail.classState?.completed || 0}</Text></View>
+            <View style={localStyles.detailBlock}><Text style={localStyles.detailTitle}>Inventory</Text><Text style={localStyles.detailText}>{compactEntries(detail.inventory)}</Text><Text style={localStyles.detailText}>Towar: {compactEntries(detail.drugInventory)}</Text></View>
+            <View style={localStyles.detailBlock}><Text style={localStyles.detailTitle}>Biznesy i fabryki</Text><Text style={localStyles.detailText}>Biznesy: {(detail.businesses || []).filter((item) => Number(item?.count || 0) > 0).map((item) => `${item.id || item.name} × ${item.count}`).join(" · ") || "brak"}</Text><Text style={localStyles.detailText}>Fabryki: {compactEntries(detail.factories)}</Text></View>
+            <View style={localStyles.detailBlock}><Text style={localStyles.detailTitle}>Klub i gang</Text><Text style={localStyles.detailText}>Klub: {detail.club?.owned ? `${detail.club.name || detail.club.sourceId} · sejf ${detail.club.safeCash || 0}` : "brak"}</Text><Text style={localStyles.detailText}>Gang: {detail.gangState?.joined ? `${detail.gangState.name} · ${detail.gangState.role} · skarbiec ${detail.gangState.vault || 0}` : "brak"}</Text></View>
+            <View style={localStyles.detailBlock}><Text style={localStyles.detailTitle}>Plan, operacja, rywal, Imperium</Text><Text style={localStyles.detailText}>Plan: {detail.activePlan || "brak"} · operacja: {detail.activeOperation || "brak"} · rywal: {detail.activeRival || "brak"}</Text><Text style={localStyles.detailText}>Projekty: {compactEntries(detail.empireProjects?.projects || detail.empireProjects)}</Text></View>
           </SectionCard>
 
           <SectionCard title="Korekta stanu" subtitle="Ustaw konkretna wartosc. Backend pilnuje pol i bezpiecznych zakresow.">
@@ -189,8 +211,10 @@ export function AdminScreen({ token, styles, SectionCard, formatMoney }) {
             {audit.length ? audit.map((entry) => (
               <View key={entry.id} style={localStyles.auditRow}>
                 <Text style={localStyles.auditTitle}>{entry.operation}</Text>
-                <Text style={localStyles.meta}>{entry.adminUsername} · {new Date(entry.createdAt).toLocaleString("pl-PL")}</Text>
+                <Text style={localStyles.meta}>{entry.adminUsername} · {new Date(entry.createdAt).toLocaleString(getIntlLocale())}</Text>
                 {entry.reason ? <Text style={localStyles.auditReason}>{entry.reason}</Text> : null}
+                <Text style={localStyles.auditState}>Przed: {auditState(entry.before)}</Text>
+                <Text style={localStyles.auditState}>Po: {auditState(entry.after)}</Text>
               </View>
             )) : <Text style={styles.emptyText}>Brak operacji administracyjnych dla tego konta.</Text>}
           </SectionCard>
@@ -227,4 +251,8 @@ const localStyles = StyleSheet.create({
   auditRow: { borderBottomWidth: 1, borderBottomColor: "#292c32", paddingVertical: 10 },
   auditTitle: { color: "#f0c76b", fontWeight: "900" },
   auditReason: { color: "#d9d4cc", marginTop: 5 },
+  auditState: { color: "#8e949f", marginTop: 3, fontSize: 10 },
+  detailBlock: { borderBottomWidth: 1, borderBottomColor: "#292c32", paddingVertical: 10, gap: 4 },
+  detailTitle: { color: "#f0c76b", fontWeight: "900", fontSize: 12 },
+  detailText: { color: "#c9c5be", lineHeight: 19, fontSize: 12 },
 });

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE } from "../utils/uiEffects";
 
+import { Text } from "../i18n";
 function getHpTone(ratio) {
   if (ratio <= 0.3) {
     return {

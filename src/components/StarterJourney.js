@@ -1,7 +1,8 @@
 import React, { useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { getTaskDestination } from "../../shared/taskGuidance.js";
 
+import { Text } from "../i18n";
 export function StarterJourney({ journey, onNavigate, onClaim, formatMoney, nextUnlock, recovery }) {
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);

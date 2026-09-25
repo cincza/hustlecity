@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 
+import { Text } from "../i18n";
 const LOADOUT_LABELS = {
   weapon: "Bron",
   armor: "Ochrona",
@@ -138,7 +139,7 @@ export function ProfileScreen({
 
             <View style={localStyles.identityCopy}>
               <View>
-                <Text style={localStyles.identityName}>{game.player.name}</Text>
+                <Text translate={false} style={localStyles.identityName}>{game.player.name}</Text>
                 <Text style={styles.listCardMeta}>{getRankTitle(game.player.respect)} • RES {game.player.respect}</Text>
               </View>
 

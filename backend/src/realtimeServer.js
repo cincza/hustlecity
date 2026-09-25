@@ -133,6 +133,17 @@ export function createRealtimeServer({ server, findUserById, path = "/realtime" 
     });
   }
 
+  function disconnectUser(userId, code = 4001, reason = "Account unavailable") {
+    const safeUserId = String(userId || "").trim();
+    const userSockets = socketsByUserId.get(safeUserId);
+    if (!userSockets?.size) return 0;
+    const openSockets = [...userSockets];
+    openSockets.forEach((socket) => {
+      try { socket.close(code, reason); } catch (_error) { try { socket.terminate(); } catch {} }
+    });
+    return openSockets.length;
+  }
+
   function notifyGang(gangName, event) {
     const gangKey = normalizeGangKey(gangName);
     if (!gangKey || !event) return;
@@ -262,6 +273,7 @@ export function createRealtimeServer({ server, findUserById, path = "/realtime" 
     syncUserRecord,
     broadcast,
     notifyUsers,
+    disconnectUser,
     notifyGang,
     notifyClub,
     broadcastInvalidation,

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, Pressable, Linking, StyleSheet } from "react-native";
+import { View, Pressable, Linking, StyleSheet } from "react-native";
 import { request } from "../game/api/client";
 import { GANG_IDENTITIES } from "../../shared/premium.js";
 import { getGangNetworkProgress } from "../../shared/gangIdentity.js";
 
+import { Text } from "../i18n";
 export default function PremiumPanel({ game, token, onUser, gangOnly = false }) {
   const [catalog, setCatalog] = useState(null), [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   useEffect(() => {

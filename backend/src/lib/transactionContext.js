@@ -15,6 +15,8 @@ export async function inTransactionContext(handler) {
     authentication: new Map(),
     deletedUsers: new Map(),
     adminAudits: [],
+    accountDeletionCleanups: [],
+    adminAuditRedactions: new Set(),
     afterCommit: [],
     cleanup: [],
   };

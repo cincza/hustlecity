@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { USE_NATIVE_DRIVER } from "../utils/uiEffects";
+import { Text } from "../i18n";
 import {
   ARENA_BOOSTS,
   ARENA_MODES,

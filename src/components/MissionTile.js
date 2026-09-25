@@ -1,9 +1,10 @@
 import React, { useMemo, useRef, useState } from "react";
 import { getTaskDestination } from "../../shared/taskGuidance.js";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE, createShadowStyle } from "../utils/uiEffects";
 
+import { Pressable, Text } from "../i18n";
 function getTilePalette(task) {
   if (task?.completed && !task?.onlineDisabled) {
     return {

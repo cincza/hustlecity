@@ -3,6 +3,7 @@ export const OPERATION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export function isTransactionalAction(path, method = "POST") {
   if (method !== "POST") return false;
   if (/^\/premium\//.test(path)) return true;
+  if (path === "/account/delete") return true;
   if (/^\/contacts\//.test(path)) return true;
   if (/^\/city-event\//.test(path)) return true;
   if (/^\/plans\//.test(path)) return true;

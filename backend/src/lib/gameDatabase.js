@@ -92,6 +92,10 @@ async function initialize() {
       );
       CREATE INDEX IF NOT EXISTS admin_audit_created_at ON admin_audit(created_at DESC);
       CREATE INDEX IF NOT EXISTS admin_audit_target_id ON admin_audit(target_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS account_deletion_cleanup (
+        user_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, completed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS account_deletion_cleanup_pending ON account_deletion_cleanup(completed_at, created_at);
       CREATE TABLE IF NOT EXISTS world_documents (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, document TEXT NOT NULL CHECK (json_valid(document)));`);
     const imported = db.prepare("SELECT value FROM metadata WHERE key = 'legacy-users-import'").get();
     if (!imported) {
@@ -217,6 +221,38 @@ export function stageAdminAudit(entry) {
   return record;
 }
 
+export function stageAccountDeletionCleanup(userId, createdAt = Date.now()) {
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId) throw new Error("Account deletion cleanup requires a user id");
+  const context = currentTransaction();
+  const record = { userId: safeUserId, createdAt: Number(createdAt || Date.now()) };
+  if (context) context.accountDeletionCleanups.push(record);
+  else return getGameDatabase().then((db) => {
+    db.prepare("INSERT INTO account_deletion_cleanup (user_id, created_at, completed_at) VALUES (?, ?, NULL) ON CONFLICT(user_id) DO UPDATE SET created_at = excluded.created_at, completed_at = NULL")
+      .run(record.userId, record.createdAt);
+    return record;
+  });
+  return record;
+}
+
+export function stageAdminAuditRedaction(userId) {
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId) return;
+  const context = currentTransaction();
+  if (context) context.adminAuditRedactions.add(safeUserId);
+}
+
+export async function readPendingAccountDeletionCleanups() {
+  const db = await getGameDatabase();
+  return db.prepare("SELECT user_id AS userId, created_at AS createdAt FROM account_deletion_cleanup WHERE completed_at IS NULL ORDER BY created_at").all();
+}
+
+export async function completeAccountDeletionCleanup(userId, completedAt = Date.now()) {
+  const db = await getGameDatabase();
+  return db.prepare("UPDATE account_deletion_cleanup SET completed_at = ? WHERE user_id = ? AND completed_at IS NULL")
+    .run(Number(completedAt || Date.now()), String(userId || "")).changes;
+}
+
 async function writeAdminAudit(record) {
   const db = await getGameDatabase();
   db.prepare("INSERT INTO admin_audit (id, admin_id, admin_username, target_id, target_username, operation, before_document, after_document, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -334,7 +370,22 @@ export async function commitGameTransaction(context, receipt = null) {
       db.prepare("INSERT INTO admin_audit (id, admin_id, admin_username, target_id, target_username, operation, before_document, after_document, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .run(audit.id, audit.adminId, audit.adminUsername, audit.targetId, audit.targetUsername, audit.operation, JSON.stringify(audit.before), JSON.stringify(audit.after), audit.reason, audit.createdAt);
     }
-    if (receipt) db.prepare("INSERT INTO operation_receipts (actor_id, operation_key, request_hash, status, response, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    for (const userId of context.adminAuditRedactions || []) {
+      const rows = db.prepare("SELECT id, before_document, after_document FROM admin_audit WHERE target_id = ?").all(userId);
+      const redact = (value) => {
+        let parsed;
+        try { parsed = JSON.parse(value); } catch { return value; }
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) parsed.username = "deleted-account";
+        return JSON.stringify(parsed);
+      };
+      const update = db.prepare("UPDATE admin_audit SET target_username = NULL, before_document = ?, after_document = ? WHERE id = ?");
+      for (const row of rows) update.run(redact(row.before_document), redact(row.after_document), row.id);
+    }
+    for (const cleanup of context.accountDeletionCleanups || []) {
+      db.prepare("INSERT INTO account_deletion_cleanup (user_id, created_at, completed_at) VALUES (?, ?, NULL) ON CONFLICT(user_id) DO UPDATE SET created_at = excluded.created_at, completed_at = NULL")
+        .run(cleanup.userId, cleanup.createdAt);
+    }
+    if (receipt && !context.deletedUsers?.has(receipt.actorId)) db.prepare("INSERT INTO operation_receipts (actor_id, operation_key, request_hash, status, response, created_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(receipt.actorId, receipt.key, receipt.hash, receipt.status, gzipSync(JSON.stringify(receipt.body)), Date.now());
     const cleanupAt = Date.now();
     const cleanupDue = cleanupAt - lastReceiptCleanup >= 60 * 60 * 1000;

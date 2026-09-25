@@ -4,6 +4,8 @@ import { buyGangIdentity, recordGangCityResponse, recordGangDirectorResponse, re
 import { advanceCityDirectorState, applyCityEventMarketQuote, applyCityEventToMarketView, createCityDirectorState, getCityEventAt, getCityEventResponse, normalizePlayerDirector, respondToCityEvent } from "../../shared/cityDirector.js";
 import { abandonSessionPlan, acceptSessionPlan, claimSessionPlan, createSessionPlanState, getSessionPlanBoard, normalizeSessionPlanState } from "../../shared/sessionPlans.js";
 import { premiumConfiguration, createPremiumCheckout, verifyPremiumWebhook, fulfillPremiumOrder } from "./services/premiumService.js";
+import { prepareAccountDeletion } from "./services/accountDeletionService.js";
+import { isPremiumCheckoutEnabled } from "../../shared/releaseFeatures.js";
 import { executeContactAction, normalizeContacts } from "../../shared/contacts.js";
 import { recordGangJobProgress as recordContactGangProgress } from "../../shared/gangProjects.js";
 import { getSoloHeistOdds } from "../../shared/heists.js";
@@ -64,6 +66,9 @@ import {
   initUserStore,
   listUsers,
   listAdminAudits,
+  queueAccountDeletionCleanup,
+  redactAdminAuditsForUser,
+  completeOwnedChatCleanup,
   saveUserPlayerData,
   updateUserAuthentication,
 } from "./repositories/userRepository.js";
@@ -402,6 +407,41 @@ function recordAdminAudit(actor, target, operation, before, after, reason = null
     after,
     reason: adminReason(reason),
   });
+}
+
+async function deleteAccountCompletely(targetUserId, { actor = null, reason = null, now = Date.now() } = {}) {
+  const preview = await listUsers();
+  const targetPreview = preview.find((entry) => entry?._id === targetUserId);
+  if (!targetPreview?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
+  const allIds = preview.map((entry) => entry._id).filter(Boolean);
+  let result;
+  await withUserMutationLocks(allIds, `account-delete:${targetUserId}`, async () => {
+    const records = await listUsers();
+    const prepared = prepareAccountDeletion(records, targetUserId, now);
+    for (const record of prepared.changedRecords) await persistPlayerForUser(record._id, record.playerData);
+    const before = buildAdminPlayerSnapshot(prepared.target);
+    await queueAccountDeletionCleanup(targetUserId, now);
+    await deleteUserById(targetUserId);
+    if (actor) recordAdminAudit(actor, prepared.target, "player.delete", before, { ...before, username: "deleted-account", deleted: true }, reason);
+    redactAdminAuditsForUser(targetUserId);
+    result = {
+      deletedUserId: targetUserId,
+      successorId: prepared.successorId,
+      gangName: prepared.gangName,
+    };
+  });
+  afterCommit(() => {
+    state.activeUsers.delete(targetUserId);
+    realtime.disconnectUser(targetUserId);
+    void completeOwnedChatCleanup(targetUserId).catch((error) => logMutationFailure({
+      actionName: "account-delete-chat-cleanup",
+      userId: targetUserId,
+      reason: error?.message || "unknown",
+    }));
+    emitSocialRealtimeUpdate("account.delete");
+    if (result?.gangName) emitGangRealtimeUpdate({ gangNames: [result.gangName], reason: "account.delete" });
+  });
+  return result;
 }
 
 app.use(
@@ -2308,6 +2348,23 @@ app.get("/me", auth, asyncHandler(async (req, res) => {
     });
 }));
 
+app.post("/account/delete", auth, asyncHandler(async (req, res) => {
+  if (!enforceRateLimit(req, res, "account-delete", 1200, "Account deletion rate limit active")) return;
+  const current = await findUserById(req.user.id);
+  if (!current?.playerData) return res.status(401).json({ error: "Authenticated player not found" });
+  if (isAdminUsername(current.username)) return res.status(400).json({ error: "Admin account cannot delete itself" });
+  const confirmation = sanitizeAuthInput(req.body?.confirmUsername);
+  const password = String(req.body?.password || "");
+  if (confirmation.toLowerCase() !== current.username.toLowerCase()) {
+    return res.status(400).json({ error: "Type your current username to confirm account deletion" });
+  }
+  if (!password || !(await bcrypt.compare(password, current.passwordHash))) {
+    return res.status(401).json({ error: "Current password is invalid" });
+  }
+  const result = await deleteAccountCompletely(current._id);
+  res.json({ result: { ok: true, deleted: true, deletedUserId: result.deletedUserId } });
+}));
+
 app.get("/admin/players", auth, asyncHandler(async (req, res) => {
   if (!requireAdminRequest(req, res)) return;
   await requireCurrentAdmin(req);
@@ -2669,15 +2726,11 @@ app.post("/admin/players/delete-account", auth, asyncHandler(async (req, res) =>
     return;
   }
 
-  await withUserMutationLocks([req.user.id, targetRecord._id], `admin-delete-account:${targetRecord._id}`, async () => {
-    const currentActor = await requireCurrentAdmin(req);
-    const currentTarget = await findUserById(targetRecord._id);
-    if (!currentTarget?.playerData) throw Object.assign(new Error("Target player not found"), { statusCode: 404 });
-    const before = buildAdminPlayerSnapshot(currentTarget);
-    await deleteUserById(currentTarget._id);
-    recordAdminAudit(currentActor, currentTarget, "player.delete", before, { ...before, deleted: true }, req.body?.reason);
+  const currentActor = await requireCurrentAdmin(req);
+  const deletion = await deleteAccountCompletely(targetRecord._id, {
+    actor: currentActor,
+    reason: req.body?.reason,
   });
-  state.activeUsers.delete(targetRecord._id);
 
   logInfo("admin", "delete-account", {
     adminUserId: req.user.id,
@@ -2691,6 +2744,7 @@ app.post("/admin/players/delete-account", auth, asyncHandler(async (req, res) =>
       ok: true,
       login,
       deletedUserId: targetRecord._id,
+      successorId: deletion.successorId,
       message: `Usunieto konto ${login}.`,
     },
   });
@@ -2944,6 +2998,8 @@ app.post("/social/friends/:id", auth, asyncHandler(async (req, res) => {
       subject: "Nowe zaproszenie do znajomych",
       preview: `${actorName} chce dodac Cie do znajomych.`,
       time: new Date(now).toISOString(),
+      fromUserId: actorRecord._id,
+      toUserId: targetRecord._id,
     });
     pushLog(actor, result.logMessage);
     pushLog(target, `${actorName} wysyla Ci zaproszenie do znajomych.`);
@@ -3026,8 +3082,13 @@ app.post("/social/messages/:id", auth, asyncHandler(async (req, res) => {
           targetName,
           message: rawMessage,
           now,
+          senderUserId: actorRecord._id,
+          targetUserId: targetRecord._id,
         })
-      : sendQuickMessageBetweenPlayers(actor, target, actorName, targetName, now);
+      : sendQuickMessageBetweenPlayers(actor, target, actorName, targetName, now, {
+          senderUserId: actorRecord._id,
+          targetUserId: targetRecord._id,
+        });
     pushLog(actor, result.logMessage);
     pushLog(target, rawMessage ? `${actorName} wysyla Ci prywatna wiadomosc.` : `${actorName} zostawia Ci szybka wiadomosc.`);
 
@@ -3406,7 +3467,8 @@ app.post("/player/jail/bribe", auth, asyncHandler(async (req, res) => {
 }));
 
 app.get("/premium/catalog", auth, asyncHandler(async (_req, res) => {
-  res.json({ enabled: premiumConfiguration().enabled, packs: PREMIUM_PACKS });
+  const enabled = premiumConfiguration().enabled;
+  res.json({ enabled, packs: enabled ? PREMIUM_PACKS : [] });
 }));
 app.post("/premium/checkout", auth, asyncHandler(async (req, res) => {
   const order = await createPremiumCheckout(req.user.id, req.body?.packId, req.get("Idempotency-Key") || crypto.randomUUID());
@@ -3415,6 +3477,7 @@ app.post("/premium/checkout", auth, asyncHandler(async (req, res) => {
   res.json({ url: order.url });
 }));
 app.post("/premium/webhook", asyncHandler(async (req, res) => {
+  if (!isPremiumCheckoutEnabled()) return res.status(503).json({ code: "premium_disabled", error: "Płatności są wyłączone." });
   const event = verifyPremiumWebhook(req.paymentRawBody, req.get("Stripe-Signature"), process.env.STRIPE_WEBHOOK_SECRET);
   if (!["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(event.type) || event.data.object.payment_status !== "paid") return res.json({ received: true });
   const id = `premium-order:${event.data.object.id}`;
@@ -3547,6 +3610,9 @@ app.post("/plans/claim", auth, asyncHandler(async (req, res) => {
 }));
 
 app.post("/contacts/:action", auth, asyncHandler(async (req, res) => {
+  if (!isPremiumCheckoutEnabled() && (req.params.action === "cosmetic" || (req.params.action === "class" && req.player.contacts?.classId))) {
+    return res.status(503).json({ code: "premium_disabled", error: "Płatności są wyłączone." });
+  }
   const now = Date.now();
   let result;
   const perform = (player) => {
@@ -4598,6 +4664,7 @@ app.get("/gangs", auth, asyncHandler(async (_req, res) => {
 }));
 
 app.post("/gang/identity", auth, asyncHandler(async (req, res) => {
+  if (!isPremiumCheckoutEnabled()) return res.status(503).json({ code: "premium_disabled", error: "Płatności są wyłączone." });
   const now = Date.now(); let result;
   await withGangMutation(req, "gang-identity", async (entries) => {
     const actor = getGangMutationActor(entries, req.user.id, now);
@@ -4775,6 +4842,8 @@ app.post("/gang/invite", auth, asyncHandler(async (req, res) => {
       subject: "Zaproszenie do gangu",
       preview: `${liveGang.name} chce Cie w ekipie. Wejscie od ${liveGang.inviteRespectMin} szacunu.`,
       time: new Date(now).toISOString(),
+      fromUserId: actorRecord._id,
+      toUserId: targetRecord._id,
     });
     pushLog(actor, `Zaproszenie wyslane do ${target.profile?.name || targetRecord.username || "gracza"}.`);
     pushLog(target, `${liveGang.name} wysyla Ci zaproszenie do gangu.`);

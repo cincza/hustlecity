@@ -2,13 +2,15 @@ import React, { useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import PremiumPanel from "../components/PremiumPanel";
 import { CONTACT_SPECIALIZATIONS } from "../../shared/contacts";
-import { View, Text, Pressable, ScrollView, StyleSheet } from "react-native";
+import { View, ScrollView, StyleSheet } from "react-native";
 import { request } from "../game/api/client";
 import { CONTACT_CLASSES, CONTACT_COSMETICS, CONTACT_SLOT_MS, normalizeContacts, getContactQuote, contactMilestones } from "../../shared/contacts";
 import { DISTRICTS } from "../../shared/districts";
 import { getCitySituation } from "../../shared/cityStories";
 import CityEventPanel from "../components/CityEventPanel";
+import { MONETIZATION_VISIBLE } from "../../shared/releaseFeatures";
 
+import { Pressable, Text, getIntlLocale } from "../i18n";
 export default function ContactsScreen({ game, token, onUser, initial = false }) {
   const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const [mode, setMode] = useState("quiet"), [selected, setSelected] = useState(null);
@@ -40,7 +42,7 @@ export default function ContactsScreen({ game, token, onUser, initial = false })
     <Text style={styles.eyebrow}>{initial ? "PIERWSZY UKŁAD" : "SIEĆ KONTAKTÓW"}</Text>
     <Text style={[styles.title, { color }]}>{initial ? "Jak wejdziesz do miasta?" : "Kontakty miasta"}</Text>
     {(cosmetic || title) && <Text style={[styles.heading, { color }]}>{[title, cosmetic?.name].filter(Boolean).join(" · ")}</Text>}
-    <Text style={styles.lead}>{initial ? "Wybierz przewagę i człowieka, który odbierze twój pierwszy telefon. Każda droga prowadzi przez całą grę; zmienia decyzje, koszty i wyjścia z kłopotów." : `${s.completed} zamkniętych umów · ${game.player.premiumTokens || 0} żetonów · Heat ${Math.round(game.player.heat || 0)}`}</Text>
+    <Text style={styles.lead}>{initial ? "Wybierz przewagę i człowieka, który odbierze twój pierwszy telefon. Każda droga prowadzi przez całą grę; zmienia decyzje, koszty i wyjścia z kłopotów." : `${s.completed} zamkniętych umów · Heat ${Math.round(game.player.heat || 0)}`}</Text>
     {initial ? <View style={styles.promise}><MaterialCommunityIcons name="shield-check-outline" size={20} color="#e6c176" /><Text style={styles.promiseText}>Nic sobie nie zamykasz. Kolejne profesje poznasz przez grę, a klasę możesz później zmienić bez utraty postępu.</Text></View> : null}
     {!initial && <CityEventPanel game={game} token={token} onUser={onUser} compact />}
     {!!message && <Text accessibilityLiveRegion="polite" style={styles.notice}>{message}</Text>}
@@ -55,7 +57,7 @@ export default function ContactsScreen({ game, token, onUser, initial = false })
       <View style={styles.strengthRow}>{c.strengths.map((strength) => <View key={strength} style={styles.strengthChip}><Text style={styles.strengthText}>{strength}</Text></View>)}</View>
       <Text style={styles.contactQuote}>„{c.voice}”</Text>
       <Text style={styles.mechanicsLabel}>W GRZE</Text><Text style={styles.mechanicsText}>{c.text}</Text>
-      {!s.classId ? button(`Wejdź jako ${c.name}`, () => act("class", { classId: c.id })) : s.learned.includes(c.id) ? <View style={styles.actionStack}>{button(method === c.id ? "Ta metoda jest aktywna" : `Działaj jako ${c.name}`, () => setSelected(c.id), method === c.id)}{s.classId !== c.id && button("Ustaw jako główną klasę · 3 żetony", () => act("class", { classId: c.id }), (game.player.premiumTokens || 0) < 3, true)}</View> : button(`Poznaj kontakt · wymaga ${s.learned.length * 6} zleceń`, () => act("learn", { classId: c.id }), s.completed < s.learned.length * 6)}
+      {!s.classId ? button(`Wejdź jako ${c.name}`, () => act("class", { classId: c.id })) : s.learned.includes(c.id) ? <View style={styles.actionStack}>{button(method === c.id ? "Ta metoda jest aktywna" : `Działaj jako ${c.name}`, () => setSelected(c.id), method === c.id)}{MONETIZATION_VISIBLE && s.classId !== c.id && button("Ustaw jako główną klasę · 3 żetony", () => act("class", { classId: c.id }), (game.player.premiumTokens || 0) < 3, true)}</View> : button(`Poznaj kontakt · wymaga ${s.learned.length * 6} zleceń`, () => act("learn", { classId: c.id }), s.completed < s.learned.length * 6)}
     </View>)}
     {!!s.classId && <>
       <View style={[styles.methodBrief, { borderColor: activeClass.accent }]}><Text style={styles.eyebrow}>AKTYWNA METODA · {activeClass.name.toUpperCase()}</Text><Text style={styles.contactQuote}>„{activeClass.voice}”</Text></View>
@@ -88,7 +90,7 @@ export default function ContactsScreen({ game, token, onUser, initial = false })
           <View style={styles.districtHeader}><View style={[styles.districtIcon, { backgroundColor: `${d.accent}1F` }]}><MaterialCommunityIcons name={d.icon} size={22} color={d.accent} /></View><View style={styles.classIdentity}><Text style={[styles.heading, { color: d.accent }]}>{d.name}</Text><Text style={styles.eyebrow}>{q.condition.label} · {q.pressure}</Text></View></View>
           <Text style={styles.classFantasy}>{d.signature}</Text>
           <Text style={styles.text}>{d.streetLine}</Text>
-          <Text style={styles.text}>Poziom kontaktu {q.tier} · presja: {q.pressure} · warunki do {new Date(q.condition.endsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text>
+          <Text style={styles.text}>Poziom kontaktu {q.tier} · presja: {q.pressure} · warunki do {new Date(q.condition.endsAt).toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" })}</Text>
           <View style={styles.dealRow}><View style={styles.dealStat}><Text style={styles.mechanicsLabel}>WYPŁATA</Text><Text style={styles.dealValue}>${q.reward}</Text></View><View style={styles.dealStat}><Text style={styles.mechanicsLabel}>SZANSA</Text><Text style={styles.dealValue}>{Math.round(q.chance * 100)}%</Text></View><View style={styles.dealStat}><Text style={styles.mechanicsLabel}>HEAT</Text><Text style={styles.dealValue}>{q.heat > 0 ? "+" : ""}{q.heat}</Text></View></View>
           <Text style={styles.mechanicsText}>Wkład: ${q.cost}{q.quantity ? ` + ${q.quantity} × ${q.goods === "spirytus" ? "Spirytus" : "Fajki"} (${q.source === "production" ? "produkcja" : "rynek"})` : ""} · {q.energy} EN{q.damage ? ` · ${q.damage} HP` : ""} · {q.xp} XP</Text>
           {q.pressureOpportunity > 1 && <Text style={styles.notice}>Wysoka presja podbija wypłatę pilnego zlecenia o {Math.round((q.pressureOpportunity - 1) * 100)}%, ale obniża szansę i zwiększa ślad.</Text>}
@@ -100,12 +102,14 @@ export default function ContactsScreen({ game, token, onUser, initial = false })
         </View>;
       })}
       <Text style={styles.text}>Po 9 zleceniach i 5 RES kontakt rozwija się na poziom 2; po 24 i 15 RES na poziom 3. Potrzebuje zaplecza: biznesu, fabryki, klubu, 25 sprzedanych towarów lub ukończonej operacji — zależnie od profesji. Zlecenia w dzielnicy gangu liczą się do wspólnego zadania „Sieć kontaktów”.</Text>
-      <Text style={styles.heading}>Cele i żetony</Text>
-      {button(`Tydzień: ${s.weekCount}/9 · odbierz 2 żetony${s.weekClaimed ? " · odebrane" : ""}`, () => act("weekly"), s.weekCount < 9 || s.weekClaimed)}
-      {milestones.map((m) => <View key={m.id} style={styles.card}><Text style={styles.heading}>{m.title}{m.claimed ? " · zdobyty" : ""}</Text><Text style={styles.text}>{m.text}</Text><Text style={styles.text}>{m.progress}</Text>{button(`${m.cost ? "Ufunduj i odbierz" : "Odbierz"} · żetony: ${m.tokens}${m.cost ? ` · $${m.cost}` : ""}`, () => act("milestone", { id: m.id }), !m.ready || m.claimed || game.player.cash < m.cost)}</View>)}
-      <Text style={styles.heading}>Wizytówka</Text><Text style={styles.text}>Żetony kupują wygląd i zmianę wypracowanej profesji. Nie kupują energii, pieniędzy ani statystyk.</Text>
-      <PremiumPanel game={game} token={token} onUser={onUser} />
-      {CONTACT_COSMETICS.map((c) => <View key={c.id}>{button(`${c.name} · ${s.cosmetics.includes(c.id) ? "posiadasz" : `${c.cost} żetony`}`, () => act("cosmetic", { id: c.id }), s.cosmetic === c.id || (!s.cosmetics.includes(c.id) && (game.player.premiumTokens || 0) < c.cost))}</View>)}
+      {MONETIZATION_VISIBLE ? <>
+        <Text style={styles.heading}>Cele i żetony</Text>
+        {button(`Tydzień: ${s.weekCount}/9 · odbierz 2 żetony${s.weekClaimed ? " · odebrane" : ""}`, () => act("weekly"), s.weekCount < 9 || s.weekClaimed)}
+        {milestones.map((m) => <View key={m.id} style={styles.card}><Text style={styles.heading}>{m.title}{m.claimed ? " · zdobyty" : ""}</Text><Text style={styles.text}>{m.text}</Text><Text style={styles.text}>{m.progress}</Text>{button(`${m.cost ? "Ufunduj i odbierz" : "Odbierz"} · żetony: ${m.tokens}${m.cost ? ` · $${m.cost}` : ""}`, () => act("milestone", { id: m.id }), !m.ready || m.claimed || game.player.cash < m.cost)}</View>)}
+        <Text style={styles.heading}>Wizytówka</Text><Text style={styles.text}>Żetony kupują wygląd i zmianę wypracowanej profesji. Nie kupują energii, pieniędzy ani statystyk.</Text>
+        <PremiumPanel game={game} token={token} onUser={onUser} />
+        {CONTACT_COSMETICS.map((c) => <View key={c.id}>{button(`${c.name} · ${s.cosmetics.includes(c.id) ? "posiadasz" : `${c.cost} żetony`}`, () => act("cosmetic", { id: c.id }), s.cosmetic === c.id || (!s.cosmetics.includes(c.id) && (game.player.premiumTokens || 0) < c.cost))}</View>)}
+      </> : null}
       {s.history.length > 0 && <Text style={styles.heading}>Ostatnie umowy</Text>}
       {s.history.map((h, i) => <Text key={`${h.at}-${i}`} style={styles.text}>{DISTRICTS.find((d) => d.id === h.districtId)?.name} · {h.success ? `+$${h.gain}` : "Przechwycono"}</Text>)}
     </>}

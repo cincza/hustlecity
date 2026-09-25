@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
+import { Text, TextInput } from "../i18n";
 export function BankTransferPanel({ cash, bank, amountDraft, setAmountDraft, onDeposit, onWithdraw, formatMoney, recentTransfers = [], feedback }) {
   const [direction, setDirection] = useState("deposit");
   const [busy, setBusy] = useState(false);

@@ -1,9 +1,10 @@
 import React from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 import { getContextActions } from "../../shared/contextActions.js";
 import SessionPlanBoard from "../components/SessionPlanBoard";
 
+import { Text } from "../i18n";
 export function HubScreen({
   game,
   styles,

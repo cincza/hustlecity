@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { OPERATION_CATALOG, OPERATION_STAGE_ORDER, OPERATION_STAGE_LABELS, OPERATION_PHASES, normalizeOperationsState, getOperationById, getOperationChoicesForStage, getActiveOperationStage, getOperationCondition, getOperationUnlockReasons, getOperationChoiceLock, getOperationOutcomePreview, getOperationComplicationOptions, isMajorOperation, advanceActiveOperation } from "../../shared/operations.js";
 import { getDistrictModifierSummary, DISTRICTS } from "../../shared/districts.js";
 import { getGangProjectEffects } from "../../shared/gangProjects.js";
 import { getRivalOperationModifier, getRivalView } from "../../shared/rivals.js";
 
+import { Text } from "../i18n";
 export function OperationsScreen({ game, formatMoney, onStartOperation, onAdvanceOperation, onExecuteOperation, onResolveOperation, onRespondRival, onCancelOperation, online, onOpenSection }) {
   const [now, setNow] = useState(Date.now());
   const [pending, setPending] = useState(false);

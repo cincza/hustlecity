@@ -30,7 +30,7 @@ export function getCareer(snapshot, options = {}) {
       ? { tab: "heists", section: "solo", label: `Zdobądź ${investment.respect} RES`, hint: `${investment.name} wymaga ${investment.respect} RES. Zdobywaj XP ze skoków i misji.` }
       : missingCash > 0 && Number(player.bank || 0) >= missingCash
         ? { tab: "city", section: "bank", label: "Przygotuj gotówkę", hint: "Masz środki w banku. Wypłać brakującą kwotę, uwzględniając ewentualną opłatę." }
-        : { ...destination, hint: `${investment.name}: $${investment.cost.toLocaleString("pl-PL")}. ${missingCash ? `Do zakupu brakuje $${missingCash.toLocaleString("pl-PL")}.` : "Masz środki na inwestycję."}` };
+        : { ...destination, hint: `${investment.name}: $${investment.cost.toLocaleString()}. ${missingCash ? `Do zakupu brakuje $${missingCash.toLocaleString()}.` : "Masz środki na inwestycję."}` };
   }
   return { ...chapter, current, destination, finished, chapters, chapterNumber: chapters.indexOf(chapter) + 1 };
 }

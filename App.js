@@ -1,6 +1,7 @@
 import { isInvalidSession } from "./shared/http.js";
 import ContactsScreen from "./src/screens/ContactsScreen";
 import PremiumPanel from "./src/components/PremiumPanel";
+import { MONETIZATION_VISIBLE } from "./shared/releaseFeatures";
 import { GANG_IDENTITIES } from "./shared/premium.js";
 import { getBusinessPurchaseCost } from "./shared/empire.js";
 import { getRestaurantQuote } from "./shared/restaurant.js";
@@ -9,21 +10,7 @@ import { normalizeMarketPayload, advanceOnlineDisplay } from "./shared/clientSna
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { useRef } from "react";
 import {
-  Alert,
-  Animated,
-  Image,
-  ImageBackground,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
+  Animated, Image, ImageBackground, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, View, useWindowDimensions } from "react-native";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -79,6 +66,7 @@ import {
   fetchRankingsOnline,
   fetchSocialPlayers,
   deleteAdminPlayerAccountOnline,
+  deleteOwnAccountOnline,
   grantAdminCashToPlayerOnline,
   grantAdminRespectToPlayerOnline,
   healOnline,
@@ -267,6 +255,7 @@ import { getCareer } from "./shared/career.js";
 import { CareerPanel } from "./src/components/CareerPanel";
 import { MobileSectionNav } from "./src/components/MobileSectionNav";
 import { rouletteOutcome } from "./shared/roulette.js";
+import { Alert, Pressable, Text, TextInput, getIntlLocale, translateText } from "./src/i18n";
 import {
   CLUB_ESCORT_SEARCH_COST,
   CLUB_NIGHT_PLANS,
@@ -901,7 +890,7 @@ const normalizeHeistDefinition = (heist) => {
 
 const normalizeUiTimeLabel = (value) => {
   if (typeof value === "string" && value.includes("T")) {
-    return new Date(value).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+    return new Date(value).toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" });
   }
   if (typeof value === "string" && value.trim()) {
     return value;
@@ -1136,17 +1125,10 @@ const formatMoney = (value) => {
   const amount = Number(value || 0);
   const sign = amount < 0 ? "-" : "";
   const absolute = Math.abs(amount);
-
-  const compact = (divisor, suffix) => {
-    const scaled = absolute / divisor;
-    const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
-    return `${sign}$${Number(scaled.toFixed(decimals)).toString().replace(".", ",")}${suffix}`;
-  };
-
-  if (absolute >= 1000000000) return compact(1000000000, "mld");
-  if (absolute >= 1000000) return compact(1000000, "mln");
-  if (absolute >= 1000) return compact(1000, "tys");
-  return `${sign}$${Math.floor(absolute)}`;
+  const options = absolute >= 1000
+    ? { notation: "compact", maximumFractionDigits: 2 }
+    : { maximumFractionDigits: 0 };
+  return `${sign}$${new Intl.NumberFormat(getIntlLocale(), options).format(Math.floor(absolute))}`;
 };
 const formatAccruedMoney = (value) => {
   const amount = Number(value || 0);
@@ -1162,7 +1144,7 @@ const formatAccruedMoney = (value) => {
   }
 
   const decimals = absolute >= 100 ? 1 : 2;
-  return `${sign}$${absolute.toFixed(decimals).replace(".", ",")}`;
+  return `${sign}$${new Intl.NumberFormat(getIntlLocale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(absolute)}`;
 };
 const getPassiveCapAmount = (incomePerMinute) => incomePerMinute * PASSIVE_COLLECTION_CAP_MINUTES;
 
@@ -1188,8 +1170,7 @@ function formatLongDuration(ms) {
 
 function formatCollectionStamp(ts) {
   if (!ts) return "Jeszcze nie odbierales";
-  const date = new Date(ts);
-  return `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return new Intl.DateTimeFormat(getIntlLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
 }
 
 function formatCooldown(ms) {
@@ -3332,6 +3313,12 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     setQuickActionModal(null);
     setGangProfileView("actions");
     setCasinoState(createInitialCasinoState());
+  };
+
+  const handleDeleteOwnAccount = async ({ password, confirmUsername }) => {
+    if (!sessionToken) throw new Error("Brak aktywnej sesji.");
+    await deleteOwnAccountOnline(sessionToken, password, confirmUsername);
+    await handleLogout();
   };
 
   const setActiveSection = (tabId, sectionId) => {
@@ -6449,7 +6436,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                   ...entry,
                   time:
                     typeof entry.time === "string" && entry.time.includes("T")
-                      ? new Date(entry.time).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })
+                      ? new Date(entry.time).toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" })
                       : entry.time,
                 }))
               : prev.online.cityChat,
@@ -7283,7 +7270,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
 
     const message = `Konto ${login} zniknie z gry na stale. Tego nie cofnie nawet admin.`;
     if (Platform.OS === "web" && typeof globalThis.confirm === "function") {
-      if (globalThis.confirm(`Usunac konto?\n\n${message}`)) confirmDelete();
+      if (globalThis.confirm(`${translateText("Usunac konto?")}\n\n${translateText(message)}`)) confirmDelete();
       return;
     }
     Alert.alert("Usunac konto?", message, [
@@ -8352,7 +8339,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                 <View key={member.id} style={styles.districtCard}>
                   <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
                     <View style={styles.flexOne}>
-                      <Text style={styles.listCardTitle}>{member.name}</Text>
+                      <Text translate={false} style={styles.listCardTitle}>{member.name}</Text>
                       <Text style={styles.listCardMeta}>{member.role} • Szacun {member.respect ?? "-"} • {member.online ? "Online" : "Offline"}</Text>
                     </View>
                     <Tag text={member.trusted ? "Zaufany" : "Czlonek"} warning={!member.trusted} />
@@ -8374,8 +8361,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               </View>
               {(selectedGangProfile.eventLog || []).map((entry) => (
                 <View key={entry.id} style={styles.districtCard}>
-                  <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
-                  <Text style={styles.chatText}>{entry.text}</Text>
+                  <Text style={styles.chatAuthor}><Text translate={false}>{entry.author}</Text> <Text translate={false} style={styles.chatTime}>{entry.time}</Text></Text>
+                  <Text translate={entry.author === "System"} style={styles.chatText}>{entry.text}</Text>
                 </View>
               ))}
             </View>
@@ -8384,7 +8371,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
       ) : null}
       {!selectedGangProfile ? (
         <>
-          {game.gang.joined && <PremiumPanel game={game} token={sessionToken} onUser={mergeServerUser} gangOnly />}
+          {MONETIZATION_VISIBLE && game.gang.joined && <PremiumPanel game={game} token={sessionToken} onUser={mergeServerUser} gangOnly />}
           <HeroPanel
             eyebrow="Gang"
             title={game.gang.joined ? game.gang.name : "Wejdz do ekipy albo zaloz swoja"}
@@ -8642,8 +8629,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
                 {(game.gang.chat || []).length ? (
                   (game.gang.chat || []).slice(0, 3).map((entry) => (
                     <View key={entry.id} style={styles.chatBubble}>
-                      <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
-                      <Text style={styles.chatText}>{entry.text}</Text>
+                      <Text style={styles.chatAuthor}><Text translate={false}>{entry.author}</Text> <Text translate={false} style={styles.chatTime}>{entry.time}</Text></Text>
+                      <Text translate={entry.author === "System"} style={styles.chatText}>{entry.text}</Text>
                     </View>
                   ))
                 ) : (
@@ -8734,7 +8721,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               <View key={member.id} style={styles.districtCard}>
                 <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
                   <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{member.name}</Text>
+                    <Text translate={false} style={styles.listCardTitle}>{member.name}</Text>
                     <Text style={styles.listCardMeta}>{member.role} • RES {member.respect ?? "-"} • {member.trusted ? "Zaufany" : "Czlonek"}</Text>
                   </View>
                   <Tag text={member.online ? "ONLINE" : "OFFLINE"} warning={!member.online} />
@@ -8756,7 +8743,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               <View key={candidate.id} style={styles.districtCard}>
                 <View style={[styles.listCardHeader, styles.playerRosterHeader]}>
                   <View style={styles.flexOne}>
-                    <Text style={styles.listCardTitle}>{candidate.name}</Text>
+                    <Text translate={false} style={styles.listCardTitle}>{candidate.name}</Text>
                     <Text style={styles.listCardMeta}>Szacun {candidate.respect} • {candidate.online ? "Online" : "Offline"}</Text>
                   </View>
                   <Pressable onPress={() => inviteCandidate(candidate.id)} style={[styles.inlineButton, (game.gang.role !== "Boss" || candidate.respect < game.gang.inviteRespectMin || game.gang.members >= game.gang.maxMembers) && styles.tileDisabled]}>
@@ -8796,8 +8783,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
           </View>
           {game.gang.chat.length ? game.gang.chat.map((entry) => (
             <View key={entry.id} style={styles.districtCard}>
-              <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
-              <Text style={styles.chatText}>{entry.text}</Text>
+              <Text style={styles.chatAuthor}><Text translate={false}>{entry.author}</Text> <Text translate={false} style={styles.chatTime}>{entry.time}</Text></Text>
+              <Text translate={entry.author === "System"} style={styles.chatText}>{entry.text}</Text>
             </View>
           )) : <Text style={styles.emptyText}>Na razie cisza. Pierwsza wiadomosc ustawia tempo ekipy.</Text>}
         </>
@@ -9059,7 +9046,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               <LinearGradient colors={selectedWorldPlayer.online ? ["#57411a", "#1a1209"] : ["#363636", "#111111"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.playerProfileHero}>
                 <EntityBadge visual={getPlayerAvatarVisual(selectedWorldPlayer)} large />
                 <View style={styles.playerProfileMeta}>
-                  <Text style={styles.playerProfileName}>{selectedWorldPlayer.name}</Text>
+                  <Text translate={false} style={styles.playerProfileName}>{selectedWorldPlayer.name}</Text>
                   <Pressable onPress={() => openGangProfile(selectedWorldPlayer.gang)} disabled={selectedWorldPlayer.gang === "No gang"}>
                     <Text style={[styles.playerProfileGang, selectedWorldPlayer.gang === "No gang" && styles.mutedLink]}>{selectedWorldPlayer.gang}</Text>
                   </Pressable>
@@ -9200,7 +9187,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
               <View style={styles.entityHead}>
                 <EntityBadge visual={getPlayerAvatarVisual(player)} />
                 <View style={styles.flexOne}>
-                  <Text style={styles.listCardTitle}>{player.name}</Text>
+                  <Text translate={false} style={styles.listCardTitle}>{player.name}</Text>
                   <Text style={styles.listCardMeta}>
                     {player.gang === "No gang" ? "Solo" : player.gang} | Szacun {player.respect} | Kasa {formatMoney(player.cash)}
                   </Text>
@@ -9239,7 +9226,7 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         <View key={friend.id} style={styles.listCard}>
           <View style={styles.inlineRow}>
             <View style={styles.flexOne}>
-              <Text style={styles.listCardTitle}>{friend.name}</Text>
+              <Text translate={false} style={styles.listCardTitle}>{friend.name}</Text>
               <Text style={styles.listCardMeta}>{friend.gang} | Szacun {friend.respect}</Text>
             </View>
             <Tag text={friend.online ? "ONLINE" : "OFFLINE"} warning={!friend.online} />
@@ -9329,8 +9316,8 @@ const [rankingCategory, setRankingCategory] = useState("respect");
         </View>
         {(game.online.cityChat || []).map((entry) => (
           <View key={entry.id} style={styles.chatBubble}>
-            <Text style={styles.chatAuthor}>{entry.author} <Text style={styles.chatTime}>{entry.time}</Text></Text>
-            <Text style={styles.chatText}>{entry.text}</Text>
+            <Text style={styles.chatAuthor}><Text translate={false}>{entry.author}</Text> <Text translate={false} style={styles.chatTime}>{entry.time}</Text></Text>
+            <Text translate={entry.author === "System"} style={styles.chatText}>{entry.text}</Text>
           </View>
         ))}
       </SectionCard>
@@ -9768,6 +9755,9 @@ const [rankingCategory, setRankingCategory] = useState("respect");
     actions: {
       openSection: setActiveSection,
       logout: handleLogout,
+      deleteAccount: handleDeleteOwnAccount,
+      accountUsername: game.player.username || game.player.name,
+      isAdmin: game.player.isAdmin,
     },
   };
 

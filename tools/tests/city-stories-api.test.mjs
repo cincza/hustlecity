@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import os from "node:os";
+import { getCitySituationTemplate } from "../../shared/cityStories.js";
 import { createOperationKey } from "../../shared/transactions.js";
 
 test("city decision persists through restart and its idempotent replay cannot duplicate cash or pressure", { timeout: 20000 }, async () => {
@@ -37,17 +38,19 @@ test("city decision persists through restart and its idempotent replay cannot du
     db.prepare("UPDATE users SET document = ? WHERE id = ?").run(JSON.stringify(record), accountId);
     db.close();
     await start();
+    const choice = getCitySituationTemplate("oldtown").choices.find((entry) => !entry.classId && !entry.goods);
     const key = createOperationKey();
-    const resolved = await call("/contacts/situation", { districtId: "oldtown", choiceId: "sell" }, key);
+    const resolved = await call("/contacts/situation", { districtId: "oldtown", choiceId: choice.id }, key);
     assert.equal(resolved.status, 200);
-    assert.equal(resolved.user.contacts.stories.relations.oldtown.lastChoiceId, "sell");
+    assert.equal(resolved.user.contacts.stories.relations.oldtown.lastChoiceId, choice.id);
     const savedCash = resolved.user.profile.cash, savedPressure = resolved.user.city.districts.oldtown.pressure;
     await stop(); await start();
     const restored = (await call("/me")).user;
     assert.equal(restored.profile.cash, savedCash);
-    assert.ok(restored.city.districts.oldtown.pressure <= savedPressure && restored.city.districts.oldtown.pressure > savedPressure - 0.1);
-    assert.equal(restored.contacts.stories.consequences[0].kind, "hot-lead");
-    const replay = await call("/contacts/situation", { districtId: "oldtown", choiceId: "sell" }, key);
+    // Pressure relaxes toward its baseline from either side between requests.
+    assert.ok(Math.abs(restored.city.districts.oldtown.pressure - savedPressure) < 0.1);
+    assert.equal(restored.contacts.stories.consequences[0].kind, choice.consequence.kind);
+    const replay = await call("/contacts/situation", { districtId: "oldtown", choiceId: choice.id }, key);
     assert.deepEqual(replay.user, resolved.user);
     assert.equal((await call("/contacts/situation", { districtId: "oldtown", choiceId: "protect" }, createOperationKey())).status, 400);
   } finally {

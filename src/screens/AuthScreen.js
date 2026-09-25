@@ -1,7 +1,9 @@
 import React, { useState } from "react";
-import { Image, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, SafeAreaView, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 
+import { Text, TextInput } from "../i18n";
+import { LanguageSelector } from "../components/LanguageSelector";
 const BRAND_LOGO = require("../../assets/branding/hustle-city-logo.png");
 
 export function AuthScreen({ busy = false, error = "", onLogin, onRegister }) {
@@ -22,6 +24,9 @@ export function AuthScreen({ busy = false, error = "", onLogin, onRegister }) {
     <SafeAreaView style={styles.root}>
       <LinearGradient colors={["#050607", "#0f1116", "#171a20"]} style={styles.fill}>
         <View style={styles.card}>
+          <View style={styles.languageRow}>
+            <LanguageSelector compact />
+          </View>
           <View style={styles.brandWrap}>
             <Image source={BRAND_LOGO} style={styles.brandImage} resizeMode="contain" />
           </View>
@@ -94,6 +99,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(8,10,14,0.94)",
     gap: 12,
   },
+  languageRow: { alignItems: "flex-end", minHeight: 42 },
   brandWrap: {
     alignItems: "center",
     justifyContent: "center",

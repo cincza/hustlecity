@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { getDealerPayoutForDrug } from "../../shared/socialGameplay.js";
 import { getDealerCityEventPricing } from "../../shared/cityDirector.js";
 import { HeroPanel } from "../components/GameScreenPrimitives";
 import CityEventPanel from "../components/CityEventPanel";
 
+import { Text, TextInput, getIntlLocale } from "../i18n";
 const CONTRACT_CATEGORY_LABELS = {
   weapon: "Bron",
   armor: "Ochrona",
@@ -462,7 +463,7 @@ export function MarketScreen({
           })}
           {marketMeta?.refreshedAt ? (
             <Text style={styles.listCardMeta}>
-              Ostatni refresh rynku: {new Date(marketMeta.refreshedAt).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })}
+              Ostatni refresh rynku: {new Date(marketMeta.refreshedAt).toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" })}
             </Text>
           ) : null}
         </SectionCard>

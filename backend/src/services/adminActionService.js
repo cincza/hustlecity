@@ -80,7 +80,6 @@ export function buildAdminPublicState(isAdmin) {
 const ADMIN_EDIT_LIMITS = {
   cash: [0, 1_000_000_000_000],
   bank: [0, 1_000_000_000_000],
-  premiumTokens: [0, 1_000_000],
   hp: [0, 1_000_000],
   energy: [0, 1_000_000],
   heat: [0, 100],
@@ -97,6 +96,7 @@ export function buildAdminPlayerSnapshot(userRecord) {
     classId: player.contacts?.classId || null,
     respect: Number(profile.respect || 0),
     level: Number(profile.level || profile.respect || 0),
+    xp: Number(profile.xp || 0),
     cash: Number(profile.cash || 0),
     bank: Number(profile.bank || 0),
     premiumTokens: Number(profile.premiumTokens || 0),
@@ -122,6 +122,7 @@ export function buildAdminPlayerDetail(userRecord) {
     profile: structuredClone(player.profile || {}),
     stats: structuredClone(player.stats || {}),
     classState: structuredClone(player.contacts || {}),
+    specializations: Object.entries(player.contacts?.methods || {}).filter(([, count]) => Number(count || 0) >= 6).map(([id]) => id),
     gangState: structuredClone(player.gang || {}),
     inventory: structuredClone(player.inventory || {}),
     drugInventory: structuredClone(player.drugInventory || {}),

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import "../bootstrapEnv.js";
 import Datastore from "@seald-io/nedb";
-import { gameDatabasePath, getGameDatabase, closeGameDatabase, readUser, readUserByLogin, readUsers, insertUserRecord, stagePlayerSave, stageAuthenticationUpdate, stageUserDelete, stageAdminAudit, readAdminAudits } from "./gameDatabase.js";
+import { gameDatabasePath, getGameDatabase, closeGameDatabase, readUser, readUserByLogin, readUsers, insertUserRecord, stagePlayerSave, stageAuthenticationUpdate, stageUserDelete, stageAdminAudit, readAdminAudits, stageAccountDeletionCleanup, stageAdminAuditRedaction, readPendingAccountDeletionCleanups, completeAccountDeletionCleanup } from "./gameDatabase.js";
 import { logInfo } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -104,6 +104,7 @@ export async function initUserStore() {
   await getGameDatabase();
   await getGlobalChatDb();
   await getPrisonChatDb();
+  await resumeAccountDeletionCleanups();
   logInfo("persistence", "store-initialized", {
     dataDir,
     userDbPath: gameDatabasePath,
@@ -190,6 +191,8 @@ export async function deleteUserByLogin(login) {
 export async function deleteUserById(userId) { return stageUserDelete(userId); }
 export async function appendAdminAudit(entry) { return stageAdminAudit(entry); }
 export async function listAdminAudits(options) { return readAdminAudits(options); }
+export async function queueAccountDeletionCleanup(userId, createdAt) { return stageAccountDeletionCleanup(userId, createdAt); }
+export function redactAdminAuditsForUser(userId) { return stageAdminAuditRedaction(userId); }
 
 export async function listUsers() { return readUsers(); }
 
@@ -210,6 +213,11 @@ export async function clearGlobalChatMessages() {
   const removed = await db.removeAsync({}, { multi: true });
   logUserStore(`cleared global chat -> ${removed}`);
   return removed;
+}
+
+export async function removeGlobalChatMessagesByUserId(userId) {
+  const db = await getGlobalChatDb();
+  return db.removeAsync({ userId: String(userId || "") }, { multi: true });
 }
 
 export async function addGlobalChatMessage({ userId, author, text }) {
@@ -236,6 +244,26 @@ export async function clearPrisonChatMessages() {
   const removed = await db.removeAsync({}, { multi: true });
   logUserStore(`cleared prison chat -> ${removed}`);
   return removed;
+}
+
+export async function removePrisonChatMessagesByUserId(userId) {
+  const db = await getPrisonChatDb();
+  return db.removeAsync({ userId: String(userId || "") }, { multi: true });
+}
+
+export async function completeOwnedChatCleanup(userId) {
+  const [globalRemoved, prisonRemoved] = await Promise.all([
+    removeGlobalChatMessagesByUserId(userId),
+    removePrisonChatMessagesByUserId(userId),
+  ]);
+  await completeAccountDeletionCleanup(userId);
+  return { globalRemoved, prisonRemoved };
+}
+
+export async function resumeAccountDeletionCleanups() {
+  const pending = await readPendingAccountDeletionCleanups();
+  for (const entry of pending) await completeOwnedChatCleanup(entry.userId);
+  return pending.length;
 }
 
 export async function addPrisonChatMessage({ userId, author, text }) {

@@ -7,7 +7,7 @@ import { buyGangIdentity, recordGangSpecialist } from "../../shared/gangIdentity
 import { createGangState, ensureGangWeeklyGoal } from "../../shared/gangProjects.js";
 import { createGangForPlayer } from "../../backend/src/services/gangProjectService.js";
 const now = 1789812000000;
-const env = { STRIPE_SECRET_KEY: "sk_test_isolated", STRIPE_WEBHOOK_SECRET: "whsec_isolated", PREMIUM_RETURN_URL: "http://localhost:8102/" };
+const env = { PREMIUM_CHECKOUT_ENABLED: "1", STRIPE_SECRET_KEY: "sk_test_isolated", STRIPE_WEBHOOK_SECRET: "whsec_isolated", PREMIUM_RETURN_URL: "http://localhost:8102/" };
 const player = () => ({ profile: { cash: 5000, bank: 5000, energy: 20, hp: 100, respect: 1, xp: 0, heat: 10, premiumTokens: 10 }, inventory: { smoke: 100, spirytus: 100 }, stats: {} });
 const eventFor = (order) => ({ id: "evt_test", type: "checkout.session.completed", data: { object: { id: order.id, payment_status: "paid", amount_total: order.amount, currency: order.currency, metadata: { playerId: order.userId, packId: order.packId } } } });
 

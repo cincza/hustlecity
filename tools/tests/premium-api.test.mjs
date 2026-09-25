@@ -15,7 +15,7 @@ test("signed payment API: SQL rollback, repeated notifications, cosmetic purchas
   let server, base, token, logs = "";
   async function start() {
     let port;
-    server = spawn(process.execPath, ["backend/src/server.js"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, HOST: "127.0.0.1", PORT: "0", DATA_DIR: directory, BACKEND_ENV_FILE: path.join(directory, "no-env"), JWT_SECRET: "isolated-premium-secret", ADMIN_BOOTSTRAP_PASSWORD: "", STRIPE_WEBHOOK_SECRET: secret, STRIPE_SECRET_KEY: "", PREMIUM_RETURN_URL: "", ALPHA_TEST_STARTING_CASH: "5000", ALPHA_TEST_STARTING_RESPECT: "1" } });
+    server = spawn(process.execPath, ["backend/src/server.js"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, HOST: "127.0.0.1", PORT: "0", DATA_DIR: directory, BACKEND_ENV_FILE: path.join(directory, "no-env"), JWT_SECRET: "isolated-premium-secret", ADMIN_BOOTSTRAP_PASSWORD: "", PREMIUM_CHECKOUT_ENABLED: "1", STRIPE_WEBHOOK_SECRET: secret, STRIPE_SECRET_KEY: "", PREMIUM_RETURN_URL: "", ALPHA_TEST_STARTING_CASH: "5000", ALPHA_TEST_STARTING_RESPECT: "1" } });
     server.stdout.on("data", (data) => { logs += data; const match = String(data).match(/"boundPort":(\d+)/); if (match) port = Number(match[1]); });
     server.stderr.on("data", (data) => { logs += data; });
     for (let i = 0; i < 120 && !port; i++) { if (server.exitCode !== null) throw new Error(logs.slice(-2000)); await new Promise((r) => setTimeout(r, 50)); }

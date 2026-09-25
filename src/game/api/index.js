@@ -376,6 +376,14 @@ export async function syncClientStateOnline(token, game) {
   });
 }
 
+export async function deleteOwnAccountOnline(token, password, confirmUsername) {
+  return request("/account/delete", {
+    method: "POST",
+    token,
+    body: { password, confirmUsername },
+  });
+}
+
 export async function fetchSocialPlayers(token, query = "") {
   const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
   return request(`/social/players${suffix}`, { token });

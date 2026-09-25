@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { request } from "../game/api/client";
 
+import { Text } from "../i18n";
 function timeLeftLabel(expiresAt, now) {
   const minutes = Math.max(0, Math.ceil((Number(expiresAt || 0) - now) / 60000));
   if (minutes < 60) return `${minutes} min`;

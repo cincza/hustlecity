@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE } from "../utils/uiEffects";
 
+import { Text } from "../i18n";
 const DISPLAY_SERIES_COUNT = 10;
 
 const PASS_ICON_BY_ID = {

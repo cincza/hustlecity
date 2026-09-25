@@ -16,6 +16,9 @@ import {
   initUserStore,
   listUsers,
   listAdminAudits,
+  queueAccountDeletionCleanup,
+  redactAdminAuditsForUser,
+  completeOwnedChatCleanup,
   saveUserPlayerData,
   updateUserAuthentication,
 } from "../lib/userStore.js";
@@ -38,6 +41,9 @@ export {
   initUserStore,
   listUsers,
   listAdminAudits,
+  queueAccountDeletionCleanup,
+  redactAdminAuditsForUser,
+  completeOwnedChatCleanup,
   saveUserPlayerData,
   updateUserAuthentication,
 };

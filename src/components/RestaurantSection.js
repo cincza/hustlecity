@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, StyleSheet, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { USE_NATIVE_DRIVER, WEB_POINTER_EVENTS_NONE_STYLE, createShadowStyle } from "../utils/uiEffects";
 import { getRestaurantAllowance, getRestaurantQuote } from "../../shared/restaurant.js";
 
+import { Pressable, Text } from "../i18n";
 const FOOD_ICON_BY_ID = {
   burger: "hamburger",
   kebab: "food",

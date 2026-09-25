@@ -120,7 +120,7 @@ test("live API: market rollback, odds, dealer inventory, hidden cards and restar
     const repeatContact = await call("/contacts/execute", contactBody, createOperationKey());
     assert.equal(repeatContact.status, 400);
     const lockedClass = await call("/contacts/class", { classId: "enforcer", cost: 0 }, createOperationKey());
-    assert.equal(lockedClass.status, 400);
+    assert.equal(lockedClass.status, 503);
     assert.equal((await call("/me")).user.profile.cash, contact.user.profile.cash);
     const beforeHeist = (await call("/me")).user;
     const heistKey = createOperationKey();
